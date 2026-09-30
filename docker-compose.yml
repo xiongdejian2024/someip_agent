@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend-dev
+    environment:
+      SOMEIP_AGENT_HOST: 0.0.0.0
+      SOMEIP_AGENT_PORT: 8765
+      SOMEIP_AGENT_DATA_DIR: /workspace/data
+      SOMEIP_AGENT_NETWORK_SEND_ENABLED: "false"
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./backend:/workspace/backend
+      - someip-data:/workspace/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/v1/health', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      target: frontend-dev
+    environment:
+      VITE_BACKEND_URL: http://backend:8765
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./frontend:/workspace/frontend
+      - frontend-node-modules:/workspace/frontend/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  someip-data:
+  frontend-node-modules:

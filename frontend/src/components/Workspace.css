@@ -1,0 +1,48 @@
+.workspace-body { min-width: 0; }
+.workspace-body > .main-content { min-width: 0; container-type: inline-size; }
+.protocol-agent-dock[hidden] { display: none; }
+.protocol-agent-dock { min-width: 0; height: min(760px, 85dvh); min-height: 480px; padding: 0 15px 15px; scroll-margin-top: 76px; }
+.context-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.agent-draft-review { padding: 16px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; border-color: var(--green-dim); }
+.agent-draft-review > div:first-child { flex: 1; min-width: 180px; }
+.agent-draft-review strong { overflow-wrap: anywhere; }
+.agent-draft-review p { font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+.agent-draft-review small { font-size: 11px; line-height: 1.7; }
+
+@media (min-width: 1180px) {
+  .workspace-body.has-agent { display: grid; grid-template-columns: minmax(0, 1fr) clamp(350px, 28vw, 440px); align-items: start; }
+  .has-agent > .protocol-agent-dock { position: sticky; top: 69px; height: calc(100dvh - 69px); min-height: 0; padding: 12px 12px 12px 0; }
+  .workspace-body.has-agent > .main-content { padding-inline: 18px; }
+}
+
+/* 根据可用工作区宽度响应，而非只根据整个浏览器宽度。 */
+@container (max-width: 950px) {
+  .main-content .sim-workspace-grid { grid-template-columns: 165px minmax(0, 1fr); height: auto; }
+  .main-content .sim-catalog-pane, .main-content .sim-signal-pane { height: 450px; }
+  .main-content .sim-properties-pane { grid-column: 1 / -1; height: 360px; }
+  .main-content .sim-metadata { grid-template-columns: 125px minmax(0, 1fr); }
+  .main-content .model-workspace { grid-template-columns: 200px minmax(0, 1fr); }
+  .main-content .service-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .main-content .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+  .main-content .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .main-content .monitor-actions { flex-wrap: wrap; }
+  .main-content .listener-config { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .main-content .listener-config > * { min-width: 0; }
+  .main-content .trace-content { grid-template-columns: minmax(0, 1fr); }
+  .main-content .trace-detail, .main-content .is-split .trace-detail { height: 230px; max-height: 230px; border-left: 0; border-top: 1px solid var(--line); }
+  .main-content .trace-detail-empty { min-height: 120px; }
+  .main-content .pcap-upload-layout { grid-template-columns: minmax(0, 1fr); }
+  .main-content .pcap-file-summary { flex-wrap: wrap; }
+}
+@container (max-width: 580px) {
+  .main-content .sim-workspace-grid, .main-content .model-workspace { grid-template-columns: minmax(0, 1fr); }
+  .main-content .sim-catalog-pane { height: 230px; }
+  .main-content .model-tree { position: static; max-height: 300px; }
+  .main-content .service-tree-list { max-height: 230px; }
+  .main-content .hero-strip { flex-wrap: wrap; gap: 12px; }
+  .main-content .signal-scope-body { grid-template-columns: minmax(0, 1fr); }
+  .main-content .scope-channel-list { height: 130px !important; }
+  .main-content .signal-scope-header > div:first-child { flex-wrap: wrap; }
+  .main-content .signal-scope-controls { flex-wrap: wrap; }
+  .main-content .trace-search { min-width: 120px; }
+}

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: 校验语义版本
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            python scripts/check_version.py --tag "${GITHUB_REF_NAME}"
+          else
+            python scripts/check_version.py
+          fi
+
+      - name: 安装后端开发依赖
+        run: python -m pip install -e './backend[dev]'
+
+      - name: 静态检查
+        run: python -m ruff check backend/src backend/tests scripts/check_version.py scripts/create_update_manifest.py
+
+      - name: 执行后端测试
+        run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing
+
+  frontend-build:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装依赖
+        run: npm --prefix frontend ci --no-audit --no-fund
+
+      - name: 类型检查
+        run: npm --prefix frontend run typecheck
+
+      - name: 构建前端
+        run: npm --prefix frontend run build
+
+  windows-package:
+    name: Windows 安装包
+    needs: [backend-test, frontend-build]
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装 Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: 构建 Windows 安装包
+        shell: powershell
+        run: .\packaging\windows\build.ps1 -Clean
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: someip-agent-windows-${{ github.run_number }}
+          path: packaging/windows/output/*
+          if-no-files-found: error
+          retention-days: 14
