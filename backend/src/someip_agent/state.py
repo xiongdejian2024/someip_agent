@@ -24,7 +24,7 @@ class ApplicationState:
         settings.ensure_directories()
         self.settings = settings
         self.monitor = MonitorStore(settings.monitor_capacity)
-        self.network = NetworkCaptureManager(self.monitor, self.enrich_message)
+        self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
         self.simulator = SimulationManager(self.monitor, settings)
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")

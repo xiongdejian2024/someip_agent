@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -16,6 +18,8 @@ from someip_agent.domain.models import (
     SignalDataType,
     SignalDefinition,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ArxmlParseError(ValueError):
@@ -157,17 +161,21 @@ class ArxmlParser:
             raise ArxmlParseError(f"ARXML XML 语法错误: {exc}") from exc
         if _local_name(root) != "AUTOSAR":
             raise ArxmlParseError(f"根元素必须是 AUTOSAR，实际为 {_local_name(root) or root.tag}")
+        if root.getroottree().docinfo.doctype:
+            raise ArxmlParseError("出于安全原因，不允许 ARXML 包含 DOCTYPE 或 ENTITY")
 
         model = ArxmlModel(
             source_name=source_name,
+            source_sha256=hashlib.sha256(content).hexdigest(),
             autosar_version=self._detect_version(root),
         )
         services = self._extract_services(root)
-        self._apply_deployments(root, services, model.warnings)
+        services = self._apply_deployments(root, services, model.warnings)
         self._apply_instances(root, services)
         if not services:
             services = self._extract_classic_service_table(root, model.warnings)
         model.services = sorted(services.values(), key=lambda item: item.name.lower())
+        self._resolve_wire_types(root, model)
         if not model.services:
             model.warnings.append(
                 "未发现可用的 SOME/IP 服务定义：文件中既没有 SERVICE-INTERFACE 部署，"
@@ -193,19 +201,28 @@ class ArxmlParser:
             if _local_name(element) not in {"SERVICE-INTERFACE", "SOMEIP-SERVICE-INTERFACE"}:
                 continue
             name = _short_name(element)
-            if name in services:
-                continue
+            path = _element_path(element)
+            if path in services:
+                raise ArxmlParseError(f"服务完整路径重复: {path}")
             methods: list[MethodDefinition] = []
             for operation in _descendants(element, "CLIENT-SERVER-OPERATION"):
                 inputs: list[SignalDefinition] = []
                 outputs: list[SignalDefinition] = []
                 for argument in _descendants(operation, "ARGUMENT-DATA-PROTOTYPE"):
                     direction = (_first_text(argument, "DIRECTION") or "IN").upper()
+                    if direction not in {"IN", "OUT", "INOUT"}:
+                        raise ArxmlParseError(
+                            f"参数 {_element_path(argument)} 的方向非法: {direction}"
+                        )
                     signal = _signal_from_prototype(argument)
-                    (outputs if direction in {"OUT", "INOUT"} else inputs).append(signal)
+                    if direction in {"IN", "INOUT"}:
+                        inputs.append(signal)
+                    if direction in {"OUT", "INOUT"}:
+                        outputs.append(signal.model_copy(deep=True))
                 methods.append(
                     MethodDefinition(
                         name=_short_name(operation),
+                        path=_element_path(operation),
                         input_signals=inputs,
                         output_signals=outputs,
                         fire_and_forget=(
@@ -220,6 +237,7 @@ class ArxmlParser:
                     events.append(
                         EventDefinition(
                             name=_short_name(prototype),
+                            path=_element_path(prototype),
                             signals=[_signal_from_prototype(prototype)],
                         )
                     )
@@ -227,14 +245,17 @@ class ArxmlParser:
             fields: list[FieldDefinition] = []
             for field_element in _descendants(element, "FIELD"):
                 prototype = _first_descendant(field_element, "VARIABLE-DATA-PROTOTYPE")
+                if prototype is None:
+                    prototype = field_element
                 fields.append(
                     FieldDefinition(
                         name=_short_name(field_element),
+                        path=_element_path(field_element),
                         signal=_signal_from_prototype(prototype) if prototype is not None else None,
                     )
                 )
 
-            services[name] = ServiceDefinition(
+            services[path] = ServiceDefinition(
                 name=name,
                 path=_element_path(element),
                 methods=methods,
@@ -391,8 +412,15 @@ class ArxmlParser:
                 outputs: list[SignalDefinition] = []
                 for argument in _descendants(operation, "ARGUMENT-DATA-PROTOTYPE"):
                     direction = (_first_text(argument, "DIRECTION") or "IN").upper()
+                    if direction not in {"IN", "OUT", "INOUT"}:
+                        raise ArxmlParseError(
+                            f"参数 {_element_path(argument)} 的方向非法: {direction}"
+                        )
                     signal = _signal_from_prototype(argument)
-                    (outputs if direction in {"OUT", "INOUT"} else inputs).append(signal)
+                    if direction in {"IN", "INOUT"}:
+                        inputs.append(signal)
+                    if direction in {"OUT", "INOUT"}:
+                        outputs.append(signal.model_copy(deep=True))
                 client_interfaces[interface_name] = MethodDefinition(
                     name=_short_name(operation, interface_name),
                     input_signals=inputs,
@@ -473,9 +501,7 @@ class ArxmlParser:
         for instance in root.iter():
             if _local_name(instance) != "CONSUMED-SERVICE-INSTANCE":
                 continue
-            service_name = _reference_name(
-                _first_text(instance, "PROVIDED-SERVICE-INSTANCE-REF")
-            )
+            service_name = _reference_name(_first_text(instance, "PROVIDED-SERVICE-INSTANCE-REF"))
             if not service_name:
                 continue
             for group in _descendants(instance, "CONSUMED-EVENT-GROUP"):
@@ -489,17 +515,39 @@ class ArxmlParser:
         root: etree._Element,
         services: dict[str, ServiceDefinition],
         warnings: list[str],
-    ) -> None:
+    ) -> dict[str, ServiceDefinition]:
+        deployed: dict[str, ServiceDefinition] = {}
+        referenced: set[str] = set()
         for deployment in _descendants(root, "SOMEIP-SERVICE-INTERFACE-DEPLOYMENT"):
             service_ref = _first_text(deployment, "SERVICE-INTERFACE-REF")
-            service_name = _reference_name(service_ref) or _short_name(deployment)
-            service = services.get(service_name)
-            if service is None:
-                warnings.append(f"部署 {service_name} 找不到对应 SERVICE-INTERFACE")
+            template = services.get(service_ref or "")
+            deployment_path = _element_path(deployment)
+            if template is None:
+                warnings.append(f"部署 {deployment_path} 找不到完整引用 {service_ref}")
                 continue
+            if deployment_path in deployed:
+                raise ArxmlParseError(f"部署完整路径重复: {deployment_path}")
+            # 一个接口可以有多个部署；不能后者覆盖前者的 ID/实例。
+            service = template.model_copy(deep=True)
+            service.deployment_path = deployment_path
+            if any(
+                "SERIALIZATION" in _local_name(element) or _local_name(element) == "BYTE-ORDER"
+                for element in deployment.iter()
+            ):
+                service.deployment_errors.append(
+                    f"部署 {deployment_path} 的显式序列化属性尚未完整映射，不能套用默认 scalar 布局"
+                )
+            referenced.add(service.path)
+            deployed[deployment_path] = service
             service.service_id = _parse_int(_first_text(deployment, "SERVICE-INTERFACE-ID"))
-            service.major_version = _parse_int(_first_text(deployment, "MAJOR-VERSION")) or 1
-            service.minor_version = _parse_int(_first_text(deployment, "MINOR-VERSION")) or 0
+            major = _parse_int(_first_text(deployment, "MAJOR-VERSION"))
+            minor = _parse_int(_first_text(deployment, "MINOR-VERSION"))
+            if major is None or minor is None:
+                service.deployment_errors.append(
+                    f"部署 {deployment_path} 缺少明确的 Major/Minor 版本"
+                )
+            service.major_version = major if major is not None else 1
+            service.minor_version = minor if minor is not None else 0
 
             method_ids = self._deployment_id_map(
                 deployment, "SOMEIP-METHOD-DEPLOYMENT", ("METHOD-REF",), "METHOD-ID"
@@ -510,15 +558,18 @@ class ArxmlParser:
             field_ids = self._field_deployment_map(deployment)
             eventgroups = self._eventgroup_map(deployment)
             for method in service.methods:
-                method.method_id = method_ids.get(method.name)
+                method.method_id = method_ids.get(method.path)
             for event in service.events:
-                event.event_id = event_ids.get(event.name)
-                event.event_group_ids = eventgroups.get(event.name, [])
+                event.event_id = event_ids.get(event.path)
+                event.event_group_ids = eventgroups.get(event.path, [])
             for field in service.fields:
-                ids = field_ids.get(field.name, {})
+                ids = field_ids.get(field.path, {})
                 field.getter_id = ids.get("getter")
                 field.setter_id = ids.get("setter")
                 field.notifier_id = ids.get("notifier")
+                field.event_group_ids = eventgroups.get(field.path, [])
+        deployed.update({path: value for path, value in services.items() if path not in referenced})
+        return deployed
 
     @staticmethod
     def _deployment_id_map(
@@ -529,9 +580,11 @@ class ArxmlParser:
     ) -> dict[str, int]:
         result: dict[str, int] = {}
         for item in _descendants(deployment, deployment_tag):
-            name = _reference_name(_first_text(item, *reference_tags)) or _short_name(item)
+            name = _first_text(item, *reference_tags)
             item_id = _parse_int(_first_text(item, id_tag))
-            if item_id is not None:
+            if name and item_id is not None:
+                if name in result:
+                    raise ArxmlParseError(f"重复的成员部署引用: {name}")
                 result[name] = item_id
         return result
 
@@ -539,7 +592,11 @@ class ArxmlParser:
     def _field_deployment_map(deployment: etree._Element) -> dict[str, dict[str, int]]:
         result: dict[str, dict[str, int]] = {}
         for item in _descendants(deployment, "SOMEIP-FIELD-DEPLOYMENT"):
-            name = _reference_name(_first_text(item, "FIELD-REF")) or _short_name(item)
+            name = _first_text(item, "FIELD-REF")
+            if not name:
+                continue
+            if name in result:
+                raise ArxmlParseError(f"重复的字段部署引用: {name}")
             values: dict[str, int] = {}
             for key, tag in (
                 ("getter", "GETTER-ID"),
@@ -555,13 +612,24 @@ class ArxmlParser:
     @staticmethod
     def _eventgroup_map(deployment: etree._Element) -> dict[str, list[int]]:
         result: defaultdict[str, list[int]] = defaultdict(list)
+        deployment_refs = {
+            _element_path(item): _first_text(item, "EVENT-REF", "FIELD-REF")
+            for tag in ("SOMEIP-EVENT-DEPLOYMENT", "SOMEIP-FIELD-DEPLOYMENT")
+            for item in _descendants(deployment, tag)
+        }
         for group in _descendants(deployment, "SOMEIP-EVENT-GROUP"):
             group_id = _parse_int(_first_text(group, "EVENT-GROUP-ID"))
             if group_id is None:
                 continue
-            for reference_tag in ("EVENT-REF", "FIELD-REF"):
+            for reference_tag in (
+                "EVENT-REF",
+                "FIELD-REF",
+                "EVENT-DEPLOYMENT-REF",
+                "FIELD-DEPLOYMENT-REF",
+            ):
                 for reference in _descendants(group, reference_tag):
-                    name = _reference_name(_text(reference))
+                    raw = _text(reference)
+                    name = deployment_refs.get(raw or "", raw)
                     if name and group_id not in result[name]:
                         result[name].append(group_id)
         return dict(result)
@@ -571,17 +639,47 @@ class ArxmlParser:
         by_deployment: dict[str, list[int]] = defaultdict(list)
         for tag in ("PROVIDED-SOMEIP-SERVICE-INSTANCE", "REQUIRED-SOMEIP-SERVICE-INSTANCE"):
             for instance in _descendants(root, tag):
-                deployment_name = _reference_name(
-                    _first_text(
-                        instance,
-                        "SERVICE-INTERFACE-DEPLOYMENT-REF",
-                        "SERVICE-INTERFACE-REF",
-                    )
-                )
+                deployment_name = _first_text(instance, "SERVICE-INTERFACE-DEPLOYMENT-REF")
                 instance_id = _parse_int(_first_text(instance, "SERVICE-INSTANCE-ID"))
                 if deployment_name and instance_id is not None:
                     by_deployment[deployment_name].append(instance_id)
         for service in services.values():
-            candidates = {service.name, f"{service.name}_Deployment", f"{service.name}Deployment"}
-            ids = sorted({value for name in candidates for value in by_deployment.get(name, [])})
-            service.instance_ids = ids
+            service.instance_ids = sorted(set(by_deployment.get(service.deployment_path or "", [])))
+
+    @staticmethod
+    def _resolve_wire_types(root: etree._Element, model: ArxmlModel) -> None:
+        from .wire_types import WireTypeError, WireTypeResolver
+
+        type_tags = {"SW-BASE-TYPE", "IMPLEMENTATION-DATA-TYPE", "APPLICATION-PRIMITIVE-DATA-TYPE"}
+        index: dict[str, etree._Element] = {}
+        for element in root.iter():
+            if _local_name(element) not in type_tags:
+                continue
+            path = _element_path(element)
+            if path in index:
+                raise ArxmlParseError(f"数据类型完整路径重复: {path}")
+            index[path] = element
+        resolver = WireTypeResolver(index)
+        for service in model.services:
+            signals = [
+                signal
+                for method in service.methods
+                for signal in [*method.input_signals, *method.output_signals]
+            ]
+            signals += [signal for event in service.events for signal in event.signals]
+            signals += [field.signal for field in service.fields if field.signal is not None]
+            for signal in signals:
+                try:
+                    signal.wire_schema = resolver.resolve(signal.type_ref)
+                    signal.data_type = SignalDataType(signal.wire_schema["type"])
+                except WireTypeError as exc:
+                    # 浏览投影保留旧类型提示，原生配置必须检查 wire_schema，禁止猜测发包。
+                    signal.wire_error = str(exc)
+                    warning = f"信号 {signal.path} 不能自动初始化原生类型: {exc}"
+                    if warning not in model.warnings:
+                        model.warnings.append(warning)
+                        logger.warning(
+                            "ARXML 类型未解析，禁止自动原生初始化",
+                            extra={"operation": "arxml.type.resolve", "signal_path": signal.path},
+                            exc_info=True,
+                        )

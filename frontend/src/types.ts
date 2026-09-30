@@ -65,6 +65,8 @@ export interface ServiceField {
 export interface ServiceDefinition {
   id: string
   name: string
+  path?: string
+  deploymentPath?: string
   serviceId: string
   instanceId: string
   instanceIds?: number[]
@@ -108,6 +110,26 @@ export interface NetworkListener {
   running?: boolean
   message_count?: number
   started_at?: string
+  mode?: 'socket' | 'pcap'
+  capture_interface?: string | null
+  capture_filter?: string
+  captured_count?: number
+  kernel_dropped_count?: number | null
+  interface_dropped_count?: number | null
+  parse_error_count?: number
+  active_streams?: number
+  active_fragment_datagrams?: number
+  fragment_buffered_bytes?: number
+  reassembled_datagrams?: number
+  fragment_error_count?: number
+  last_error?: string | null
+}
+
+export interface CaptureInterface {
+  name: string
+  description: string
+  loopback: boolean
+  addresses: string[]
 }
 
 export interface NetworkListenerConfig {
@@ -117,6 +139,10 @@ export interface NetworkListenerConfig {
   port: number
   multicast_group?: string
   interface_ip: string
+  mode?: 'socket' | 'pcap'
+  capture_interface?: string
+  capture_filter?: string
+  promiscuous?: boolean
 }
 
 export interface WaveSample {

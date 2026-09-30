@@ -199,7 +199,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
   const [simState, setSimState] = useState<SimState>('idle')
   const [mode, setMode] = useState<'physical' | 'virtual'>('virtual')
   const [config, setConfig] = useState<SimulationConfig>({
-    destinationHost: '127.0.0.1', destinationPort: 30490, cycleMs: 20, multiplier: 1,
+    destinationHost: '127.0.0.1', destinationPort: 30501, cycleMs: 20, multiplier: 1,
     periodSeconds: 5, enableSd: true, autoRespond: false, selectedServices: [],
   })
   const [serviceQuery, setServiceQuery] = useState('')
@@ -517,13 +517,13 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
             </> : <div className="sim-empty"><Icon name="eye" /><strong>选择信号查看属性</strong><span>点击中间表格中的信号，查看来源并配置激励。</span></div> : <>
               <p className="sim-eyebrow">测量配置</p>
               <label className="sim-form-field"><span>运行模式</span><select value={mode} disabled={locked} onChange={(event) => setMode(event.target.value as 'virtual' | 'physical')}><option value="virtual">虚拟总线 · 内部监控</option><option value="physical">真实 UDP · 网络发送</option></select></label>
-              {mode === 'physical' ? <><label className="sim-form-field"><span>目标主机</span><input value={config.destinationHost} disabled={locked} onChange={(event) => updateConfig('destinationHost', event.target.value)} placeholder="192.168.10.20" /></label><label className="sim-form-field"><span>目标端口</span><input type="number" min={1} max={65535} value={config.destinationPort} disabled={locked} onChange={(event) => updateConfig('destinationPort', Number(event.target.value))} /></label></> : <p className="sim-help">信号写入内部监控流，可在波形和 Trace 中观察，不发送网络报文。</p>}
+              {mode === 'physical' ? <><label className="sim-form-field"><span>授权订阅主机</span><input value={config.destinationHost} disabled={locked} onChange={(event) => updateConfig('destinationHost', event.target.value)} placeholder="192.168.10.20" /></label><label className="sim-form-field"><span>本机服务端口</span><input type="number" min={1} max={65535} value={config.destinationPort} disabled={locked} onChange={(event) => updateConfig('destinationPort', Number(event.target.value))} /></label><p className="sim-help">vsomeip 在本机服务端口提供事件，客户端完成 SD 订阅后接收；需配置本机网卡地址和主机级白名单。Trace 中的提交记录不代替线上抓包。</p></> : <p className="sim-help">原生发生器在本地协议栈运行，信号写入内部监控流，不发送网络报文或 SD 组播。</p>}
               <div className="sim-property-divider" />
               <label className="sim-form-field"><span>基础发送周期 (ms)</span><input type="number" min={10} max={60000} value={config.cycleMs} disabled={locked} onChange={(event) => updateConfig('cycleMs', Number(event.target.value))} /></label>
               <label className="sim-form-field"><span>速率倍率</span><select value={config.multiplier} disabled={locked} onChange={(event) => updateConfig('multiplier', Number(event.target.value))}><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option><option value={10}>10×</option></select></label>
               <div className="sim-effective-rate"><span>实际发送周期</span><strong>{effectiveIntervalMs} ms</strong><small>{(1000 / effectiveIntervalMs).toFixed(1)} Hz / 信号</small></div>
-              <label className="sim-checkbox-field"><input type="checkbox" checked={config.enableSd} disabled={locked} onChange={(event) => updateConfig('enableSd', event.target.checked)} /><span>启用 SOME/IP-SD OfferService</span></label>
-              <p className="sim-help">每个服务实例发布一组 OfferService。自动响应请求尚未实现。</p>
+              <label className="sim-checkbox-field"><input type="checkbox" checked={mode === 'physical' && config.enableSd} disabled={locked || mode === 'virtual'} onChange={(event) => updateConfig('enableSd', event.target.checked)} /><span>启用 SOME/IP-SD OfferService</span></label>
+              <p className="sim-help">真实网络模式由 vsomeip 维护服务发现与订阅；方法自动响应可通过 Python SOA API 配置，页面入口尚未接入。</p>
             </>}
           </div>
         </aside>

@@ -15,6 +15,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-runtime:
+    name: vsomeip 原生与虚拟以太网验收
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 构建固定版本原生镜像
+        run: make native-image
+      - name: 编解码与虚拟网功能验收
+        run: make native-test
+      - name: 原生后端完整回归
+        run: make native-regression
+      - name: 保留抓包、日志和测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsomeip-virtual-evidence
+          path: build/virtual-evidence/
+          if-no-files-found: error
+
   backend-test:
     name: 后端测试
     runs-on: ubuntu-latest
@@ -70,7 +90,7 @@ jobs:
 
   windows-package:
     name: Windows 安装包
-    needs: [backend-test, frontend-build]
+    needs: [backend-test, frontend-build, native-runtime]
     runs-on: windows-latest
     steps:
       - name: 检出代码
@@ -89,6 +109,10 @@ jobs:
       - name: 安装 Inno Setup
         shell: powershell
         run: choco install innosetup --no-progress -y
+
+      - name: 构建原生协议栈与桥接进程
+        shell: powershell
+        run: .\packaging\windows\build-native.ps1
 
       - name: 构建 Windows 安装包
         shell: powershell

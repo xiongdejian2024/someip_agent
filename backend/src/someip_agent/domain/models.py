@@ -5,7 +5,7 @@ from enum import Enum, IntEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MessageType(IntEnum):
@@ -62,10 +62,13 @@ class SignalDefinition(BaseModel):
     factor: float = 1.0
     offset: float = 0.0
     type_ref: str | None = None
+    wire_schema: dict[str, Any] | None = None
+    wire_error: str | None = None
 
 
 class MethodDefinition(BaseModel):
     name: str
+    path: str = ""
     method_id: int | None = None
     input_signals: list[SignalDefinition] = Field(default_factory=list)
     output_signals: list[SignalDefinition] = Field(default_factory=list)
@@ -74,6 +77,7 @@ class MethodDefinition(BaseModel):
 
 class EventDefinition(BaseModel):
     name: str
+    path: str = ""
     event_id: int | None = None
     event_group_ids: list[int] = Field(default_factory=list)
     signals: list[SignalDefinition] = Field(default_factory=list)
@@ -81,15 +85,19 @@ class EventDefinition(BaseModel):
 
 class FieldDefinition(BaseModel):
     name: str
+    path: str = ""
     getter_id: int | None = None
     setter_id: int | None = None
     notifier_id: int | None = None
+    event_group_ids: list[int] = Field(default_factory=list)
     signal: SignalDefinition | None = None
 
 
 class ServiceDefinition(BaseModel):
     name: str
     path: str = ""
+    deployment_path: str | None = None
+    deployment_errors: list[str] = Field(default_factory=list)
     service_id: int | None = None
     instance_ids: list[int] = Field(default_factory=list)
     major_version: int = 1
@@ -102,6 +110,7 @@ class ServiceDefinition(BaseModel):
 class ArxmlModel(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     source_name: str
+    source_sha256: str | None = None
     imported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     autosar_version: str | None = None
     services: list[ServiceDefinition] = Field(default_factory=list)
@@ -178,7 +187,7 @@ class SimulationConfig(BaseModel):
     interval_ms: int = Field(default=100, ge=10, le=60_000)
     transport: Literal["internal", "udp"] = "internal"
     destination_host: str = "127.0.0.1"
-    destination_port: int = Field(default=30490, ge=1, le=65535)
+    destination_port: int = Field(default=30501, ge=1, le=65535)
     enable_sd: bool = True
     sd_multicast_group: str = "239.192.255.251"
     sd_port: int = Field(default=30490, ge=1, le=65535)
@@ -199,11 +208,25 @@ class SimulationStatus(BaseModel):
 
 class ListenerConfig(BaseModel):
     name: str = "someip-listener"
+    mode: Literal["socket", "pcap"] = "socket"
+    capture_interface: str | None = Field(default=None, min_length=1, max_length=256)
+    capture_filter: str = Field(
+        default="udp port 30490 or udp port 30500 or tcp port 30500",
+        min_length=1,
+        max_length=4096,
+    )
+    promiscuous: bool = False
     transport: Literal["udp", "tcp"] = "udp"
     bind_host: str = "0.0.0.0"
     port: int = Field(default=30490, ge=1, le=65535)
     multicast_group: str | None = None
     interface_ip: str = "0.0.0.0"
+
+    @model_validator(mode="after")
+    def validate_capture_interface(self) -> ListenerConfig:
+        if self.mode == "pcap" and not self.capture_interface:
+            raise ValueError("被动抓包必须明确选择网卡")
+        return self
 
 
 class ListenerStatus(BaseModel):
@@ -214,6 +237,14 @@ class ListenerStatus(BaseModel):
     received_count: int = 0
     parse_error_count: int = 0
     last_error: str | None = None
+    captured_count: int = 0
+    kernel_dropped_count: int | None = None
+    interface_dropped_count: int | None = None
+    active_streams: int = 0
+    active_fragment_datagrams: int = 0
+    fragment_buffered_bytes: int = 0
+    reassembled_datagrams: int = 0
+    fragment_error_count: int = 0
 
 
 class PcapEndpointStat(BaseModel):

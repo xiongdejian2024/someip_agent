@@ -8,6 +8,15 @@ Windows 安装包使用或携带的关键传递依赖；版权归各自权利人
 
 ## 后端运行时
 
+新增原生运行依赖：vsomeip 3.5.10（固定源码提交
+`c4e0db329da9b63f511f3c2456c040582daf9305`，MPL-2.0）、Boost（BSL-1.0）和
+nlohmann/json（MIT）。发行包需从实际构建输入收集对应完整许可证、版权与源码归档，
+不能把这条摘要视为已经完成分发合规门禁。
+
+网卡捕获新增 libtins（BSD-2-Clause；Linux 验收使用 Debian 4.0-1+b1）及 libpcap
+（BSD-3-Clause；Linux 验收使用 Debian 1.10.3）。Windows 构建从 vcpkg 实际输入归档
+两者的 copyright 文件；Npcap SDK/驱动是独立依赖，必须另行确认使用/分发许可，不隐式捆绑。
+
 | 组件 | 仓库声明范围 | 许可证 | 项目/许可证链接 |
 |---|---:|---|---|
 | FastAPI | `>=0.115,<1` | MIT | [项目](https://github.com/fastapi/fastapi) / [LICENSE](https://github.com/fastapi/fastapi/blob/master/LICENSE) |

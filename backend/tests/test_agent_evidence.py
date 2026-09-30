@@ -296,7 +296,9 @@ async def test_unsupported_serialization_not_presented_as_valid_plan(tmp_path, c
 
 
 @pytest.mark.asyncio
-async def test_only_explicit_task_can_be_stopped_and_valid_internal_can_start(tmp_path) -> None:
+async def test_only_explicit_task_can_be_stopped_and_valid_internal_can_start(
+    tmp_path, native_runtime
+) -> None:
     subject = agent(tmp_path)
     plan = await invoke(subject, "prepare_simulation", service_id=0x1234, method_id=0x8001)
     started = await subject._execute_tool("start_simulation", plan["simulation_config"], True)

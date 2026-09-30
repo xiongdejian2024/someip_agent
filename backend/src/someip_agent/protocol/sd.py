@@ -123,8 +123,9 @@ class SdOption:
         if len(data) - offset < 4:
             raise SomeIpDecodeError("SOME/IP-SD Option 头被截断")
         option_length = struct.unpack_from("!H", data, offset)[0]
-        total = option_length + 2
-        if option_length < 2 or offset + total > len(data):
+        # Length 不包含前两个长度字节和 Type，仅包含 Reserved 与选项正文。
+        total = option_length + 3
+        if option_length < 1 or offset + total > len(data):
             remaining = len(data) - offset
             raise SomeIpDecodeError(
                 f"SOME/IP-SD Option 长度非法: length={option_length}, remaining={remaining}"
@@ -134,7 +135,7 @@ class SdOption:
         return cls(option_type, reserved, data[offset + 4 : offset + total]), offset + total
 
     def encode(self) -> bytes:
-        option_length = len(self.data) + 2
+        option_length = len(self.data) + 1
         return struct.pack("!HBB", option_length, self.option_type, self.reserved) + self.data
 
 

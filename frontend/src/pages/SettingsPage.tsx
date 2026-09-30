@@ -20,7 +20,7 @@ const modelDescriptions: Record<(typeof LLM_MODELS)[number], string> = {
   'deepseek-v4.1-flash': '快速故障归因与摘要',
 }
 
-export function SettingsPage() {
+export function SettingsPage({ currentVersion }: { currentVersion?: string } = {}) {
   const [settings, setSettings] = useState<LlmSettings>(initialSettings)
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
@@ -128,12 +128,32 @@ export function SettingsPage() {
     setStagingUpdate(true)
     setNotice(null)
     try {
-      const result = await api.stageUpdate()
-      setNotice({ tone: 'success', text: `升级包已完成签名与哈希校验，并暂存到：${result.path}` })
-      logInfo('升级包暂存完成', { path: result.path })
+      const result = await api.installUpdate()
+      setNotice({ tone: 'success', text: `已开始升级至 v${result.version}，应用将自动重启，请稍候。` })
+      logInfo('在线升级已启动', { version: result.version })
+      const expected = result.version
+      const deadline = Date.now() + 90_000
+      const waitForRestart = async () => {
+        if (Date.now() > deadline) {
+          setNotice({ tone: 'warning', text: '重启尚未完成，请查看升级日志；安装失败时会恢复旧版本。' })
+          return
+        }
+        try {
+          const info = await api.health()
+          if (info.status === 'ok' && info.version === expected) {
+            window.location.reload()
+            return
+          }
+        } catch (error) {
+          logInfo('升级重启期间等待服务恢复', { detail: describeApiError(error) })
+          // 重启期间连接中断属于预期状态，继续等待版本确认。
+        }
+        window.setTimeout(() => void waitForRestart(), 2000)
+      }
+      window.setTimeout(() => void waitForRestart(), 2000)
     } catch (error) {
-      logError('升级包暂存失败', error)
-      setNotice({ tone: 'error', text: `升级包暂存失败：${describeApiError(error)}` })
+      logError('在线升级失败', error)
+      setNotice({ tone: 'error', text: `在线升级失败：${describeApiError(error)}` })
     } finally {
       setStagingUpdate(false)
     }
@@ -175,21 +195,20 @@ export function SettingsPage() {
           </section>
 
           <section className="panel settings-section updater-section">
-            <div className="settings-section-header"><span className="settings-icon purple"><Icon name="refresh" /></span><div><span className="panel-kicker">APPLICATION UPDATE</span><h2>版本与在线升级</h2><p>Windows 客户端通过签名更新包进行安全升级。</p></div><span className="version-chip">v{updateInfo?.current_version ?? '0.1.0'}</span></div>
-            <div className="update-row"><div><strong>自动检查更新</strong><span>启动应用时检查稳定通道</span></div><label className="switch"><input type="checkbox" defaultChecked /><i /></label></div>
-            <div className="update-row"><div><strong>更新通道</strong><span>Stable · 企业稳定版</span></div><select defaultValue="stable"><option value="stable">Stable</option><option value="beta">Beta</option></select></div>
+            <div className="settings-section-header"><span className="settings-icon purple"><Icon name="refresh" /></span><div><span className="panel-kicker">APPLICATION UPDATE</span><h2>版本与在线升级</h2><p>Windows 客户端通过签名更新包进行安全升级。</p></div><span className="version-chip">{updateInfo?.current_version || currentVersion ? `v${updateInfo?.current_version ?? currentVersion}` : '版本未知'}</span></div>
+            <div className="update-row"><div><strong>更新来源</strong><span>由后端 HTTPS 发布清单与验签公钥配置，点击检查后确认可用版本。</span></div></div>
             <div className={`update-status${updateInfo?.available ? ' available' : ''}`}>
               <span><Icon name={updateInfo?.available ? 'arrowDown' : updateInfo?.latest_version ? 'check' : 'info'} />{updateInfo ? (updateInfo.available ? `发现新版本 v${updateInfo.latest_version ?? '—'}` : updateInfo.latest_version ? '当前已是最新版本' : '尚未配置更新源') : '尚未检查更新'}</span>
               <small>{updateInfo?.latest_version ? `签名状态：${updateInfo.signature_verified ? '已验证' : '未验证'}` : updateInfo ? '请在后端配置 HTTPS 更新清单与 Ed25519 公钥' : '点击按钮向更新服务查询'}</small>
               <button className="button ghost" disabled={checkingUpdate} onClick={() => void checkUpdate()}>{checkingUpdate ? <span className="spinner" /> : <Icon name="refresh" />}{checkingUpdate ? '检查中…' : '检查更新'}</button>
             </div>
-            {updateInfo?.available && <div className="update-detail"><strong>更新说明</strong><p>{updateInfo.release_notes || '服务未提供更新说明。'}</p><span><Icon name={updateInfo.signature_verified ? 'shield' : 'info'} size={14} />{updateInfo.signature_verified ? '更新包签名已验证' : '更新包签名尚未验证，请勿安装'}</span>{updateInfo.signature_verified && <button className="button primary" disabled={stagingUpdate} onClick={() => void stageUpdate()}>{stagingUpdate ? <span className="spinner" /> : <Icon name="download" />}{stagingUpdate ? '下载校验中…' : '下载并暂存升级包'}</button>}</div>}
+            {updateInfo?.available && <div className="update-detail"><strong>更新说明</strong><p>{updateInfo.release_notes || '服务未提供更新说明。'}</p><span><Icon name={updateInfo.signature_verified ? 'shield' : 'info'} size={14} />{updateInfo.signature_verified ? '更新包签名已验证' : '更新包签名尚未验证，请勿安装'}</span>{updateInfo.signature_verified && <button className="button primary" disabled={stagingUpdate} onClick={() => void stageUpdate()}>{stagingUpdate ? <span className="spinner" /> : <Icon name="download" />}{stagingUpdate ? '下载并安装中…' : '升级到最新版本'}</button>}</div>}
           </section>
         </div>
 
         <aside className="settings-aside">
           <section className="panel security-card"><span className="security-illustration"><Icon name="shield" size={28} /></span><h3>凭证安全</h3><p>API Key 不写入前端源码、不保存到浏览器，也不会从配置接口回显。</p><ul><li><Icon name="check" />优先写入操作系统凭据库</li><li><Icon name="check" />日志不记录密钥</li><li><Icon name="check" />仅服务进程可读取</li></ul></section>
-          <section className="panel runtime-card"><div className="panel-header"><div><span className="panel-kicker">RUNTIME</span><h3>运行环境</h3></div></div><dl><dt>前端</dt><dd>React + Vite</dd><dt>平台</dt><dd>Windows x64</dd><dt>更新源</dt><dd>企业稳定通道</dd><dt>配置协议</dt><dd>OpenAI Compatible</dd></dl></section>
+          <section className="panel runtime-card"><div className="panel-header"><div><span className="panel-kicker">RUNTIME</span><h3>运行环境</h3></div></div><dl><dt>前端</dt><dd>React + Vite</dd><dt>发行目标</dt><dd>Windows x64</dd><dt>更新源</dt><dd>后端配置 HTTPS 清单</dd><dt>配置协议</dt><dd>OpenAI Compatible</dd></dl></section>
         </aside>
       </section>
     </div>

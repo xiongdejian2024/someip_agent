@@ -131,7 +131,7 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
             <>
               <section className="panel service-hero">
                 <div className="service-logo">SI</div>
-                <div className="service-identity"><span>Service Interface</span><h2>{selected.name}</h2><p>{selected.endpoint ?? '端点由运行时动态分配'}</p></div>
+                <div className="service-identity"><span>Service Interface</span><h2>{selected.name}</h2><p>{selected.deploymentPath ?? selected.path ?? selected.endpoint ?? '端点由运行时动态分配'}</p></div>
                 <span className="protocol-pill">SOME/IP · {selected.transport ?? '传输未配置'}</span>
               </section>
               <section className="service-facts">

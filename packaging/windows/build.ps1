@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$Clean,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [string]$NativeRuntimeDir = $env:SOMEIP_AGENT_NATIVE_PACKAGE_DIR
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +36,10 @@ try {
         throw "无法从版本 $Version 生成 Windows 数字版本"
     }
     $NumericVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+    if (-not $NativeRuntimeDir -or -not (Test-Path (Join-Path $NativeRuntimeDir "soa_partner.exe"))) {
+        throw "缺少原生 soa_partner.exe；请先执行 build-native.ps1 或指定 -NativeRuntimeDir"
+    }
+    $NativeRuntimeDir = (Resolve-Path $NativeRuntimeDir).Path
     Invoke-Native $SystemPython @((Join-Path $ProjectRoot "scripts\check_version.py"))
 
     Write-Step 2 7 "准备干净构建目录"
@@ -72,6 +77,23 @@ try {
         "--workpath", (Join-Path $BuildRoot "pyinstaller"),
         (Join-Path $PSScriptRoot "someip-agent.spec")
     )
+    Write-Host "构建独立升级器"
+    Invoke-Native $BuildPython @(
+        "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
+        "--name", "someip-agent-updater",
+        "--distpath", (Join-Path $DistRoot "someip-agent"),
+        "--workpath", (Join-Path $BuildRoot "updater"),
+        "--specpath", $BuildRoot,
+        (Join-Path $PSScriptRoot "updater.py")
+    )
+    $PackagedNative = Join-Path $DistRoot "someip-agent\native"
+    New-Item -ItemType Directory -Path $PackagedNative -Force | Out-Null
+    Get-ChildItem -LiteralPath $NativeRuntimeDir | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $PackagedNative -Recurse -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "VERSION") -Destination (Join-Path $DistRoot "someip-agent\VERSION")
+    $ZipPackage = Join-Path $OutputRoot "someip-agent-$Version-windows-x64.zip"
+    Compress-Archive -Path (Join-Path $DistRoot "someip-agent\*") -DestinationPath $ZipPackage -Force
 
     if ($SkipInstaller) {
         Write-Host "已跳过 Inno Setup；PyInstaller 输出：$(Join-Path $DistRoot 'someip-agent')" -ForegroundColor Yellow

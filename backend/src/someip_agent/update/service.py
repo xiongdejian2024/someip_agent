@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
+import json
 import logging
+import os
 import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -52,6 +58,8 @@ class UpdateService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._last_manifest: dict[str, object] | None = None
+        self._install_lock = asyncio.Lock()
+        self._install_scheduled = False
 
     async def check(self) -> UpdateInfo:
         if not self._settings.update_manifest_url:
@@ -87,6 +95,10 @@ class UpdateService:
         )
 
     async def stage(self) -> Path:
+        target, _info = await self._stage_release()
+        return target
+
+    async def _stage_release(self) -> tuple[Path, UpdateInfo]:
         info = await self.check()
         if not info.available:
             raise UpdateError("当前已是最新版本")
@@ -99,15 +111,19 @@ class UpdateService:
         target = target_dir / filename
         temporary = target.with_suffix(target.suffix + ".part")
         hasher = hashlib.sha256()
+        downloaded = 0
         try:
             async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
                 async with client.stream("GET", info.download_url) as response:
                     response.raise_for_status()
                     with temporary.open("wb") as output:
                         async for chunk in response.aiter_bytes():
+                            downloaded += len(chunk)
+                            if downloaded > self._settings.update_max_download_bytes:
+                                raise UpdateError("升级包下载大小超限")
                             hasher.update(chunk)
                             output.write(chunk)
-        except (httpx.HTTPError, OSError) as exc:
+        except (httpx.HTTPError, OSError, UpdateError) as exc:
             logger.exception("升级包下载失败", extra={"operation": "update.stage"})
             temporary.unlink(missing_ok=True)
             raise UpdateError(f"升级包下载失败: {type(exc).__name__}: {exc}") from exc
@@ -115,7 +131,87 @@ class UpdateService:
             temporary.unlink(missing_ok=True)
             raise UpdateError("升级包 SHA-256 校验失败")
         temporary.replace(target)
-        return target
+        return target, info
+
+    async def install(self) -> dict[str, str]:
+        """下载验证后交给外置升级器；请求返回之后主进程才允许退出。"""
+        async with self._install_lock:
+            if self._install_scheduled:
+                raise UpdateError("升级已经启动")
+            root, helper, packaged = await asyncio.to_thread(self._install_paths)
+            target, info = await self._stage_release()
+            manifest: dict[str, object] = {"version": info.latest_version, "sha256": info.sha256}
+            if target.suffix.lower() not in {".zip", ".exe"}:
+                raise UpdateError("不支持的安装包格式")
+            await asyncio.to_thread(
+                self._schedule_install, target, manifest, root, helper, packaged
+            )
+            self._install_scheduled = True
+            logger.info("独立升级器已启动", extra={"operation": "update.install"})
+            return {"status": "scheduled", "version": str(manifest["version"])}
+
+    def _install_paths(self) -> tuple[Path, Path, bool]:
+        packaged = bool(getattr(sys, "frozen", False))
+        root = self._settings.update_install_root
+        if root is None and packaged:
+            root = Path(sys.executable).resolve().parent
+        if root is None:
+            raise UpdateError("开发启动模式没有安装目录，请使用发行版执行在线升级")
+        helper = self._settings.update_helper_binary or root / "someip-agent-updater.exe"
+        if not helper.is_file():
+            raise UpdateError("发行版缺少独立升级器")
+        return root, helper, packaged
+
+    def _schedule_install(
+        self, target: Path, manifest: dict[str, object], root: Path, helper: Path, packaged: bool
+    ) -> None:
+        executable = Path(sys.executable).name if packaged else "someip-agent"
+        plan = {
+            "package": str(target.resolve()),
+            "install_root": str(root.resolve()),
+            "executable": executable,
+            "parent_pid": os.getpid(),
+            "version": manifest["version"],
+            "sha256": manifest["sha256"],
+            "health_url": f"http://127.0.0.1:{self._settings.port}/api/v1/health",
+        }
+        from uuid import uuid4
+
+        plan_path = target.parent / ("install-plan-" + uuid4().hex + ".json")
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+        # 将独立 onefile 升级器放到安装目录之外，避免 Windows 的文件占用锁。
+        import shutil
+
+        outside_helper = target.parent / helper.name
+        shutil.copy2(helper, outside_helper)
+        try:
+            process = subprocess.Popen(
+                [str(outside_helper), "--plan", str(plan_path)],
+                start_new_session=os.name != "nt",
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) if os.name == "nt" else 0,
+            )
+            deadline = time.monotonic() + 30
+            status_path = plan_path.with_suffix(".status.json")
+            while time.monotonic() < deadline:
+                if status_path.is_file():
+                    try:
+                        result = json.loads(status_path.read_text(encoding="utf-8"))
+                    except json.JSONDecodeError:
+                        logger.debug("升级器状态文件仍在写入", exc_info=True)
+                        time.sleep(0.05)
+                        continue
+                    if result.get("status") == "prepared":
+                        return
+                    raise UpdateError(f"升级器准备失败: {result.get('error', result)}")
+                if process.poll() is not None:
+                    raise UpdateError(f"升级器在准备阶段退出: {process.returncode}")
+                time.sleep(0.05)
+            process.terminate()
+            process.wait(timeout=5)
+            raise UpdateError("升级器准备超时，主程序保持运行")
+        except Exception as exc:
+            logger.exception("独立升级器启动失败", extra={"operation": "update.install"})
+            raise UpdateError(f"独立升级器启动失败: {exc}") from exc
 
     def _verify_signature(self, version: str, digest: str, url: str, signature: str) -> bool:
         if not self._settings.update_public_key or not signature:

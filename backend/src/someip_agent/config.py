@@ -44,8 +44,13 @@ class Settings(BaseSettings):
 
     update_manifest_url: str = ""
     update_public_key: str = ""
+    update_install_root: Path | None = None
+    update_helper_binary: Path | None = None
+    update_max_download_bytes: int = 1024 * 1024 * 1024
 
     network_send_enabled: bool = False
+    native_binary: str = "soa_partner"
+    native_unicast: str = "127.0.0.1"
     allowed_destinations: list[str] = Field(default_factory=list)
     monitor_capacity: int = 20_000
     max_upload_bytes: int = 256 * 1024 * 1024

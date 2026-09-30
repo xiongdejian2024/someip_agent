@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import UpdateInfo
@@ -11,6 +11,25 @@ from someip_agent.update.service import UpdateError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["updates"])
+
+
+@router.post("/updates/install")
+async def install_update(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    state: ApplicationState = Depends(get_state),
+) -> dict[str, str]:
+    shutdown = getattr(request.app.state, "request_shutdown", None)
+    if shutdown is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "当前启动方式不支持自动重启升级")
+    try:
+        result = await state.update_service.install()
+    except UpdateError as exc:
+        logger.exception("在线升级安装失败", extra={"operation": "update.install"})
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    state.audit.add(action="update.install", target=result["version"])
+    background_tasks.add_task(shutdown)
+    return result
 
 
 @router.get("/updates/check", response_model=UpdateInfo)

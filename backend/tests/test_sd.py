@@ -43,3 +43,13 @@ def test_sd_eventgroup_round_trip() -> None:
     decoded = SdPayload.decode(SdPayload(entries=(entry,)).encode())
     assert decoded.entries[0].eventgroup_id == 0x100
     assert "SubscribeEventgroup" in decoded.summary()
+
+
+def test_ipv4_endpoint_option_matches_vsomeip_golden_bytes() -> None:
+    # vsomeip ipv4_option_impl：Length=9，整条 Option=12 字节。
+    golden = bytes.fromhex("00090400c0a801010011771a")
+    option, end = SdOption.decode_from(golden, 0)
+    assert option.option_type == 4
+    assert option.data.hex() == "c0a801010011771a"
+    assert end == 12
+    assert option.encode() == golden

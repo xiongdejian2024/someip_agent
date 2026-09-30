@@ -9,7 +9,7 @@ from someip_agent.runtime.simulator import SimulationManager, SimulationPermissi
 
 
 @pytest.mark.asyncio
-async def test_internal_simulation_publishes_samples(tmp_path) -> None:
+async def test_internal_simulation_publishes_samples(tmp_path, native_runtime) -> None:
     settings = Settings(_env_file=None, data_dir=tmp_path)
     monitor = MonitorStore()
     manager = SimulationManager(monitor, settings)
@@ -28,6 +28,9 @@ async def test_internal_simulation_publishes_samples(tmp_path) -> None:
     assert len(messages) >= 2
     assert messages[0].service_id == 0x1234
     assert "value" in messages[0].signal_values
+    assert messages[0].source == "vsomeip"
+    assert messages[0].metadata["runtime"] == "vsomeip"
+    assert messages[0].metadata["wire_verified"] is False
 
 
 @pytest.mark.asyncio
@@ -42,3 +45,26 @@ async def test_udp_is_disabled_by_default(tmp_path) -> None:
                 destination_host="192.0.2.1",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_native_generator_failure_marks_task_stopped(tmp_path, native_runtime) -> None:
+    manager = SimulationManager(MonitorStore(), Settings(_env_file=None, data_dir=tmp_path))
+    status = await manager.start(
+        SimulationConfig(
+            service_id=0x1234,
+            method_id=0x8001,
+            interval_ms=10,
+            generator=SignalGeneratorConfig(kind="sequence", data_type="uint8", sequence=[1, 999]),
+        )
+    )
+    try:
+        for _ in range(200):
+            current = manager.list()[0]
+            if not current.running:
+                break
+            await asyncio.sleep(0.01)
+        assert not current.running
+        assert "超限" in current.last_error
+    finally:
+        assert not (await manager.stop(status.id))[0].running

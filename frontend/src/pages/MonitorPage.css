@@ -49,6 +49,10 @@
 .trace-pagination .icon-button { width: 29px; height: 29px; font-size: 18px; }
 .monitor-workbench .listener-panel { max-height: 280px; overflow: auto; }
 .monitor-workbench .active-listeners { max-height: 140px; overflow: auto; }
+.monitor-workbench .listener-config input[type="checkbox"] { width: 18px; height: 18px; margin: 7px 0; padding: 0; }
+.monitor-workbench .active-listeners > div { flex-wrap: wrap; }
+.monitor-workbench .active-listeners > div > span:not(.result-dot) { font-size: 10px; overflow-wrap: anywhere; }
+.monitor-workbench .active-listeners code { min-width: 120px; overflow-wrap: anywhere; }
 .monitor-graphics-window { min-width: 0; }
 @media (max-width: 1150px) {
   .trace-content { grid-template-columns: minmax(0, 1fr) 242px; }

@@ -124,7 +124,7 @@ export default function App() {
       case 'simulation': return <SimulationPage services={services} samples={samples} draft={simulationDraft} onDismissDraft={() => setSimulationDraft(undefined)} loading={servicesLoading} />
       case 'monitor': return <MonitorPage messages={messages} samples={samples} streamState={streamState} source={source} onClear={clear} />
       case 'pcap': return <PcapPage />
-      case 'settings': return <SettingsPage />
+      case 'settings': return <SettingsPage currentVersion={health?.version} />
       case 'dashboard':
       default: return <DashboardPage services={services} modelLoading={servicesLoading} streamState={streamState} messages={messages} samples={samples} source={source} modelSource={serviceSource} onNavigate={navigate} onOpenAgent={() => openAgent()} />
     }

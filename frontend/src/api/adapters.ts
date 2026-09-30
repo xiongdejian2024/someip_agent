@@ -37,6 +37,7 @@ interface RawField {
 export interface RawServiceDefinition {
   name?: string
   path?: string
+  deployment_path?: string | null
   service_id?: number | null
   instance_ids?: number[]
   major_version?: number
@@ -69,6 +70,9 @@ interface RawNetworkListener {
   id?: string
   config?: {
     name?: string
+    mode?: 'socket' | 'pcap'
+    capture_interface?: string | null
+    capture_filter?: string
     transport?: 'udp' | 'tcp'
     bind_host?: string
     port?: number
@@ -80,6 +84,14 @@ interface RawNetworkListener {
   received_count?: number
   parse_error_count?: number
   last_error?: string | null
+  captured_count?: number
+  kernel_dropped_count?: number | null
+  interface_dropped_count?: number | null
+  active_streams?: number
+  active_fragment_datagrams?: number
+  fragment_buffered_bytes?: number
+  reassembled_datagrams?: number
+  fragment_error_count?: number
 }
 
 export interface RawPcapImportResult {
@@ -151,7 +163,9 @@ export function normalizeService(raw: RawServiceDefinition, index = 0): ServiceD
   const serviceId = formatHex(raw.service_id)
   const instanceId = formatHex(raw.instance_ids?.[0] ?? 0)
   return {
-    id: raw.path || `${raw.name ?? 'service'}-${serviceId}-${index}`,
+    id: raw.deployment_path || raw.path || `${raw.name ?? 'service'}-${serviceId}-${index}`,
+    path: raw.path,
+    deploymentPath: raw.deployment_path ?? undefined,
     name: raw.name || `Service_${serviceId}`,
     serviceId,
     instanceId,
@@ -229,6 +243,19 @@ export function normalizeNetworkListener(raw: RawNetworkListener, index = 0): Ne
     running: Boolean(raw.running),
     message_count: raw.received_count ?? 0,
     started_at: raw.started_at,
+    mode: config.mode ?? 'socket',
+    capture_interface: config.capture_interface,
+    capture_filter: config.capture_filter,
+    captured_count: raw.captured_count ?? 0,
+    kernel_dropped_count: raw.kernel_dropped_count,
+    interface_dropped_count: raw.interface_dropped_count,
+    parse_error_count: raw.parse_error_count ?? 0,
+    active_streams: raw.active_streams ?? 0,
+    active_fragment_datagrams: raw.active_fragment_datagrams ?? 0,
+    fragment_buffered_bytes: raw.fragment_buffered_bytes ?? 0,
+    reassembled_datagrams: raw.reassembled_datagrams ?? 0,
+    fragment_error_count: raw.fragment_error_count ?? 0,
+    last_error: raw.last_error,
   }
 }
 

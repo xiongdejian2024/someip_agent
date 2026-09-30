@@ -1,6 +1,10 @@
 PYTHON ?= python3
 NPM ?= npm
 VENV ?= .venv
+NATIVE_IMAGE ?= someip-agent-vsomeip:test
+NATIVE_BASE ?= debian:bookworm-slim
+NATIVE_SDK ?= upstream
+NATIVE_IPV6 := --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 --sysctl net.ipv6.conf.lo.disable_ipv6=0
 
 ifeq ($(OS),Windows_NT)
 VENV_PYTHON := $(VENV)/Scripts/python.exe
@@ -8,7 +12,7 @@ else
 VENV_PYTHON := $(VENV)/bin/python
 endif
 
-.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows
+.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows native-image native-compile native-test native-regression
 
 help:
 	@echo "install          安装后端开发依赖和前端依赖"
@@ -21,6 +25,9 @@ help:
 	@echo "dev-backend      启动 FastAPI 开发服务（8765）"
 	@echo "dev-frontend     启动 Vite 开发服务（5173）"
 	@echo "docker-up        启动 Docker 开发环境"
+	@echo "native-image     构建 vsomeip 固定版本的 Linux 验收镜像"
+	@echo "native-test      编译原生核心并运行隔离虚拟以太网功能测试"
+	@echo "native-regression 在真实原生运行时上执行全部后端测试，禁止跳过"
 
 $(VENV_PYTHON):
 	$(PYTHON) -m venv $(VENV)
@@ -64,3 +71,15 @@ docker-down:
 
 package-windows:
 	powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1 -Clean
+
+native-image:
+	docker build --build-arg NATIVE_BASE=$(NATIVE_BASE) --build-arg NATIVE_SDK=$(NATIVE_SDK) -f native/Dockerfile -t $(NATIVE_IMAGE) .
+
+native-compile:
+	docker run --rm --init --network none -v "$(CURDIR):/workspace" $(NATIVE_IMAGE) bash -c 'cmake -S native -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build/native -j2 && ctest --test-dir build/native --output-on-failure'
+
+native-test: native-compile
+	docker run --rm --init --privileged --network none $(NATIVE_IPV6) -v "$(CURDIR):/workspace" -e PYTHONPATH=/workspace/backend/src $(NATIVE_IMAGE) bash native/tests/run_virtual.sh
+
+native-regression: native-compile
+	docker run --rm --init --network none $(NATIVE_IPV6) -v "$(CURDIR):/workspace" -e PYTHONPATH=/workspace/backend/src -e SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner -e SOMEIP_AGENT_REQUIRE_NATIVE_TESTS=1 $(NATIVE_IMAGE) python -m pytest backend/tests --junitxml=build/virtual-evidence/backend-regression.xml

@@ -37,7 +37,7 @@ packaging = ["pyinstaller>=6.11,<7"]
 someip-agent = "someip_agent.main:run"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/someip_agent"]
+packages = ["src/someip_agent", "src/soa_partner"]
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"

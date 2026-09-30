@@ -8,6 +8,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from someip_agent.api.dependencies import get_state
 from someip_agent.arxml.parser import ArxmlParseError, ArxmlParser
 from someip_agent.domain.models import ArxmlModel, ServiceDefinition
+from someip_agent.runtime.native_config import SimulationPermissionError
+from someip_agent.soa.catalog import (
+    CatalogBuildError,
+    NativeCatalogRequest,
+    NativeServiceBundle,
+    build_native_bundle,
+)
 from someip_agent.state import ApplicationState
 
 logger = logging.getLogger(__name__)
@@ -65,3 +72,21 @@ async def get_model(state: ApplicationState = Depends(get_state)) -> ArxmlModel 
 async def get_services(state: ApplicationState = Depends(get_state)) -> list[ServiceDefinition]:
     model = await state.get_arxml_model()
     return model.services if model else []
+
+
+@router.post("/model/native-catalog", response_model=NativeServiceBundle)
+async def native_catalog(
+    request: NativeCatalogRequest, state: ApplicationState = Depends(get_state)
+) -> NativeServiceBundle:
+    """生成完整目录和初始化字典；不启动服务、不写文件、不自动发包。"""
+    model = await state.get_arxml_model()
+    if model is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "请先导入 ARXML 服务模型")
+    try:
+        return build_native_bundle(model, request, state.settings)
+    except SimulationPermissionError as exc:
+        logger.exception("原生服务配置授权失败", extra={"operation": "soa.catalog.build"})
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except (CatalogBuildError, ValueError) as exc:
+        logger.exception("原生服务目录生成失败", extra={"operation": "soa.catalog.build"})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

@@ -115,12 +115,16 @@ def run() -> None:
         )
         timer.daemon = True
         timer.start()
-    uvicorn.run(
-        "someip_agent.main:app",
-        host=settings.host,
-        port=settings.port,
-        log_config=None,
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=settings.host, port=settings.port, log_config=None)
     )
+
+    def request_shutdown() -> None:
+        logger.info("升级准备完成，停止主程序", extra={"operation": "update.shutdown"})
+        server.should_exit = True
+
+    app.state.request_shutdown = request_shutdown
+    server.run()
 
 
 if __name__ == "__main__":

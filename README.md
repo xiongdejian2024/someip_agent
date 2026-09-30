@@ -9,16 +9,16 @@ ARXML 建模、SOME/IP / SOME/IP-SD 编解码、PCAP 导入、信号仿真与智
 
 ## 核心能力
 
-- ARXML 安全导入，抽取服务、方法、事件、字段、部署 ID 和信号类型；
+- ARXML 安全导入，抽取服务、方法、事件、字段、部署 ID；基础类型可解析到原生目录，缺失类型禁止猜测发包；
 - SOME/IP 报文与 SOME/IP-SD 基础条目/选项编解码；
 - PCAP / PCAPNG 离线导入，解析 IPv4/IPv6、UDP/TCP 和 SOME/IP；
-- 真实 UDP/TCP/IPv4 组播监听，实时解码 SOME/IP 并汇入统一监控流；
+- 原生 UDP/TCP/IPv4 组播端口监听，vsomeip 解码 SOME/IP 并汇入统一监控流（不是网卡被动抓包）；
 - 基于 WebSocket 的有界监控数据流、Trace 分页/冻结/详情和可选信号的 ECharts 分轨波形；
-- 信号仿真与周期 OfferService，配合安全的网络发送总开关和目标白名单；
+- vsomeip 原生信号仿真与服务发现，Python 通过控制 socket 管理二进制，周期生成和编码不再由 Python 执行；
 - OpenAI 兼容模型配置、SSE 流式智能体、Markdown/表格/代码块显示与停止生成；
 - 根版本、Python 包版本、前端版本与源码版本的语义版本一致性校验；
 - Docker 开发环境，以及 PyInstaller + Inno Setup 的 Windows 安装包流水线；
-- 为签名更新清单、包哈希校验、回滚和审计预留升级契约。
+- 签名更新清单、下载哈希校验、独立升级器准备确认、重启验证与失败回滚；正式发布源需配置。
 
 ## 架构概览
 
@@ -28,12 +28,18 @@ React + Vite + ECharts
           ▼
 FastAPI 应用层 ── 智能体编排 ── OpenAI 兼容网关
           │
-          ├── ARXML 投影模型 ── 仿真调度器
-          ├── SOME/IP + SOME/IP-SD 编解码器
-          └── PCAP / 实时网卡 ── 监控缓冲区
+          ├── ARXML 投影模型 ── 原生服务配置
+          ├── 控制 socket ── vsomeip 原生服务 / 周期发生器 / 端口监听 / 网卡捕获
+          └── 离线 PCAP / 原生监控 socket ── 展示分析与监控缓冲区
 ```
 
 详细设计、安全边界和数据流见[架构文档](docs/architecture.md)。
+
+原生迁移正在进行，不代表整个底层已经验收完成：默认仿真、端口监听和 Ethernet 被动抓包已切换。
+ARXML 基础类型已接通原生目录及 Python 字典初始化；完整序列化映射、服务页面生命周期、
+SAT 辅助 API、IPv6 分片、完整 IPv4 选项、离线 PCAP 原生迁移及 Windows 实机验收仍有门禁。
+IPv4 分片已接入成熟重组库，但不代表支持所有 IP 流量。当前状态与复现命令见
+[原生运行时](docs/native-runtime.md)和[执行记录](docs/vsomeip-progress.md)。
 
 ## 本地开发
 
@@ -129,6 +135,9 @@ make lint
 make test
 make build-frontend
 make ci
+make native-image
+make native-test
+make native-regression
 node scripts/check_monitor_buffer.mjs
 node scripts/check_agent_stream.mjs
 ```
@@ -136,7 +145,8 @@ node scripts/check_agent_stream.mjs
 Windows 安装包需在 Windows 上构建：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Clean
+.\packaging\windows\build-native.ps1 -VcpkgRoot C:\vcpkg
+.\packaging\windows\build.ps1 -Clean -NativeRuntimeDir .\.build\native-windows\runtime
 ```
 
 输出位于 `packaging/windows/output/`。生产发布前必须完成代码签名、安装包签名、恶意软件

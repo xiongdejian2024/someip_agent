@@ -1,0 +1,8 @@
+.git
+.venv
+data
+build
+frontend/node_modules
+.mypy_cache
+.ruff_cache
+**/__pycache__

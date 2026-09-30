@@ -5,7 +5,7 @@ import { Icon } from '../components/Icon'
 import { StatusBadge } from '../components/StatusBadge'
 import { SignalScope } from '../components/SignalScope'
 import { protocolId, useAgentScope } from '../agent/workspace'
-import type { ConnectionState, MonitorMessage, NetworkListener, NetworkListenerConfig, WaveSample } from '../types'
+import type { CaptureInterface, ConnectionState, MonitorMessage, NetworkListener, NetworkListenerConfig, WaveSample } from '../types'
 import './MonitorPage.css'
 
 interface MonitorPageProps {
@@ -44,8 +44,13 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
   const [listenerPanel, setListenerPanel] = useState(false)
   const [listenerBusy, setListenerBusy] = useState(false)
   const [listenerNotice, setListenerNotice] = useState<string | null>(null)
+  const [captureInterfaces, setCaptureInterfaces] = useState<CaptureInterface[]>([])
   const [listenerConfig, setListenerConfig] = useState<NetworkListenerConfig>({
     name: 'SOME/IP UDP Listener',
+    mode: 'socket',
+    capture_interface: '',
+    capture_filter: 'udp port 30490 or udp port 30500 or tcp port 30500',
+    promiscuous: false,
     transport: 'udp',
     bind_host: '0.0.0.0',
     port: 30490,
@@ -66,13 +71,29 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
     void loadListeners()
   }, [])
 
+  useEffect(() => {
+    if (!listenerPanel) return
+    const timer = window.setInterval(() => void loadListeners(), 2000)
+    return () => window.clearInterval(timer)
+  }, [listenerPanel])
+
+  const loadCaptureInterfaces = async () => {
+    try {
+      setCaptureInterfaces(await api.networkInterfaces())
+      logInfo('原生抓包网卡枚举完成')
+    } catch (error) {
+      logError('枚举原生抓包网卡失败', error)
+      setListenerNotice(`网卡枚举失败：${describeApiError(error)}`)
+    }
+  }
+
   const startListener = async () => {
     setListenerBusy(true)
     setListenerNotice(null)
     try {
       await api.startNetworkListener(listenerConfig)
       await loadListeners()
-      setListenerNotice(`已启动 ${listenerConfig.transport.toUpperCase()} 监听：${listenerConfig.bind_host}:${listenerConfig.port}`)
+      setListenerNotice(listenerConfig.mode === 'pcap' ? `已启动被动抓包：${listenerConfig.capture_interface}` : `已启动 ${listenerConfig.transport.toUpperCase()} 监听：${listenerConfig.bind_host}:${listenerConfig.port}`)
       logInfo('网络监听器已启动', { name: listenerConfig.name, transport: listenerConfig.transport, port: listenerConfig.port })
     } catch (error) {
       logError('启动网络监听器失败', error, { transport: listenerConfig.transport, port: listenerConfig.port })
@@ -197,19 +218,28 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
 
       {listenerPanel && (
         <section className="panel listener-panel">
+          <p className="muted">端口监听会绑定服务端口；网卡被动抓包不占用端口，由 libpcap 读取、libtins 重组 TCP、vsomeip 解码。抓包需要对应网卡权限，时间戳不是硬件时间。</p>
           <div className="listener-config">
             <label><span>名称</span><input value={listenerConfig.name} onChange={(event) => setListenerConfig((current) => ({ ...current, name: event.target.value }))} /></label>
+            <label><span>观测模式</span><select value={listenerConfig.mode ?? 'socket'} onChange={(event) => { const mode = event.target.value as 'socket' | 'pcap'; setListenerConfig((current) => ({ ...current, mode })); if (mode === 'pcap') void loadCaptureInterfaces() }}><option value="socket">端口监听</option><option value="pcap">网卡被动抓包</option></select></label>
+            {listenerConfig.mode === 'pcap' ? <>
+              <label><span>捕获网卡</span><select value={listenerConfig.capture_interface ?? ''} onChange={(event) => setListenerConfig((current) => ({ ...current, capture_interface: event.target.value }))}><option value="">请选择网卡</option>{captureInterfaces.map((item) => <option key={item.name} value={item.name}>{item.name} · {item.addresses.join(', ') || item.description}</option>)}</select></label>
+              <button className="button ghost" onClick={() => void loadCaptureInterfaces()}>刷新网卡</button>
+              <label><span>BPF 过滤器</span><input value={listenerConfig.capture_filter ?? ''} onChange={(event) => setListenerConfig((current) => ({ ...current, capture_filter: event.target.value }))} /></label>
+              <label><span>混杂模式</span><input type="checkbox" checked={Boolean(listenerConfig.promiscuous)} onChange={(event) => setListenerConfig((current) => ({ ...current, promiscuous: event.target.checked }))} /></label>
+            </> : <>
             <label><span>传输协议</span><select value={listenerConfig.transport} onChange={(event) => setListenerConfig((current) => ({ ...current, transport: event.target.value as 'udp' | 'tcp' }))}><option value="udp">UDP</option><option value="tcp">TCP</option></select></label>
             <label><span>绑定地址</span><input value={listenerConfig.bind_host} onChange={(event) => setListenerConfig((current) => ({ ...current, bind_host: event.target.value }))} /></label>
             <label><span>端口</span><input type="number" min={1} max={65535} value={listenerConfig.port} onChange={(event) => setListenerConfig((current) => ({ ...current, port: Number(event.target.value) }))} /></label>
             {listenerConfig.transport === 'udp' && <label><span>组播地址</span><input value={listenerConfig.multicast_group ?? ''} onChange={(event) => setListenerConfig((current) => ({ ...current, multicast_group: event.target.value }))} placeholder="可选" /></label>}
             <label><span>接口 IP</span><input value={listenerConfig.interface_ip} onChange={(event) => setListenerConfig((current) => ({ ...current, interface_ip: event.target.value }))} /></label>
-            <button className="button primary" disabled={listenerBusy || !listenerConfig.name || !listenerConfig.port} onClick={() => void startListener()}>{listenerBusy ? <span className="spinner" /> : <Icon name="play" />}启动监听</button>
+            </>}
+            <button className="button primary" disabled={listenerBusy || !listenerConfig.name || (listenerConfig.mode === 'pcap' ? !listenerConfig.capture_interface || !listenerConfig.capture_filter : !listenerConfig.port)} onClick={() => void startListener()}>{listenerBusy ? <span className="spinner" /> : <Icon name="play" />}启动观测</button>
           </div>
           {listenerNotice && <div className={`listener-notice ${listenerNotice.includes('失败') ? 'error' : ''}`}><Icon name="info" size={14} />{listenerNotice}</div>}
           {listeners.length > 0 && <div className="active-listeners">{listeners.map((listener) => {
             const isRunning = listener.running || listener.status === 'running'
-            return <div key={listener.id}><span className={`result-dot ${isRunning ? 'ok' : ''}`} /><strong>{listener.name}</strong><code>{listener.transport.toUpperCase()} · {listener.bind_host}:{listener.port}{listener.multicast_group ? ` · ${listener.multicast_group}` : ''}</code><em>{listener.message_count?.toLocaleString() ?? 0} 帧</em>{isRunning ? <button className="button ghost" disabled={listenerBusy} onClick={() => void stopListener(listener.id)}><Icon name="stop" />停止</button> : <span className="muted">已停止</span>}</div>
+            return <div key={listener.id}><span className={`result-dot ${isRunning ? 'ok' : ''}`} /><strong>{listener.name}</strong><code>{listener.mode === 'pcap' ? `${listener.capture_interface} · ${listener.capture_filter}` : `${listener.transport.toUpperCase()} · ${listener.bind_host}:${listener.port}${listener.multicast_group ? ` · ${listener.multicast_group}` : ''}`}</code><em>{listener.message_count?.toLocaleString() ?? 0} 条</em>{listener.mode === 'pcap' && <span>捕获 {listener.captured_count ?? 0} 帧 · 内核丢包 {listener.kernel_dropped_count ?? '未知'} · 接口丢包 {listener.interface_dropped_count ?? '未知'} · 活跃流 {listener.active_streams ?? 0} · 分片上下文 {listener.active_fragment_datagrams ?? 0}（{listener.fragment_buffered_bytes ?? 0} 字节）· 已重组 {listener.reassembled_datagrams ?? 0} · 分片异常 {listener.fragment_error_count ?? 0}</span>}{listener.last_error && <span className="error" title={listener.last_error}>异常 {listener.parse_error_count ?? 0}：{listener.last_error}</span>}{isRunning ? <button className="button ghost" disabled={listenerBusy} onClick={() => void stopListener(listener.id)}><Icon name="stop" />停止</button> : <span className="muted">已停止</span>}</div>
           })}</div>}
         </section>
       )}

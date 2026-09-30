@@ -1,0 +1,41 @@
+{
+  "DoorService": {
+    "service_id": "0x1234", "instance_id": 1, "major_version": 1,
+    "methods": {
+      "SetPosition": {
+        "id": 1,
+        "input": {"type": "struct", "fields": [{"name": "position", "type": "uint16"}]},
+        "output": {"type": "struct", "fields": [{"name": "position", "type": "uint16"}]}
+      },
+      "GetPosition": {
+        "id": 2, "input": {"type": "struct", "fields": []},
+        "output": {"type": "struct", "fields": [{"name": "position", "type": "uint16"}]}
+      },
+      "Echo": {
+        "id": 3,
+        "input": {"type": "struct", "fields": [
+          {"name": "label", "type": "string"},
+          {"name": "values", "type": "array", "element": {"type": "int32"}},
+          {"name": "reading", "type": "float64", "byte_order": "little"}
+        ]},
+        "output": {"type": "struct", "fields": [
+          {"name": "label", "type": "string"},
+          {"name": "values", "type": "array", "element": {"type": "int32"}},
+          {"name": "reading", "type": "float64", "byte_order": "little"}
+        ]}
+      },
+      "FireAndForget": {"id": 4, "fire_and_forget": true,
+        "input": {"type": "struct", "fields": [{"name": "position", "type": "uint16"}]}},
+      "GetAngle": {"id": 5, "input": {"type": "struct", "fields": []},
+        "output": {"type": "uint16"}}
+    },
+    "events": {
+      "UpdatePositionEvent": {"id": "0x8001", "field": true, "eventgroups": [1],
+        "schema": {"type": "struct", "fields": [{"name": "position", "type": "uint16"}]}},
+      "UpdateSampleEvent": {"id": "0x8002", "eventgroups": [2],
+        "schema": {"type": "struct", "fields": [{"name": "value", "type": "float32"}]}},
+      "UpdateAngleEvent": {"id": "0x8003", "field": true, "eventgroups": [3],
+        "schema": {"type": "struct", "fields": [{"name": "angle", "type": "uint16"}]}}
+    }
+  }
+}

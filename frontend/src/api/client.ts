@@ -1,5 +1,6 @@
 import type {
   AgentChatResponse,
+  CaptureInterface,
   HealthResponse,
   LlmSettings,
   NetworkListenerConfig,
@@ -87,6 +88,7 @@ export const api = {
   },
   messages: async () => (await request<RawMonitorMessage[]>('/monitor/messages')).map(normalizeMonitorMessage),
   clearMessages: () => request<void>('/monitor/messages', { method: 'DELETE' }),
+  networkInterfaces: () => request<CaptureInterface[]>('/network/interfaces'),
   networkListeners: async () => {
     const listeners = await request<Parameters<typeof normalizeNetworkListener>[0][]>('/network/listeners')
     return listeners.map(normalizeNetworkListener)
@@ -115,6 +117,9 @@ export const api = {
   }, 60_000),
   getLlmSettings: () => request<LlmSettings>('/settings/llm'),
   checkUpdate: () => request<UpdateInfo>('/updates/check', {}, 15_000),
+  installUpdate: () => request<{ status: string; version: string }>('/updates/install', {
+    method: 'POST',
+  }, 180_000),
   stageUpdate: () => request<{ status: string; path: string }>('/updates/stage', {
     method: 'POST',
     body: '{}',

@@ -7,6 +7,8 @@
 - Node.js 20+（推荐 22 LTS）；
 - [PyInstaller](https://pyinstaller.org/) 6.x；
 - [Inno Setup](https://jrsoftware.org/isinfo.php) 6.x；
+- MSVC x64、CMake、Git 与已有 vcpkg；原生 vsomeip 固定 3.5.10，Boost/JSON 由 vcpkg 提供；
+- 实时抓包还需获授权的 Npcap SDK、配置 `Packet_ROOT` 的独立 vcpkg triplet，及目标机驱动/权限；
 - 生产发布还需要企业代码签名证书及安全的签名服务。
 
 PyInstaller 不是交叉编译器，Windows 制品必须在 Windows 或等价的受控 Windows 构建环境中
@@ -17,8 +19,19 @@ PyInstaller 不是交叉编译器，Windows 制品必须在 Windows 或等价的
 在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Clean
+.\packaging\windows\build-native.ps1 -VcpkgRoot C:\vcpkg -CaptureTriplet x64-windows-npcap -OverlayTriplets C:\approved-triplets
+.\packaging\windows\build.ps1 -Clean -NativeRuntimeDir .\.build\native-windows\runtime
 ```
+
+`C:\approved-triplets\x64-windows-npcap.cmake` 必须使用 x64、动态 CRT/库、Windows 系统，
+并通过 `VCPKG_CMAKE_CONFIGURE_OPTIONS` 给 libpcap 传入 `-DPacket_ROOT=已授权的SDK目录`。
+构建脚本不会生成/安装 SDK、驱动或下载未经确认的 Npcap 制品。可使用环境变量
+`SOMEIP_AGENT_VCPKG_CAPTURE_TRIPLET` 和 `VCPKG_OVERLAY_TRIPLETS` 提供相同配置。
+vcpkg libpcap 的标准 Windows 路径可能设置 `PCAP_TYPE=null`；仅编译成功不能证明能抓包。
+依据为 [vcpkg 官方 libpcap port](https://github.com/microsoft/vcpkg/blob/master/ports/libpcap/portfile.cmake)
+的 Windows `Packet_ROOT` 分支，构建前仍应核对实际锁定的 port 版本。
+脚本因此拒绝缺少独立抓包 triplet 的完整发行构建。CI 发布环境也必须明确配置这两个值，
+当前仓库尚未验证此 Windows 路径。目标机 `Packet.dll` 的解析、网卡枚举与实际双向捕获仍需实机验收。
 
 脚本按顺序执行：
 
@@ -31,6 +44,10 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Clean
 
 日志会显示每个关键步骤。脚本捕获异常时输出异常文本与 PowerShell 调用堆栈，并以非零状态
 退出，不会静默忽略失败。
+
+原生运行目录缺少 `soa_partner.exe` 时禁止生成缺底层的安装包。构建独立 onefile 升级器，并
+将原生二进制/DLL、根 VERSION 与 ZIP 完整发行包一起输出。当前改造尚未在 Windows 实机
+验收，脚本存在不代表 DLL、安装器和升级回滚已经验证。
 
 只验证 PyInstaller 内容而暂不生成安装器：
 
@@ -50,6 +67,9 @@ packaging/windows/output/          # 安装器与 SHA-256
 ```text
 someip-agent/
 ├── someip-agent.exe
+├── someip-agent-updater.exe
+├── VERSION
+├── native/                        # soa_partner.exe 与原生 DLL
 └── _internal/
     ├── web/                       # Vite 静态资源
     ├── VERSION
