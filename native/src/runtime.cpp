@@ -336,6 +336,9 @@ void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_
         std::string api_name=function;
         if (api_name.size()>5 && api_name.substr(api_name.size()-5)=="Async") api_name.resize(api_name.size()-5);
         const auto &api=m->apis.at(api_name);
+        const bool acknowledge=request.value("acknowledge",false);
+        if(acknowledge && action=="request" && !api.fire_and_forget)
+            throw std::runtime_error("有响应方法不能同时请求本地提交回执，请等待真实方法响应");
         if(action=="event") {
             if(m->role!="server" || !api.event) throw std::runtime_error("通知需要 server event");
             auto data=request.contains("payload_hex")?unhex(request.at("payload_hex")):Codec::encode(api.input,args);
@@ -387,6 +390,9 @@ void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_
             response->set_message_type(static_cast<vsomeip::message_type_e>(response_type));
             app_->send(response);trace(m,api,data,"tx",response_type,response->get_client(),response->get_session(),return_code);
         } else throw std::runtime_error("未知成员操作: "+action);
+        if(acknowledge)conn->send({{"action","response"},{"function",function},
+            {"result","true"},{"failtype","FAILTYPE_SUCCESS"},
+            {"correlation_id",request.value("correlation_id","")},{"observation","native_submission"}});
     } catch(const std::exception &error) {
         log_error("member."+function,error);
         conn->send({{"action","response"},{"function",function},{"result","null"},

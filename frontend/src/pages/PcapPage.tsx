@@ -236,12 +236,13 @@ export function PcapPage() {
           <section className="pcap-result-header panel">
             <div className="pcap-file-icon"><Icon name="file" size={22} /></div>
             <div>
-              <span>{demo ? '离线演示样例 · 非所选文件解析' : '真实解析已完成'}</span>
+              <span>{demo ? '离线演示样例 · 非所选文件解析' : result.runtime === 'vsomeip' ? '原生 vsomeip 解析已完成' : '解析来源未标识'}</span>
               <h2>{result.file_name}</h2>
               <p>
                 {formatBytes(result.captured_bytes)} 捕获数据 · {result.duration_seconds.toFixed(3)} 秒 ·
                 {' '}{formatTimestamp(result.start_time)} → {formatTimestamp(result.end_time)}
               </p>
+              {!demo && result.runtime === 'vsomeip' && <p>链路类型 {result.link_type ?? '未知'} · IPv4 已重组 {result.reassembled_datagrams} 份 · 分片异常 {result.fragment_error_count} 次 · 文件时间戳，非线上重放或硬件时延</p>}
             </div>
             <div className="pcap-result-actions">
               <button className="button secondary" disabled={demo} onClick={() => openAgent('请分析后端当前缓存中来源为 PCAP 的 SOME/IP 报文和 SD 证据。先给统计范围，再列出异常与下一步验证。注意缓存可能包含多次导入，不要冒充当前文件的完整报告。')}><Icon name="sparkles" />分析抓包证据</button>

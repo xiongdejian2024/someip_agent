@@ -1,6 +1,7 @@
 #include "network.hpp"
 #include "capture.hpp"
 #include "wire.hpp"
+#include "offline.hpp"
 
 namespace agent {
 namespace {
@@ -207,8 +208,10 @@ NetworkRuntime::~NetworkRuntime() { shutdown(); }
 void NetworkRuntime::shutdown() {
     for (auto &[id, listener] : listeners_) listener->close();
     for (auto &[id, capture] : captures_) capture->close();
+    for (auto &[connection,import] : imports_) import->close();
     listeners_.clear();
     captures_.clear();
+    imports_.clear();
 }
 void NetworkRuntime::emit(const Json &message) {
     monitors_.erase(std::remove_if(monitors_.begin(), monitors_.end(),
@@ -221,6 +224,19 @@ void NetworkRuntime::control(const Json &request, std::shared_ptr<Connection> co
         auto args = unpack_json(request.value("args", Json()));
         Json result = true;
         if (function == "monitor") { monitors_.push_back(connection); }
+        else if(function=="pcap_import") {
+            if(!imports_.empty())throw std::runtime_error("此原生进程已有离线导入任务");
+            auto key=connection.get();
+            auto import=std::make_shared<OfflineImport>(io_,args.at("path").get<std::string>(),connection,
+                [this,key]{imports_.erase(key);});
+            imports_[key]=import;
+            std::weak_ptr<OfflineImport> weak=import;
+            connection->on_close=[this,key,weak]{
+                if(auto import=weak.lock())import->close();
+                imports_.erase(key);
+            };
+            import->start();
+        }
         else if (function == "network_interfaces") { result = capture_interfaces(); }
         else if (function == "network_start") {
             auto id = args.at("id").get<std::string>();

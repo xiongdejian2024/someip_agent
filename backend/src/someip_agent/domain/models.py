@@ -277,6 +277,10 @@ class PcapImportResult(BaseModel):
     protocol_counts: dict[str, int] = Field(default_factory=dict)
     sd_entry_counts: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    runtime: Literal["vsomeip"] = "vsomeip"
+    link_type: int | None = None
+    reassembled_datagrams: int = 0
+    fragment_error_count: int = 0
 
 
 class LlmSettingsUpdate(BaseModel):

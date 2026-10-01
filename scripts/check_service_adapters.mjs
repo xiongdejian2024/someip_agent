@@ -8,7 +8,7 @@ const result = await build({
   entryPoints: [fileURLToPath(new URL('../frontend/src/api/adapters.ts', import.meta.url))],
   bundle: true, write: false, platform: 'node', format: 'esm',
 })
-const { normalizeServices, normalizeNetworkListener } = await import(
+const { normalizeServices, normalizeNetworkListener, normalizePcapResult } = await import(
   `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`,
 )
 const services = normalizeServices([
@@ -31,3 +31,11 @@ assert.equal(listener.fragment_buffered_bytes, 32)
 assert.equal(listener.reassembled_datagrams, 3)
 assert.equal(listener.fragment_error_count, 1)
 console.info('抓包适配器验证通过：IPv4 分片缓存、重组和错误计数完整传递。')
+const offline = normalizePcapResult({ runtime: 'vsomeip', link_type: 113, reassembled_datagrams: 4, fragment_error_count: 2 })
+assert.equal(offline.runtime, 'vsomeip')
+assert.equal(offline.link_type, 113)
+assert.equal(offline.reassembled_datagrams, 4)
+assert.equal(offline.fragment_error_count, 2)
+assert.equal(normalizePcapResult({ source_name: 'demo.pcap' }).runtime, null, '演示和旧接口不得推断为原生执行')
+assert.equal(normalizePcapResult({ runtime: 'unknown' }).runtime, null)
+console.info('离线适配器验证通过：真实原生来源与分片统计完整传递，演示不伪标。')

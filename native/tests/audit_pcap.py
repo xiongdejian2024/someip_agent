@@ -25,6 +25,7 @@ def audit(path: Path) -> dict:
     arxml_packets: Counter[tuple[str, str, int, int, str]] = Counter()
     wti_packets: Counter[tuple[str, int, int, int, str]] = Counter()
     recovery_packets: Counter[tuple[str, str, int, int, str]] = Counter()
+    service_packets: Counter[tuple[str, str, str, int, int, int, str]] = Counter()
     fragment_packets: dict[tuple[int, int], list[tuple[int, bool, bytes]]] = {}
     fragment_times: dict[tuple[int, int], list[float]] = {}
     fragment_headers: dict[tuple[int, int], list[tuple[int, bytes]]] = {}
@@ -50,7 +51,10 @@ def audit(path: Path) -> dict:
                         network.p == 17
                         and (0x7711 <= network.id <= 0x7717 or network.id == 0x77E0)
                     )
-                    or (network.p == 6 and 0x7721 <= network.id <= 0x7727)
+                    or (
+                        network.p == 6
+                        and (0x7721 <= network.id <= 0x7727 or network.id == 0x7730)
+                    )
                 )
             ):
                 fragment_packets.setdefault((network.p, network.id), []).append(
@@ -123,6 +127,47 @@ def audit(path: Path) -> dict:
             try:
                 for message in decode_many(body):
                     header = message.header
+                    service_port = next(
+                        (
+                            port
+                            for port in (30520, 30521, 30522, 30523)
+                            if port in (transport.sport, transport.dport)
+                        ),
+                        None,
+                    )
+                    if (
+                        service_port is not None
+                        and header.service_id == 0x1234
+                        and header.interface_version == 1
+                        and header.return_code == 0
+                        and header.message_type in {0, 0x80, 2}
+                    ):
+                        # 方法由真实 ClientID 与方向共同定角色；事件由生产者方向定角色。
+                        requester = src if header.message_type == 0 else dst
+                        local_client = (
+                            src == "10.77.0.2"
+                            if header.message_type == 2
+                            else header.client_id == 0x6631 and requester == "10.77.0.1"
+                        )
+                        local_server = (
+                            src == "10.77.0.1"
+                            if header.message_type == 2
+                            else header.client_id == 0x6632 and requester == "10.77.0.2"
+                        )
+                        if local_client or local_server:
+                            service_packets[
+                                (
+                                    name,
+                                    "client" if local_client else "server",
+                                    "little"
+                                    if service_port in {30522, 30523}
+                                    else "big",
+                                    service_port,
+                                    header.method_id,
+                                    header.message_type,
+                                    message.payload.hex(),
+                                )
+                            ] += 1
                     if (
                         header.service_id == 0x1234
                         and header.client_id == 0x5522
@@ -320,6 +365,52 @@ def audit(path: Path) -> dict:
                     "observed_segments": count,
                 }
             )
+    service_checks = []
+    for transport, port, byte_order in (
+        ("udp", 30520, "big"),
+        ("tcp", 30521, "big"),
+        ("udp", 30522, "little"),
+        ("tcp", 30523, "little"),
+    ):
+        for role in ("client", "server"):
+            for method, kind, payload in (
+                (1, 0, "0180" if byte_order == "big" else "8001"),
+                (1, 0x80, "01"),
+                (0x0102, 0, "07"),
+                (0x0102, 0x80, "07"),
+                (0x0101, 0, ""),
+                (0x0101, 0x80, "07"),
+                (0x8001, 2, "41c40000" if byte_order == "big" else "0000c441"),
+            ):
+                count = service_packets[
+                    (transport, role, byte_order, port, method, kind, payload)
+                ]
+                if not count:
+                    raise AssertionError(
+                        f"抓包缺少服务页面 API 黄金报文: {transport} {role} {byte_order} {method:#x} {kind:#x} {payload}"
+                    )
+                client_host = "10.77.0.1" if role == "client" else "10.77.0.2"
+                server_host = "10.77.0.2" if role == "client" else "10.77.0.1"
+                service_checks.append(
+                    {
+                        "transport": transport,
+                        "local_role": role,
+                        "byte_order": byte_order,
+                        "service_port": port,
+                        "service_id": 0x1234,
+                        "method_id": method,
+                        "message_type": kind,
+                        "payload_hex": payload,
+                        "source_host": client_host if kind == 0 else server_host,
+                        "destination_host": server_host if kind == 0 else client_host,
+                        **(
+                            {"client_id": 0x6631 if role == "client" else 0x6632}
+                            if kind != 2
+                            else {}
+                        ),
+                        "observed_segments": count,
+                    }
+                )
     recovery_checks = []
     for transport in ("udp", "tcp"):
         for owner in ("server", "client"):
@@ -456,6 +547,25 @@ def audit(path: Path) -> dict:
                     "expected_outcome": outcome,
                 }
             )
+    syn = fragment_packets.get((6, 0x7730), [])
+    if [piece[0] for piece in syn] != [0, 24]:
+        raise AssertionError("抓包缺少真实分片 TCP SYN 数据")
+    syn_segment = dpkt.tcp.TCP(syn[0][2] + syn[1][2])
+    if (
+        syn_segment.flags != dpkt.tcp.TH_SYN
+        or syn_segment.sport != 41015
+        or syn_segment.data.hex() != "456780030000000c001100170101020041280000"
+    ):
+        raise AssertionError("真实分片 SYN 的标志或人工黄金字节错误")
+    fragment_checks.append(
+        {
+            "transport": "tcp",
+            "profile": "syn_payload",
+            "ip_id": 0x7730,
+            "captured_fragments": 2,
+            "expected_outcome": "reassembled",
+        }
+    )
     idle = fragment_packets.get((17, 0x77E0), [])
     times = fragment_times.get((17, 0x77E0), [])
     if (
@@ -489,6 +599,7 @@ def audit(path: Path) -> dict:
         "arxml_catalog_packets": arxml_checks,
         "sat_wti_packets": wti_checks,
         "sat_recovery_packets": recovery_checks,
+        "service_api_packets": service_checks,
         "ipv4_fragment_packets": fragment_checks,
         "incomplete_segments": incomplete_segments,
         "scope": "完整可解析段及确定 IPv4 分片向量验证；不替代通用 IP/TCP 重组，也不是吞吐/丢包基准",

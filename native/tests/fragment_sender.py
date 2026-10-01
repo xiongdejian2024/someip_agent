@@ -23,10 +23,15 @@ def main():
     parser = argparse.ArgumentParser(description="IPv4 分片虚拟网验收发送器")
     parser.add_argument("transport", choices=["udp", "tcp"])
     parser.add_argument(
+        "--syn-payload", action="store_true", help="实际发送携带数据的 TCP SYN"
+    )
+    parser.add_argument(
         "--id", type=lambda value: int(value, 0), help="复用已过期数据报的 IP 标识"
     )
     parser.add_argument("profile", choices=PROFILES)
     args = parser.parse_args()
+    if args.syn_payload and args.transport != "tcp":
+        parser.error("SYN 数据验收仅适用于 TCP")
     source, destination = socket.inet_aton("10.77.0.2"), socket.inet_aton("10.77.0.1")
     if args.transport == "udp":
         transport = dpkt.udp.UDP(sport=41014, dport=30614, data=GOLDEN)
@@ -34,11 +39,13 @@ def main():
         protocol, split = 17, 16
     else:
         transport = dpkt.tcp.TCP(
-            sport=41014,
+            sport=41015 if args.syn_payload else 41014,
             dport=30614,
             seq=101,
             ack=701,
-            flags=dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+            flags=dpkt.tcp.TH_SYN
+            if args.syn_payload
+            else dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
             data=GOLDEN,
         )
         protocol, split = 6, 24

@@ -1,0 +1,16 @@
+.service-runtime-panel { padding: 22px; }
+.service-runtime-panel > .muted { line-height: 1.65; margin: 0 0 16px; }
+.service-runtime-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.service-runtime-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.service-runtime-panel input, .service-runtime-panel select, .service-runtime-panel textarea { padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); min-width: 120px; }
+.service-runtime-panel textarea { resize: vertical; width: 100%; font-family: ui-monospace, monospace; margin-bottom: 10px; }
+.service-runtime-sessions { display: grid; gap: 10px; margin-top: 16px; }
+.service-runtime-sessions article { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; }
+.service-runtime-sessions small { width: 100%; overflow-wrap: anywhere; color: var(--muted); }
+.service-runtime-commands { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px; display: grid; gap: 12px; }
+.service-runtime-request { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.service-runtime-request code { overflow-wrap: anywhere; }
+.service-runtime-panel label.service-runtime-checkbox { flex-direction: row; align-items: center; padding: 10px 0; }
+.service-runtime-panel .service-runtime-checkbox input { min-width: auto; margin: 0; }
+.service-runtime-results { display: grid; gap: 8px; margin-top: 16px; overflow-wrap: anywhere; }
+.service-runtime-results p { margin: 4px 0; color: var(--muted); font-size: 12px; }

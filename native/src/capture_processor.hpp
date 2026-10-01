@@ -24,6 +24,8 @@ class CaptureProcessor {
 public:
     CaptureProcessor(std::function<void(const Json &)>, std::function<void(const std::exception &)>);
     void feed(const uint8_t *, size_t, int64_t);
+    void feed(Tins::PDU &, int64_t, std::optional<std::chrono::steady_clock::time_point> = std::nullopt);
+    void finish();
     size_t active_streams() const { return flows_.size(); }
     void maintenance() { fragments_.expire(); }
     size_t active_fragment_datagrams() const { return fragments_.pending(); }

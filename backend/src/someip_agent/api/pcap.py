@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import PcapImportResult
 from someip_agent.pcap.importer import PcapImporter, PcapImportError
+from someip_agent.soa.operator import NativeRuntimeError
 from someip_agent.state import ApplicationState
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,9 @@ async def import_pcap(
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "抓包文件超过大小限制")
     source_name = file.filename or "capture.pcap"
     try:
-        result, messages = await asyncio.to_thread(PcapImporter().parse, content, source_name)
+        result, messages = await asyncio.to_thread(
+            PcapImporter(state.settings).parse, content, source_name
+        )
         await state.monitor.publish_many(state.enrich_message(message) for message in messages)
         state.audit.add(
             action="pcap.import",
@@ -42,3 +45,12 @@ async def import_pcap(
             detail={"error": f"{type(exc).__name__}: {exc}"},
         )
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    except NativeRuntimeError as exc:
+        logger.exception("原生 PCAP 运行时不可用", extra={"operation": "pcap.import.native"})
+        state.audit.add(
+            action="pcap.import",
+            target=source_name,
+            success=False,
+            detail={"error": f"{type(exc).__name__}: {exc}"},
+        )
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc

@@ -95,6 +95,10 @@ interface RawNetworkListener {
 }
 
 export interface RawPcapImportResult {
+  runtime?: string
+  link_type?: number | null
+  reassembled_datagrams?: number
+  fragment_error_count?: number
   source_name?: string
   packet_count?: number
   captured_bytes?: number
@@ -261,6 +265,10 @@ export function normalizeNetworkListener(raw: RawNetworkListener, index = 0): Ne
 
 export function normalizePcapResult(raw: RawPcapImportResult): PcapImportResult {
   return {
+    runtime: raw.runtime === 'vsomeip' ? 'vsomeip' : null,
+    link_type: raw.link_type ?? null,
+    reassembled_datagrams: raw.reassembled_datagrams ?? 0,
+    fragment_error_count: raw.fragment_error_count ?? 0,
     file_name: raw.source_name ?? 'capture.pcap',
     packet_count: raw.packet_count ?? 0,
     captured_bytes: raw.captured_bytes ?? 0,

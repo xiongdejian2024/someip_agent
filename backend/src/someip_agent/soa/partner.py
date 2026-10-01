@@ -22,7 +22,7 @@ from .info import PartnerStartConfig as PartnerStartConfig
 from .ipc import member_messages
 from .naming import PartnerRegistry, member_key, members_config
 from .observations import EventObserver, cache_message
-from .operator import NativeRuntimeError, SOAOperator
+from .operator import NativeOperationError, NativeRuntimeError, SOAOperator
 from .supervision import NativeSupervisor
 from .timing import MethodTimingAudit
 from .wti import WTIAssertions
@@ -462,6 +462,39 @@ class S2sBaseClass(WTIAssertions):
         )
         self._send(partner_key, {"action": "event", "function": function, "args": json.dumps(args)})
 
+    def submit_member_command(
+        self, partner_key: str, command: dict[str, Any], timeout: float = 5
+    ) -> None:
+        """扩展回执接口：原生完成编码/提交后返回；不冒充远端接收或线上抓包。"""
+        if not math.isfinite(timeout) or not 0 < timeout <= 30:
+            raise ValueError("本地提交回执超时必须为 0 至 30 秒内有限正数")
+        if command.get("action") not in {"event", "response", "request"}:
+            raise ValueError("不支持的成员提交动作")
+        info = self.partner_infos[partner_key]
+        correlation = str(uuid4())
+        waiter: queue.Queue[dict[str, Any]] = queue.Queue()
+        with info.waiter_lock:
+            info.response_waiters[correlation] = waiter
+        try:
+            self._send(partner_key, {**command, "acknowledge": True, "correlation_id": correlation})
+            try:
+                response = waiter.get(timeout=timeout)
+            except queue.Empty as exc:
+                logger.exception("原生成员提交回执超时", extra={"operation": "soa.submit.wait"})
+                raise TimeoutError("未收到原生成员提交回执") from exc
+            if response["failtype"] != "FAILTYPE_SUCCESS":
+                if response["failtype"] == "FAILTYPE_BAD_PARAM":
+                    raise NativeOperationError(response.get("error", response["failtype"]))
+                raise NativeRuntimeError(response.get("error", response["failtype"]))
+        except Exception:
+            logger.exception(
+                "原生成员提交失败", extra={"operation": "soa.submit", "member": partner_key}
+            )
+            raise
+        finally:
+            with info.waiter_lock:
+                info.response_waiters.pop(correlation, None)
+
     @staticmethod
     def _event_name(name: str) -> str:
         return (
@@ -619,6 +652,8 @@ class S2sBaseClass(WTIAssertions):
         if response["failtype"] != "FAILTYPE_SUCCESS":
             if response["failtype"] == "FAILTYPE_TIMEOUT":
                 raise TimeoutError(f"{method_name} 请求超时")
+            if response["failtype"] == "FAILTYPE_BAD_PARAM":
+                raise NativeOperationError(response.get("error", response["failtype"]))
             raise NativeRuntimeError(response.get("error", response["failtype"]))
         return json.loads(response["result"])
 

@@ -23,6 +23,15 @@ void IPv4Fragments::expire(Clock::time_point now) {
         }
     }
 }
+void IPv4Fragments::finish() {
+    size_t incomplete=0;
+    for(const auto &[key,datagram]:datagrams_)if(!datagram->rejected)++incomplete;
+    bytes_=0;datagrams_.clear();
+    while(incomplete--) {
+        ++errors_;
+        error_(std::runtime_error("PCAP 文件结束，IPv4 分片不完整"));
+    }
+}
 FragmentResult IPv4Fragments::process(Tins::PDU &packet,Clock::time_point now) {
     expire(now);
     auto ip=packet.find_pdu<Tins::IP>();

@@ -3,6 +3,7 @@ import { api, describeApiError } from '../api/client'
 import { logError, logInfo } from '../api/logger'
 import { FileDropzone } from '../components/FileDropzone'
 import { Icon } from '../components/Icon'
+import { ServiceRuntimePanel } from '../components/ServiceRuntimePanel'
 import { protocolId, useAgentScope } from '../agent/workspace'
 import type { ServiceDefinition } from '../types'
 
@@ -87,6 +88,8 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
       </div>
 
       {notice && <div className={`inline-notice ${notice.tone}`}><Icon name={notice.tone === 'success' ? 'check' : 'info'} />{notice.text}<button onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
+
+      <ServiceRuntimePanel selected={selected} demo={source === 'demo'} />
 
       {showImporter && (
         <section className="panel import-panel">

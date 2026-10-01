@@ -37,6 +37,7 @@ public:
     explicit IPv4Fragments(std::function<void(const std::exception &)> error) : error_(std::move(error)) {}
     FragmentResult process(Tins::PDU &, Clock::time_point now = Clock::now());
     void expire(Clock::time_point now = Clock::now());
+    void finish();
     size_t pending() const { return datagrams_.size(); }
     size_t buffered_bytes() const { return bytes_; }
     uint64_t reassembled_count() const { return reassembled_; }

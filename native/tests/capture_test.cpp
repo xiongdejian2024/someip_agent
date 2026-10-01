@@ -231,6 +231,19 @@ void tcp_partial_and_truncated_close() {
             "半帧关闭未报告截断或未释放缓存");
     require(truncated.messages.empty(), "半帧被伪装为完整报文");
 }
+void tcp_syn_payload_and_retransmission(bool ipv6,uint32_t initial) {
+    fragment_stage("验证 SYN 数据的首字节、重复发送及后续段衔接");
+    Fixture f;
+    f.tcp(initial,0,TCP::SYN,part(0,8),false,ipv6);
+    f.tcp(initial,0,TCP::SYN,part(0,8),false,ipv6);
+    require(f.messages.empty(),"SYN 中的半帧被提前交付");
+    f.tcp(initial+9,701,TCP::ACK|TCP::PSH,part(8,20),false,ipv6);
+    f.check(1);
+    f.tcp(initial+1,701,TCP::ACK|TCP::PSH,golden,false,ipv6);f.check(1);
+    f.tcp(initial+21,701,TCP::ACK|TCP::PSH,golden,false,ipv6);f.check(2);
+    require(f.errors.empty(),"合法 SYN 数据首字节丢失或重传被误报异常");
+    f.processor.finish();require(f.errors.empty(),"完整 SYN 数据在文件结束时被误报半帧");
+}
 }
 int main() {
     try {
@@ -239,6 +252,8 @@ int main() {
         tcp_reorder_retransmit_wrap(true, 0xfffffff8);
         isolated_bad_stream_and_limit();
         tcp_partial_and_truncated_close();
+        tcp_syn_payload_and_retransmission(false,100);
+        tcp_syn_payload_and_retransmission(true,0xfffffff8);
         ipv4_fragment_udp_tcp_and_duplicate();
         ipv4_fragment_keys_and_overlap_isolation();
         ipv4_fragment_timeout_and_resource_limits();

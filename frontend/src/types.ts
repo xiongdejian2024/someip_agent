@@ -80,6 +80,70 @@ export interface ServiceDefinition {
   fields: ServiceField[]
 }
 
+export interface NativeServiceRequest {
+  application_name: string
+  application_id: number
+  members: Record<string, {
+    service: string
+    deployment_path?: string
+    role: 'client' | 'server'
+    transport: 'internal' | 'udp' | 'tcp'
+    instance_id: number
+    byte_order: 'big' | 'little'
+    peer_host?: string
+    port?: number
+  }>
+}
+
+export interface NativeServiceSession {
+  id: string
+  runtime: 'vsomeip'
+  model_id: string
+  source_sha256: string | null
+  application_name: string
+  application_id: number
+  started_at: string
+  active: boolean
+  running: boolean
+  pid: number | null
+  last_error: string | null
+  members: Array<{
+    key: string
+    role: 'client' | 'server'
+    service_path: string
+    deployment_path: string | null
+    service_id: number
+    instance_id: number
+    transport: 'internal' | 'udp' | 'tcp'
+    state: string
+    connected: boolean
+    methods: string[]
+    no_return_methods: string[]
+    events: string[]
+    last_error: string | null
+  }>
+}
+
+export interface NativeServiceCommand {
+  member: string
+  function: string
+  args: unknown
+  timeout?: number
+  request_id?: number
+  return_code?: number
+  is_error?: boolean
+}
+
+export interface NativeServiceRequestMessage {
+  member: string
+  function: string
+  request_id: number
+  args: unknown
+  payload_hex: string
+  received_at: number
+  reply_allowed: boolean
+}
+
 export interface MonitorMessage {
   id: string
   timestamp: string
@@ -205,6 +269,10 @@ export interface PcapEndpointStat {
 }
 
 export interface PcapImportResult {
+  runtime: 'vsomeip' | null
+  link_type: number | null
+  reassembled_datagrams: number
+  fragment_error_count: number
   file_name: string
   packet_count: number
   captured_bytes: number

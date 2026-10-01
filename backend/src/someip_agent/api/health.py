@@ -19,5 +19,6 @@ async def health(state: ApplicationState = Depends(get_state)) -> dict[str, obje
         "monitor_count": monitor["total"],
         "active_simulations": sum(1 for item in state.simulator.list() if item.running),
         "active_listeners": sum(1 for item in state.network.list() if item.running),
+        "active_service_sessions": sum(1 for item in state.services.statuses() if item.running),
         "llm_configured": state.llm_configuration.view().api_key_configured,
     }

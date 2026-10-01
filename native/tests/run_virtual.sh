@@ -26,7 +26,7 @@ capture_pid=$!
 trap 'kill -INT "$capture_pid" 2>/dev/null || true; wait "$capture_pid" 2>/dev/null || true' EXIT
 export SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner
 python -m pytest native/tests/test_virtual.py native/tests/test_arxml_virtual.py native/tests/test_sat_wti_virtual.py -v --junitxml=build/virtual-evidence/junit.xml
-ip netns exec soa-server python -m pytest native/tests/test_backend_virtual.py native/tests/test_network_virtual.py native/tests/test_capture_virtual.py native/tests/test_recovery_virtual.py -v \
+ip netns exec soa-server python -m pytest native/tests/test_backend_virtual.py native/tests/test_network_virtual.py native/tests/test_capture_virtual.py native/tests/test_recovery_virtual.py native/tests/test_services_virtual.py -v \
   --basetemp=build/virtual-evidence/backend-pytest \
   --junitxml=build/virtual-evidence/backend-junit.xml
 kill -INT "$capture_pid"
@@ -34,3 +34,6 @@ wait "$capture_pid" || true
 trap - EXIT
 python native/tests/audit_pcap.py build/virtual-evidence/soa.pcap \
   --output build/virtual-evidence/pcap-audit.json
+python native/tests/audit_offline.py build/virtual-evidence/soa.pcap \
+  --reference build/virtual-evidence/pcap-audit.json \
+  --output build/virtual-evidence/offline-audit.json

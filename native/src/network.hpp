@@ -6,12 +6,14 @@
 namespace agent {
 class NetworkListener;
 class PassiveCapture;
+class OfflineImport;
 
 // 端口监听不是混杂模式网卡抓包；此处不初始化服务或抢占 vsomeip 的路由端点。
 class NetworkRuntime {
     boost::asio::io_context &io_;
     std::map<std::string, std::shared_ptr<NetworkListener>> listeners_;
     std::map<std::string, std::shared_ptr<PassiveCapture>> captures_;
+    std::map<Connection *,std::shared_ptr<OfflineImport>> imports_;
     std::vector<std::weak_ptr<Connection>> monitors_;
     void emit(const Json &);
 public:

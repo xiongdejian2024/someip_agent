@@ -11,6 +11,7 @@ from someip_agent.domain.models import ArxmlModel, MessageType, MonitorMessage, 
 from someip_agent.protocol.codec import SignalCodec, SignalCodecError
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.network import NetworkCaptureManager
+from someip_agent.runtime.services import ServiceSessionManager
 from someip_agent.runtime.simulator import SimulationManager
 from someip_agent.storage.arxml_repository import ArxmlModelRepository
 from someip_agent.storage.repository import AuditRepository
@@ -26,6 +27,7 @@ class ApplicationState:
         self.monitor = MonitorStore(settings.monitor_capacity)
         self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
         self.simulator = SimulationManager(self.monitor, settings)
+        self.services = ServiceSessionManager(settings, self.monitor)
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")
         self.llm_configuration = LlmConfigurationService(settings)
@@ -98,6 +100,7 @@ class ApplicationState:
         return message
 
     async def shutdown(self) -> None:
+        await self.services.shutdown()
         await self.network.shutdown()
         await self.simulator.shutdown()
 

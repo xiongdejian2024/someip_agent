@@ -10,7 +10,9 @@
 - `native/src/capture.cpp` 使用 libpcap 读取指定 Ethernet 网卡，`capture_processor.cpp` 复用
   libtins 的双向 TCP 与 IPv4 分片重组器，协议头复用相同 vsomeip 解码器。
   Python 不读取网卡或重组 TCP/IP。
-- 完整 ARXML 映射、SAT 辅助接口、IPv6 分片、完整 IPv4 选项和离线 PCAP 路径仍有未完成项，
+- 离线 PCAP/PCAPNG 由 libpcap 读取，复用相同原生 TCP/IPv4 重组与 vsomeip 解码；
+  Python 只负责上传文件、控制 socket、展示聚合及 SD/信号分析，不保留 Python 底层解析回退。
+- 完整 ARXML 映射、SAT 辅助接口、IPv6 分片及完整 IPv4 选项仍有未完成项，
   不能宣称整个底层已替换。
 
 vsomeip 上游固定提交：`c4e0db329da9b63f511f3c2456c040582daf9305`。
@@ -22,6 +24,7 @@ Dockerfile 检查源码提交，避免相同标签移动后悄悄更换核心。
 make native-image
 make native-test
 make native-regression
+make native-installed-test
 ```
 
 `native-regression` 先完成编译再运行后端，禁止在同一输出目录同时重链接二进制和启动测试。
@@ -32,6 +35,9 @@ make native-regression
 `--privileged` 仅用于容器内 netns、veth 和 tcpdump；不要把它改成 host 网络运行在车辆网络上。
 宿主机本地无可运行原生二进制时，测试会明确跳过原生集成；`native-regression`
 设置 `SOMEIP_AGENT_REQUIRE_NATIVE_TESTS=1`，缺少二进制必须失败，不能靠跳过验收。
+`native-installed-test` 使用先前构建的镜像，仅挂载测试与证据目录，不设置 PYTHONPATH；
+先验证各产品模块均来自 site-packages，再执行相同虚拟网和全部后端回归。
+安装包证据独立保存在 `build/installed-evidence/`，不能与源码挂载验收混为一谈。
 
 输出证据在 `build/virtual-evidence/`：JUnit、原生日志、接口信息、PCAP 与黄金报文审计 JSON。
 抓包审计核对 UDP/TCP 请求、响应、字段通知、周期浮点事件，以及 Offer/StopOffer/Subscribe/Ack。
@@ -125,10 +131,46 @@ libtins 的超时清理随新数据包处理触发，不承诺无流量时精确
 在本轮实际解析失败。[上游解析源码](https://raw.githubusercontent.com/mfontanini/libtins/v4.0/src/ip.cpp)
 中的检查与此一致，不能把它称为所有选项都支持，也不能将原始报文静默改写成其他选项。
 当前首片头长度冲突测试用四个 NOP 填满 24 字节头，分别验证合法选项重组和冲突隔离。
-后续仍需解决 EOL 补零及完整选项矩阵；IPv6 分片和离线 PCAP 原生迁移也未完成。
+后续仍需解决 EOL 补零及完整选项矩阵；IPv6 分片也未完成，离线路径遵守相同边界。
 
 监控页面可选择捕获模式、网卡、BPF 和混杂模式，并显示丢包统计与异常。Windows 构建要求
 含真实捕获后端的 libpcap/Npcap SDK 配置；默认 null 后端不能冒充可用网卡抓包。详见 Windows 打包说明。
+
+## 原生离线 PCAP/PCAPNG
+
+`POST /api/v1/pcap/import` 将原始上传字节写入独立临时目录，用 `SOAOperator` 启动
+`soa_partner run --network`，通过同一长度帧 socket 发送 `pcap_import` 文件路径。
+原生进程不创建车辆网络端点，也不重放文件。读取、重组和 SOME/IP 头解码由 C++ 完成。
+支持 libpcap 可读取的 PCAP/PCAPNG，以及 Ethernet、RAW IP、Linux SLL、明确 IPv4/IPv6
+链路类型；不代表任意链路或 PCAPNG 混合链路均支持。IPv6 分片和完整 IPv4 选项仍受上述门禁限制。
+
+每个原始帧返回连续 `pcap_frame`，结束返回 `pcap_done`；Python 校验帧号、消息序号、原始帧数和
+捕获字节数，结束记录完整之前不提交到监控。文件读取中断、消息/Payload 配额超限整份拒绝。
+二进制缺失或通道断开返回 503，不回退到 Python 解码；非法文件返回 422。
+原生每进程只允许一份离线任务，按有限批量异步读取；最多一百万原始帧。
+API 默认上传上限 256MiB、解析时限 120 秒、十万解码消息和 64MiB 累计 Payload。
+这些是资源门禁，不是已验证的处理速率。缓冲对象及 JSON 副本不包含在 Payload 额度内。
+
+分片过期用文件时间推进，而不是导入进程运行时长；乱序时间取已见最大文件时间，避免时钟倒退。
+文件结束显式报告残留 TCP 半帧和 IPv4 残片，不冒充正常 FIN 或已经经过 30 秒。
+`errors` 最多保留前 100 条展示警告，原生日志保留各异常堆栈；该数组长度不是错误总数。
+畸形报文与未知非 SOME/IP 流量可以产生警告并继续，文件读取失败不被降格成警告。
+
+消息标记 `observation=pcap_import`、`timestamp_source=pcap_file`、`runtime=vsomeip`、
+`wire_verified=false`；保留原始纳秒整数，展示时间截到微秒。
+消息时间对应完成报文的原始帧，不是第一段到达时间、导入时间或硬件网卡时延。
+分片与 TCP 等待帧计入原始帧/传输统计，SOME/IP 承载帧计数以输出完整消息的帧为准。
+
+固定 libtins 4.0 对 SYN 数据的序号处理存在首字节丢失问题。适配器只在库输入副本内
+先交付无数据 SYN，再交付序号加一的数据；不修改原始抓包或增加原始帧计数。
+TCP 重组仍由成熟库执行，不另写重组算法。原生及产品集成测试覆盖 IPv4/IPv6、拆段、
+重复重传和序号回绕；真实 veth 另验证分片 SYN 数据。
+
+虚拟网抓包经过独立黄金字节审计后，由 `native/tests/audit_offline.py` 调用产品原生导入器，
+核对 SD、SAT、ARXML/WTI、恢复请求/响应、双向 IPv4/IPv6 以及分片用例。
+各实时捕获用例拥有独立上下文，因此相同四元组/序号的分片 TCP 用例也独立导入核验；
+整份文件不会把相同序号重传伪计成新消息。证据为 `offline-audit.json`，不替代性能/长稳验收。
+页面和导出报告保留真实解码来源、链路类型与分片统计；演示样例不推断成原生执行。
 
 ## ARXML 到原生目录与字典初始化
 
@@ -186,13 +228,60 @@ with S2sBaseClass.from_arxml(
 输出目录必须不存在，避免覆盖运行中的配置；目录保留 `catalog.json`、`vsomeip.json`、
 `model-binding.json` 和原生日志。缺少二进制不会回退到 Python 发包。
 在线 UDP/TCP 必须明确 `peer_host`、服务 `port`、本机 `native_unicast`、发送开关和白名单，
-并使用独立的应用身份；授权规则复用默认仿真的主机/SD 校验。完整页面服务生命周期/API
-以及自动身份分配仍未交付，配置导出接口不代替这些验收。
+并使用独立的应用身份；授权规则复用默认仿真的主机/SD 校验。页面服务生命周期/API
+已接通下述真实原生链路；自动身份分配仍未交付，配置导出本身不代替运行验收。
 
 `native/tests/test_arxml_virtual.py` 在两个 netns 生成不同原生配置，通过已有 SAT 字典接口初始化。
 UDP/TCP、显式大端/小端均实际验证基础方法、事件和字段三种访问，并校验编号客户端的键名及
 响应路由。PCAP 单独核对 32 个请求/响应/通知黄金向量。
 此证明仅覆盖所列基础类型和测试模型，不证明任意 OEM ARXML 或性能目标。
+
+## 服务页面与会话 API
+
+服务模型页选择真实部署、实例、角色、明确标量字节序及独立应用 ID 后，可初始化原生会话。
+会话复用 `S2sBaseClass` 的成员字典、`SOAOperator` 二进制与 socket，不使用 Python 发包替身。
+初始化成功表示进程与成员通道可用；client 的 `OFFLINE` 不等于业务服务在线，操作仍需等服务可用。
+当前页面会话不自动重启；原生进程或通道故障会报告，用户停止释放后再初始化。
+
+API 前缀 `/api/v1/services/sessions`：
+
+| 方法与相对路径 | 功能 |
+|---|---|
+| GET / | 活动会话和有限停止历史，包含 PID、成员状态、模型 ID 与源文件 SHA-256 |
+| POST / | 接收与原生目录生成相同的 `NativeCatalogRequest` 成员字典并初始化 |
+| POST /{id}/stop | 幂等停止自有进程与通道，释放应用身份 |
+| POST /{id}/call | client 方法调用，等待真实响应；无响应方法只等待本地提交回执 |
+| POST /{id}/notify | server 事件编码与提交 |
+| GET /{id}/requests | 服务端收到的请求、原始 Payload 和 request_id，不自动回显业务响应 |
+| POST /{id}/respond | 按成员、接口和真实待处理 request_id 人工响应，重复响应拒绝 |
+
+动作请求使用 `member`、`function`、`args`、`timeout`（有限正数，最多 30 秒）；
+响应另带 `request_id`、可选 `return_code` 和 `is_error`。页面可等待 client 调用期间切换
+server 人工响应；最近八项结果单独保留，不因另一操作的提交提示覆盖真实方法结果。
+
+内部模式的每个会话使用独立 routing/network，不同会话互不通信；页面可勾选在同一会话
+加入相反角色的测试对端，依然需要真实方法请求与人工业务响应，不启用自动 echo。
+内部观测标记 `transport=internal`、`direction=sim`。在线 UDP/TCP 使用实际对端与发送授权。
+最多 16 个活动会话和 64 条停止历史；`active` 表示身份仍被占用，即使进程故障也可停止释放。
+当前默认发生器的 `0x1101` 保留，活动应用名称和 ID 重复返回 409；不自动猜测空闲 ID。
+
+普通方法结果为 `responded/vsomeip_response`。事件、人工响应和无响应方法返回
+`submitted/native_submission`，仅证明原生完成编码并调用协议栈，不证明对端接收或物理线上存在。
+这些 API 结果与 Trace 均保持 `wire_verified=false`；Trace 展示时间来自后端接收，另保留
+原生单调时间。对端接收和线上黄金字节由独立 veth 测试及 PCAP 审计提供证据。
+旧 SAT 发送接口不强制请求提交回执，保留既有调用语义。
+
+`native/tests/test_services_virtual.py` 用页面相同 API 与另一虚拟网卡的 SAT 伙伴互通。
+两角色、UDP/TCP、明确大小端共八项，覆盖方法、字段 getter/setter 和事件；独立审计新增
+56 组端口/角色/方向黄金字节，再交原生离线导入器复核，不仅验证页面 HTTP 返回 200。
+这不代表任意 OEM 序列化、线速或长稳已验收。
+
+安装包证据可独立指定目录，避免覆盖前一阶段：
+
+```bash
+make native-installed-test NATIVE_IMAGE=someip-agent-vsomeip:services-test \
+  NATIVE_INSTALLED_EVIDENCE=build/packaged-services-evidence
+```
 
 ## Python 调用示例
 

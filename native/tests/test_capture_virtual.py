@@ -334,6 +334,39 @@ async def test_ipv4_fragments_cross_veth_reassemble_or_isolate(
 
 
 @pytest.mark.asyncio
+async def test_fragmented_tcp_syn_payload_crosses_real_veth(tmp_path):
+    manager = NetworkCaptureManager(
+        MonitorStore(),
+        settings=Settings(
+            _env_file=None,
+            data_dir=tmp_path,
+            native_binary=os.environ["SOMEIP_AGENT_NATIVE_BINARY"],
+        ),
+    )
+    try:
+        await manager.start(
+            ListenerConfig(
+                mode="pcap",
+                capture_interface="eth0",
+                capture_filter="ip proto 6 and host 10.77.0.2",
+            )
+        )
+        await send_fragments("tcp", "ordered", "--id", "0x7730", "--syn-payload")
+        deadline = time.monotonic() + 3
+        while manager.list()[0].received_count == 0 and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        messages = await manager._monitor.list()
+        assert len(messages) == 1 and messages[0].payload_hex == "41280000"
+        assert messages[0].source == "10.77.0.2:41015"
+        assert messages[0].metadata["ip_reassembled"]
+        assert messages[0].metadata["ip_fragment_count"] == 2
+        assert not messages[0].metadata["tcp_partial"]
+        assert manager.list()[0].fragment_error_count == 0
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_ipv4_missing_fragment_expires_without_new_traffic_and_reuses_id(
     tmp_path,
 ):

@@ -27,12 +27,21 @@ jobs:
         run: make native-test
       - name: 原生后端完整回归
         run: make native-regression
+      - name: 不挂载源码的安装包虚拟网与后端验收
+        run: make native-installed-test
       - name: 保留抓包、日志和测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vsomeip-virtual-evidence
           path: build/virtual-evidence/
+          if-no-files-found: error
+      - name: 保留安装包验收证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsomeip-installed-evidence
+          path: build/installed-evidence/
           if-no-files-found: error
 
   backend-test:
@@ -84,6 +93,9 @@ jobs:
 
       - name: 类型检查
         run: npm --prefix frontend run typecheck
+
+      - name: 服务与抓包来源适配器验收
+        run: node scripts/check_service_adapters.mjs
 
       - name: 构建前端
         run: npm --prefix frontend run build

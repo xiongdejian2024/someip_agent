@@ -36,8 +36,9 @@ FastAPI 应用层 ── 智能体编排 ── OpenAI 兼容网关
 详细设计、安全边界和数据流见[架构文档](docs/architecture.md)。
 
 原生迁移正在进行，不代表整个底层已经验收完成：默认仿真、端口监听和 Ethernet 被动抓包已切换。
-ARXML 基础类型已接通原生目录及 Python 字典初始化；完整序列化映射、服务页面生命周期、
-SAT 辅助 API、IPv6 分片、完整 IPv4 选项、离线 PCAP 原生迁移及 Windows 实机验收仍有门禁。
+ARXML 基础类型已接通原生目录、Python 字典初始化及服务页面启停/调用/人工响应；
+完整序列化映射、SAT 辅助 API、IPv6 分片、完整 IPv4 选项及 Windows 实机验收仍有门禁。
+离线 PCAP 已接入相同原生重组/解码路径，Python 仅聚合展示，不保留纯 Python 解析回退。
 IPv4 分片已接入成熟重组库，但不代表支持所有 IP 流量。当前状态与复现命令见
 [原生运行时](docs/native-runtime.md)和[执行记录](docs/vsomeip-progress.md)。
 
@@ -138,6 +139,7 @@ make ci
 make native-image
 make native-test
 make native-regression
+make native-installed-test
 node scripts/check_monitor_buffer.mjs
 node scripts/check_agent_stream.mjs
 ```

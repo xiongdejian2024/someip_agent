@@ -1,6 +1,8 @@
 # SOME/IP Agent Core
 
-FastAPI 后端，负责 ARXML 建模、SOME/IP/SOME/IP-SD 编解码、PCAP 导入、信号仿真、实时监控、智能体编排和在线升级检查。
+FastAPI 控制面，负责 ARXML 建模、原生进程/socket 管理、PCAP 展示聚合、实时监控、智能体编排和在线升级检查。
+SOME/IP 在线协议、周期生成、网卡捕获及离线 PCAP 重组/解码由 C++/vsomeip 与 libpcap/libtins 承担；
+Python 不保留底层发包或 PCAP 解析回退。完整原生支持矩阵及验收边界见 `docs/native-runtime.md`。
 
 开发启动：
 

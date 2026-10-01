@@ -81,9 +81,13 @@ void CaptureProcessor::data(Stream &stream, bool client) {
     }
 }
 void CaptureProcessor::feed(const uint8_t *bytes, size_t size, int64_t timestamp_ns) {
-    timestamp_ns_ = timestamp_ns;
     Tins::EthernetII ethernet(bytes, size);
-    current_fragments_=fragments_.process(ethernet);
+    feed(ethernet,timestamp_ns);
+}
+void CaptureProcessor::feed(Tins::PDU &ethernet,int64_t timestamp_ns,
+                           std::optional<std::chrono::steady_clock::time_point> file_time) {
+    timestamp_ns_ = timestamp_ns;
+    current_fragments_=file_time ? fragments_.process(ethernet,*file_time) : fragments_.process(ethernet);
     if(current_fragments_.pending)return;
     if (!ethernet.find_pdu<Tins::IP>()) {
         auto ipv6=ethernet.find_pdu<Tins::IPv6>();
@@ -110,8 +114,32 @@ void CaptureProcessor::feed(const uint8_t *bytes, size_t size, int64_t timestamp
         }
     } else if (ethernet.find_pdu<Tins::TCP>()) {
         Tins::Packet packet(ethernet, Tins::Timestamp(std::chrono::microseconds(timestamp_ns / 1000)));
+        auto &tcp=packet.pdu()->rfind_pdu<Tins::TCP>();
+        if((tcp.flags() & Tins::TCP::SYN) && tcp.inner_pdu() && tcp.inner_pdu()->size()) {
+            if(tcp.flags() & (Tins::TCP::RST|Tins::TCP::FIN))
+                throw std::runtime_error("TCP SYN 与 RST/FIN 标志矛盾，拒绝此捕获包");
+            // libtins 4.0 的状态更新消耗 SYN 序号，但数据仍使用原始 seq，会少交付首字节。
+            // 仅在库输入副本内拆成无数据 SYN 和 seq+1 数据；原始抓包字节、帧号、时间不变。
+            auto syn=packet;
+            syn.pdu()->rfind_pdu<Tins::TCP>().inner_pdu(nullptr);
+            follower_.process_packet(syn);
+            tcp.seq(tcp.seq()+1);
+            tcp.flags(uint16_t(tcp.flags()) & ~uint16_t(Tins::TCP::SYN));
+        }
         follower_.process_packet(packet);
         check_budget();
     }
+}
+void CaptureProcessor::finish() {
+    // 文件结束不是正常 TCP FIN；残留半帧与缺片必须显式报告，不能伪装成完整报文。
+    fragments_.finish();
+    for(const auto &[stream,flow]:flows_) {
+        auto client=flow.client.size()+stream->client_flow().total_buffered_bytes();
+        auto server=flow.server.size()+stream->server_flow().total_buffered_bytes();
+        if((client && !flow.client_failed) || (server && !flow.server_failed))
+            error_(std::runtime_error("PCAP 文件结束，TCP 残留不完整 SOME/IP 报文，客户端缓存 "+
+                std::to_string(client)+" 字节，服务端缓存 "+std::to_string(server)+" 字节"));
+    }
+    flows_.clear();
 }
 }

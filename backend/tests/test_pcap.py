@@ -3,6 +3,7 @@ import socket
 
 import dpkt
 
+from someip_agent.config import Settings
 from someip_agent.pcap.importer import PcapImporter
 from someip_agent.protocol.sd import SdEntry, SdPayload
 from someip_agent.protocol.someip import SomeIpMessage
@@ -13,9 +14,7 @@ def _ethernet_ipv4(
     destination: str,
     transport: dpkt.udp.UDP | dpkt.tcp.TCP,
 ) -> bytes:
-    protocol = (
-        dpkt.ip.IP_PROTO_UDP if isinstance(transport, dpkt.udp.UDP) else dpkt.ip.IP_PROTO_TCP
-    )
+    protocol = dpkt.ip.IP_PROTO_UDP if isinstance(transport, dpkt.udp.UDP) else dpkt.ip.IP_PROTO_TCP
     ip = dpkt.ip.IP(
         src=socket.inet_aton(source),
         dst=socket.inet_aton(destination),
@@ -89,8 +88,10 @@ def _pcap_with_mixed_traffic() -> bytes:
     return output.getvalue()
 
 
-def test_imports_someip_sd_from_pcap() -> None:
-    result, messages = PcapImporter().parse(_pcap_with_sd_offer(), "offer.pcap")
+def test_imports_someip_sd_from_pcap(tmp_path, native_runtime) -> None:
+    result, messages = PcapImporter(
+        Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime)
+    ).parse(_pcap_with_sd_offer(), "offer.pcap")
     assert result.packet_count == 1
     assert result.someip_count == 1
     assert result.sd_count == 1
@@ -109,9 +110,11 @@ def test_imports_someip_sd_from_pcap() -> None:
     assert "OfferService" in (messages[0].sd_summary or "")
 
 
-def test_reports_capture_timing_protocols_and_top_endpoints() -> None:
+def test_reports_capture_timing_protocols_and_top_endpoints(tmp_path, native_runtime) -> None:
     content = _pcap_with_mixed_traffic()
-    result, messages = PcapImporter().parse(content, "mixed.pcap")
+    result, messages = PcapImporter(
+        Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime)
+    ).parse(content, "mixed.pcap")
 
     assert result.packet_count == 3
     assert result.captured_bytes > 0

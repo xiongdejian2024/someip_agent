@@ -4,6 +4,10 @@ import type {
   HealthResponse,
   LlmSettings,
   NetworkListenerConfig,
+  NativeServiceRequest,
+  NativeServiceSession,
+  NativeServiceCommand,
+  NativeServiceRequestMessage,
   PcapImportResult,
   SimulationStartRequest,
   SimulationStatus,
@@ -81,6 +85,15 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 export const api = {
   health: () => request<HealthResponse>('/health', {}, 3500),
   services: async () => normalizeServices(await request<RawServiceDefinition[]>('/model/services')),
+  serviceSessions: () => request<NativeServiceSession[]>('/services/sessions'),
+  startServiceSession: (config: NativeServiceRequest) => request<NativeServiceSession>('/services/sessions', {
+    method: 'POST', body: JSON.stringify(config),
+  }, 30_000),
+  stopServiceSession: (id: string) => request<NativeServiceSession>(`/services/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }, 30_000),
+  serviceRequests: (id: string) => request<NativeServiceRequestMessage[]>(`/services/sessions/${encodeURIComponent(id)}/requests`),
+  serviceCommand: (id: string, action: 'call' | 'notify' | 'respond', command: NativeServiceCommand) => request<{
+    status: 'responded' | 'submitted'; result: unknown; observation: 'vsomeip_response' | 'native_submission'; wire_verified: false
+  }>(`/services/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(command) }, 40_000),
   importArxml: async (file: File) => {
     const result = await uploadFile<{ services?: RawServiceDefinition[]; warnings?: string[] }>('/arxml/import', file)
     const services = normalizeServices(result.services ?? [])
