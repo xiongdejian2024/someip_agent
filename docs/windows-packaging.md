@@ -38,6 +38,11 @@ CI 使用 `pwsh` 并在构建前解析所有 Windows `.ps1` 脚本，避免将 U
 代码页。该风险见 [Microsoft PowerShell 字符编码说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding)。
 脚本语法通过不代表 SDK、原生编译、驱动或安装升级已经成功。
 
+原生构建器先由 vcpkg 准备 Boost、JSON 和真实捕获后端的 libpcap，再从固定提交构建
+libtins 4.6 并核验选项补丁与完整源文件哈希，最后构建 vsomeip 和桥接二进制。
+不再使用未固定版本的 vcpkg libtins；详见 [原生依赖来源](native-dependencies.md)。
+已有 libtins 源码缓存只接受干净源码或恰好应用本仓库补丁的版本，不隐式 reset 用户修改。
+
 脚本按顺序执行：
 
 1. 校验四处版本均符合 SemVer 且一致；

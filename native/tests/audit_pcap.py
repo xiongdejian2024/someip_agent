@@ -11,6 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 import dpkt
+from audit_ipv4_options import OptionAudit
 from performance_metrics import kernel_capture_drops
 from someip_agent.protocol.sd import SdPayload
 from someip_agent.protocol.someip import SomeIpDecodeError, decode_many
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def audit(path: Path) -> dict:
+    option_audit = OptionAudit()
     patterns: Counter[tuple[str, int, int, str]] = Counter()
     sd: Counter[str] = Counter()
     listener_packets: Counter[str] = Counter()
@@ -38,6 +40,7 @@ def audit(path: Path) -> dict:
             network = dpkt.ethernet.Ethernet(data).data
             if not isinstance(network, (dpkt.ip.IP, dpkt.ip6.IP6)):
                 continue
+            option_audit.observe(network, data)
             ipv6 = isinstance(network, dpkt.ip6.IP6)
             family = socket.AF_INET6 if ipv6 else socket.AF_INET
             src, dst = (
@@ -644,6 +647,7 @@ def audit(path: Path) -> dict:
         "service_api_packets": service_checks,
         "arxml_composite_packets": composite_golden(composite_packets),
         "ipv4_fragment_packets": fragment_checks,
+        "ipv4_option_packets": option_audit.verify(),
         "incomplete_segments": incomplete_segments,
         "scope": "完整可解析段及确定 IPv4 分片向量验证；不替代通用 IP/TCP 重组，也不是吞吐/丢包基准",
     }

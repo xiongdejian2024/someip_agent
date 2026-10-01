@@ -91,6 +91,7 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(
     result = audit_native(path, checked, tmp_path)
     assert len(result["golden_messages"]) == 932
     assert len(result["fragment_imports"]) == 16
+    assert len(result["ipv4_option_imports"]) == 40
     assert result["statistics"]["packet_count"] == len(frames) + 1
 
 
@@ -137,6 +138,81 @@ def test_complete_packet_cannot_replace_missing_real_fragment(tmp_path, captured
         audit(path)
     with pytest.raises(AssertionError, match="分片审计原始帧数量不一致"):
         audit_native(path, reference, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "change", ["option", "checksum", "payload", "missing", "duplicate", "truncated"]
+)
+def test_ipv4_options_independent_audit_rejects_corrupted_real_copy(
+    tmp_path, captured, change
+):
+    frames, link_type, reference = captured
+    changed = []
+    found = False
+    for timestamp, frame in frames:
+        packet = dpkt.ethernet.Ethernet(frame).data
+        if (
+            not found
+            and isinstance(packet, dpkt.ip.IP)
+            and packet.src == socket.inet_aton("10.77.0.2")
+            and packet.dst == socket.inet_aton("10.77.0.1")
+            and packet.p == 17
+            and packet.id == 0x7912
+        ):
+            found = True
+            if change == "missing":
+                continue
+            if change == "duplicate":
+                changed.append((timestamp, frame))
+            elif change == "truncated":
+                frame = frame[:-1]
+            elif change == "checksum":
+                raw = bytearray(frame)
+                raw[24] ^= 1
+                frame = bytes(raw)
+            else:
+                raw = bytearray(frame)
+                raw[34 if change == "option" else -1] ^= 1
+                # option 变更重算头和，避免只靠 checksum 断言掩盖黄金字节缺失。
+                raw[24:26] = b"\x00\x00"
+                raw[24:26] = dpkt.in_cksum(raw[14:38]).to_bytes(2, "big")
+                frame = bytes(raw)
+        changed.append((timestamp, frame))
+    assert found
+    path = tmp_path / ("options-" + change + ".pcap")
+    with path.open("wb") as output:
+        writer = dpkt.pcap.Writer(
+            output, linktype=link_type, snaplen=max(len(f) for _, f in changed)
+        )
+        for timestamp, frame in changed:
+            writer.writepkt(frame, ts=timestamp)
+    with pytest.raises(AssertionError, match="IPv4 选项"):
+        audit(path)
+    if change in {"missing", "duplicate"}:
+        with pytest.raises(AssertionError, match="选项审计原始帧数量不一致"):
+            audit_native(path, reference, tmp_path)
+
+
+def test_ipv4_options_id_collision_on_foreign_ports_is_not_borrowed(tmp_path, captured):
+    frames, link_type, reference = captured
+    packet = next(
+        dpkt.ethernet.Ethernet(frame)
+        for _, frame in frames
+        if isinstance((network := dpkt.ethernet.Ethernet(frame).data), dpkt.ip.IP)
+        and network.p == 17
+        and network.id == 0x7912
+        and isinstance(network.data, dpkt.udp.UDP)
+        and network.data.dport == 30618
+    )
+    packet.data.data.sport, packet.data.data.dport = 42000, 42001
+    packet.data.sum = packet.data.data.sum = 0
+    path = tmp_path / "options-foreign-port-id-collision.pcap"
+    write_copy(path, frames, link_type, bytes(packet))
+    checked = audit(path)
+    assert checked["ipv4_option_packets"] == reference["ipv4_option_packets"]
+    result = audit_native(path, checked, tmp_path)
+    assert len(result["ipv4_option_imports"]) == 40
+    assert result["statistics"]["packet_count"] == len(frames) + 1
 
 
 def test_paused_inflight_business_replay_is_rejected(tmp_path, captured):

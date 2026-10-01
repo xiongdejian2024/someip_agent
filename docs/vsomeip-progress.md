@@ -567,3 +567,51 @@
   Windows 实机、长稳/多服务/故障完整性能矩阵、独立线上应用身份、完整 IP/ARXML/OEM 语义
   以及正式签名最新版发布源仍需继续；完整目标保持 active。本轮代码与记录提交推送，新
   提交的远程 CI 独立核对，不能把本机短负载结果说成远程或整体完成。
+
+## 2026-10-01 IPv4 选项边界、固定库补丁与独立证据
+
+- 继续 c909f96 后尚未提交的选项迁移，未修改 Python 产品控制接口。保留成熟 libtins 解析、
+  TCP/IPv4 重组；固定到 4.6 提交 2d2f7012d9f3a16d684a55ba39f1215b6aef5429，而非自写解析器。
+  上游固定源码仍有 EOL 提前结束/零补齐及完整 type 分类缺口，局部补丁修复解析、长度字节
+  IHL 边界和序列化尺寸三个位置。未静默改写原始帧，未将路由/时间戳承载解析当作路由执行。
+- Linux/Windows 统一固定提交与补丁后完整 src/ip.cpp 哈希；CMake 要求 libtins 4.6 EXACT
+  配置包，防止旧头文件/新库混用。Windows 缓存有额外修改时拒绝，不 reset；补丁 LF 固定，
+  LICENSE/补丁随构建制品收集。固定输入、来源及哈希见 docs/native-dependencies.md。
+- CTest 两项通过，选项子矩阵覆盖 4–40 字节选项区 220 个 NOP 前缀/EOL 补零位置、未知
+  TLV 长度/复制位分类、带数据 TLV 往返和 UDP/TCP 带选项首片乱序重组，畸形长度不得借用
+  Payload。此前两段补丁的 hunk 行数错误已由 git apply 门禁拒绝并修正，未忽略构建失败。
+- 新增 40 项真实 veth 用例：UDP/TCP × 普通包/乱序分片 × EOL、NOP/EOL、复制位 TLV、
+  最大补齐区、路由记录、时间戳、非零补齐、缺长度、过短长度和越界长度。
+  发送器仅在临时 netns 内通过 AF_PACKET 注入，避免 IP 栈提前拒绝或改写畸形向量；不属于
+  产品 Python 发包回退。合法向量唯一交付，非法首片产生完整异常堆栈，停止后释放残片缓存。
+- 独立 PCAP oracle 手工列出选项黄金字节，不引用发送夹具；核对头/传输校验和、IHL、
+  MF/偏移与顺序、端口及完整 SOME/IP 字节。产品原生离线导入逐例验证消息来源、完成帧
+  软件时间、重组/残片统计和 malformed 拒绝，非法向量不能算成功解码。
+- 最终源码 build/ip-options-source-evidence 与不挂产品源码的安装包
+  build/ip-options-installed-verified-evidence 各通过 120+90=210 虚拟网、17 审计、12 权限/清理、
+  268 后端；逐份 JUnit 核对零失败/错误/跳过。线上及原生离线各核对 932 个原黄金向量、
+  16 组分片、40 组选项（24 个合法唯一消息，16 个非法拒绝向量；非法分片 EOF 残片计数 8）。
+  源码 17296 帧/3312 条消息，安装包 16766 帧/3251 条；两份内核采集丢包均为 0。
+  安装包来源确认为 site-packages，Python 不解码底层作为回退；既有后端三项警告保留。
+- 新库产品独立运行 build/ip-options-performance-evidence 的完整 16 阶段，均 verified：
+  1600 RPC 成功、3200 条请求/响应及 13201 条事件逐序号核对，全部采集丢包为 0；另有
+  12 权限/清理+10 统计口径回归通过。1 ms 原生 UDP/TCP 线上间隔 P99 为 1.500/1.542 ms，
+  原生 10 ms TCP 约 99.5 条/秒，不把已产生消息完整交付等同于目标频率或硬实时。
+  运行前功能验收容器均已退出；完整结果与计数边界更新到 docs/performance.md。
+- 首次完整安装包运行 120+90=210 项功能通过，但普通 UDP 与时间戳向量碰巧共用 IP ID，
+  原始审计误借其他端口的包而失败。保留 build/ip-options-installed-evidence；修复 oracle
+  普通包/首片的专用端口及实际分片标志边界，尾片仍严格按方向/协议/ID/分片选择。
+  未放宽序列、帧数或黄金字节断言。build/ip-options-audit-repair-evidence 只读复核原始失败
+  抓包：16891 帧/3461 条消息、932 个原黄金向量、16 组原分片和 40 组选项通过；17 项审计
+  回归通过，含同 ID 异端口碰撞、篡改选项/校验和/Payload、缺失、重复和截断的严格拒绝。
+- 产品镜像 someip-agent-vsomeip:ip-options-test SHA-256 为
+  b107a8cc9afe3d6c97984d4e4187661bb825b92f0b3862f3a9f3b16c02a34484。
+  镜像和源码编译二进制一致：d89a1abd3e8b2b800c6196196edbae059d4f3b9abd0a39963ce2d17fc838309e；
+  ldd 确认实际加载 /usr/local/lib/libtins.so.4.6。Python 产品未改，wheel SHA 仍为
+  ce8bc6d7fa746aa43a3ff57c0c0a25d7eae3a2d01fb36930b37205f3b9c8a59a；后续测试脚本只读挂载。
+- c909f96 远程 CI run 36817354455 已终态：Linux 原生/安装包/短负载、前后端通过，Windows
+  仍在 build-native.ps1 第 27 行因 CaptureTriplet/OverlayTriplets/Packet_ROOT 未配置拒绝。
+  该结果属于旧提交，不能替代本轮新库回归。Windows 实际编译、驱动、安装升级、生产签名
+  最新版发布源、IPv6 分片、选项专用语义/跨片复制位一致性、完整 ARXML/OEM 与长稳仍未完成。
+  Ruff、shell/YAML 语法、版本一致性和 diff 空白检查通过；本机没有 pwsh，不能宣称本轮
+  Windows 脚本已实际执行或通过语法解析。代码、测试与记录提交推送，新远程 CI 单独观察。

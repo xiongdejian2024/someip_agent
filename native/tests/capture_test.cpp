@@ -69,6 +69,70 @@ EthernetII fragment(const Bytes &payload,uint32_t offset,bool more,uint16_t id=9
 Bytes slice(const Bytes &bytes,size_t begin,size_t end) {
     return Bytes(bytes.begin()+begin,bytes.begin()+end);
 }
+Bytes with_options(EthernetII &packet,const Bytes &options) {
+    require(!options.empty() && options.size()<=40 && options.size()%4==0,"测试选项尺寸非法");
+    auto raw=packet.serialize();
+    uint16_t length=(uint16_t(raw[16])<<8)|raw[17];
+    raw.insert(raw.begin()+34,options.begin(),options.end());
+    raw[14]=uint8_t(0x45+options.size()/4);
+    length+=options.size();raw[16]=uint8_t(length>>8);raw[17]=uint8_t(length);
+    raw[24]=raw[25]=0;
+    uint32_t checksum=0;
+    for(size_t i=14;i<34+options.size();i+=2)checksum+=(uint16_t(raw[i])<<8)|raw[i+1];
+    while(checksum>>16)checksum=(checksum&65535)+(checksum>>16);
+    checksum=(~checksum)&65535;raw[24]=uint8_t(checksum>>8);raw[25]=uint8_t(checksum);
+    return raw;
+}
+void ipv4_options_padding_tlv_and_fragment_offsets() {
+    fragment_stage("验证所有 4..40 字节选项区的 EOL 零补齐与原始 payload 偏移");
+    for(size_t width=4;width<=40;width+=4) {
+        for(size_t nops=0;nops<width;++nops) {
+            Fixture f;auto body=transport_payload();
+            auto packet=fragment(body,0,false,150);
+            Bytes options(width,0);std::fill(options.begin(),options.begin()+nops,1);
+            auto raw=with_options(packet,options);
+            auto original=raw;
+            f.processor.feed(raw.data(),raw.size(),f.now);f.check(1);
+            require(raw==original && f.errors.empty(),"合法 EOL 补零被拒绝、原帧改写或 payload 偏移错误");
+        }
+    }
+    fragment_stage("验证完整 type 八位的未知 TLV，包括复制位/类别下 number 0/1");
+    for(uint8_t type:{uint8_t(0x80),uint8_t(0x81),uint8_t(0x9e)}) {
+        Fixture f;auto packet=fragment(transport_payload(),0,false,151);
+        auto raw=with_options(packet,Bytes{type,2,0,0});
+        f.processor.feed(raw.data(),raw.size(),f.now);f.check(1);
+        require(f.errors.empty(),"合法二字节 TLV 被错误识别为 EOL/NOP");
+        // 完整八位 type 的分类也必须用于序列化尺寸，不能由四字节 padding 掩盖错误。
+        Bytes options{type,6,42,43,44,45,1,1,1,0,0,0};
+        auto roundtrip_raw=with_options(packet,options);
+        EthernetII parsed(roundtrip_raw.data(),roundtrip_raw.size());
+        auto serialized=parsed.serialize();
+        require(serialized.size()==roundtrip_raw.size(),"复制位 TLV 往返改变报文尺寸");
+        require(Bytes(serialized.begin()+34,serialized.begin()+46)==options,
+                "复制位 TLV 序列化尺寸分类错误或选项被覆盖");
+        Fixture roundtrip;roundtrip.processor.feed(serialized.data(),serialized.size(),roundtrip.now);
+        roundtrip.check(1);require(roundtrip.errors.empty(),"TLV 往返后 payload 偏移错误");
+    }
+    fragment_stage("验证选项 TLV 缺长度、过小/越界长度及 EOL 后非零补齐拒绝");
+    for(const auto &options:std::vector<Bytes>{{0,0,1,0},{1,1,1,0x9e},{0x9e,0,0,0},
+                                              {0x9e,1,0,0},{0x9e,5,0,0}}) {
+        Fixture f;auto packet=fragment(transport_payload(),0,false,152);
+        auto raw=with_options(packet,options);
+        bool rejected=false;
+        try {f.processor.feed(raw.data(),raw.size(),f.now);}
+        catch(const Tins::malformed_packet &){rejected=true;}
+        require(rejected && f.messages.empty(),"非法选项从 payload 借用长度或被误交付");
+    }
+    for(bool tcp:{false,true}) {
+        Fixture f;auto body=transport_payload(tcp);size_t split=tcp ? 24:16;
+        auto head=fragment(slice(body,0,split),0,true,153,tcp ? 6:17);
+        auto raw=with_options(head,Bytes{1,0,0,0});
+        auto tail=fragment(slice(body,split,body.size()),split,false,153,tcp ? 6:17);
+        f.feed(tail);f.processor.feed(raw.data(),raw.size(),f.now);f.check(1);
+        require(f.messages[0]["ip_reassembled"]==true && f.messages[0]["ip_fragment_count"]==2 &&
+                f.errors.empty(),"含 EOL 补零首片重组时 payload 偏移或来源标记错误");
+    }
+}
 void ipv4_fragment_udp_tcp_and_duplicate() {
     Fixture udp;auto bytes=transport_payload();
     auto tail=fragment(slice(bytes,16,bytes.size()),16,false);
@@ -157,7 +221,7 @@ void ipv4_fragment_invalid_and_conflicting_input() {
     fragment_stage("验证重复首片的头长度冲突");
     head=fragment(slice(bytes,0,16),0,true,114);fragments.process(head);
     auto changed_header=fragment(slice(bytes,0,16),0,true,114);
-    // 四个 NOP 填满选项区，独立验证 IHL 冲突；单 NOP 的 EOL 补零解析限制另列门禁。
+    // 四个 NOP 填满选项区，独立验证 IHL 冲突；EOL 补零由独立矩阵验证。
     for(size_t i=0;i<4;++i)changed_header.rfind_pdu<IP>().noop();
     // 按网卡路径重新解析序列化帧，IHL 才具有真实 on-wire 值。
     auto raw=changed_header.serialize();
@@ -258,6 +322,7 @@ int main() {
         ipv4_fragment_keys_and_overlap_isolation();
         ipv4_fragment_timeout_and_resource_limits();
         ipv4_fragment_invalid_and_conflicting_input();
+        ipv4_options_padding_tlv_and_fragment_offsets();
         std::cout << Json{{"message", "原生抓包 IPv4/IPv6/VLAN、双向 TCP 重组及 IPv4 分片乱序、重复、隔离、过期与资源限额测试通过"}}.dump() << std::endl;
     } catch (const std::exception &error) { log_error("test.capture", error);return 1; }
     return 0;

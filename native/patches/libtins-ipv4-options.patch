@@ -1,0 +1,40 @@
+diff --git a/src/ip.cpp b/src/ip.cpp
+--- a/src/ip.cpp
++++ b/src/ip.cpp
+@@ -86,8 +86,11 @@ IP::IP(const uint8_t* buffer, uint32_t total_sz) {
+     // While the end of the options is not reached read an option
+     while (stream.pointer() < options_end) {
+         option_identifier opt_type = (option_identifier)stream.read<uint8_t>();
+-        if (opt_type.number > NOOP) {
++        if (!(opt_type == END || opt_type == NOOP)) {
+             // Multibyte options with length as second byte
++            if (TINS_UNLIKELY(stream.pointer() >= options_end)) {
++                throw malformed_packet();
++            }
+             const uint32_t option_size = stream.read<uint8_t>();
+             if (TINS_UNLIKELY(option_size < (sizeof(uint8_t) << 1))) {
+                 throw malformed_packet();
+@@ -111,9 +114,11 @@ IP::IP(const uint8_t* buffer, uint32_t total_sz) {
+         }
+         else if (opt_type == END) {
+             // If the end option found, we're done
+-            if (TINS_UNLIKELY(stream.pointer() != options_end)) {
+-                // Make sure we found the END option at the end of the options list
+-                throw malformed_packet();
++            // RFC 791: EOL may precede the header boundary; padding must be zero.
++            while (stream.pointer() < options_end) {
++                if (TINS_UNLIKELY(stream.read<uint8_t>() != 0)) {
++                    throw malformed_packet();
++                }
+             }
+             break;
+         }
+@@ -324,7 +329,7 @@ uint32_t IP::calculate_options_size() const {
+         options_size += sizeof(uint8_t);
+         const option_identifier option_id = iter->option();
+         // Only add length field and data size for non [NOOP, EOL] options
+-        if (option_id.op_class != CONTROL || option_id.number > NOOP) {
++        if (!(option_id == END || option_id == NOOP)) {
+             options_size += sizeof(uint8_t) + iter->data_size();
+         }
+     }

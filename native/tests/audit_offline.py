@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import dpkt
+from audit_ipv4_options import option_key
 from someip_agent.config import Settings
 from someip_agent.pcap.importer import PcapImporter
 
@@ -218,12 +219,14 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
                 "native_fragment_errors": partial.fragment_error_count,
             }
         )
+    option_checks = audit_options(frames, link_type, reference, importer)
     logger.info(
-        "原生离线虚拟网审计通过：%s 帧，%s 条消息，%s 组黄金向量，%s 组分片",
+        "原生离线虚拟网审计通过：%s 帧，%s 条消息，%s 组黄金向量，%s 组分片，%s 组选项",
         result.packet_count,
         len(messages),
         len(checks),
         len(fragment_checks),
+        len(option_checks),
     )
     return {
         "status": "verified",
@@ -231,8 +234,84 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
         "golden_messages": checks,
         "native_passive_capture_messages": dict(capture_counts),
         "fragment_imports": fragment_checks,
+        "ipv4_option_imports": option_checks,
         "scope": "真实虚拟以太网文件的原生离线解码；不代表线速、性能或任意 OEM 布局",
     }
+
+
+def audit_options(frames, link_type, reference, importer):
+    checks = []
+    for expected in reference["ipv4_option_packets"]:
+        protocol = 17 if expected["transport"] == "udp" else 6
+        selected = [
+            (timestamp, data)
+            for timestamp, data in frames
+            if option_key(dpkt.ethernet.Ethernet(data).data)
+            == (protocol, expected["ip_id"])
+        ]
+        if len(selected) != expected["captured_frames"]:
+            raise AssertionError("选项审计原始帧数量不一致")
+        output = io.BytesIO()
+        writer = dpkt.pcap.Writer(output, linktype=link_type)
+        for timestamp, data in selected:
+            writer.writepkt(data, ts=timestamp)
+        partial, decoded = importer.parse(output.getvalue(), "ipv4-options.pcap")
+        if partial.packet_count != len(selected) or partial.captured_bytes != sum(
+            len(data) for _, data in selected
+        ):
+            raise AssertionError("选项导入原始帧统计不符")
+        fragmented = expected["fragmented"]
+        if expected["expected_outcome"] == "decoded":
+            if len(decoded) != 1 or partial.errors or partial.fragment_error_count:
+                raise AssertionError("合法选项未输出唯一原生黄金消息")
+            message = decoded[0]
+            if (
+                message.transport != expected["transport"]
+                or message.source != f"10.77.0.2:{expected['source_port']}"
+                or message.destination != "10.77.0.1:30618"
+                or (
+                    message.service_id,
+                    message.method_id,
+                    message.client_id,
+                    message.session_id,
+                    message.interface_version,
+                    message.message_type,
+                    message.return_code,
+                    message.payload_hex,
+                )
+                != (0x4567, 0x8003, 0x11, 0x17, 1, 2, 0, "41280000")
+            ):
+                raise AssertionError("选项原生导入端点或黄金字节不符")
+            metadata = message.metadata
+            expected_ns = int(Decimal(str(selected[-1][0])) * 1_000_000_000)
+            if (
+                metadata["runtime"] != "vsomeip"
+                or metadata["observation"] != "pcap_import"
+                or metadata["wire_verified"]
+                or metadata["pcap_frame"] != len(selected)
+                or abs(metadata["native_timestamp_ns"] - expected_ns) > 1000
+                or metadata["ip_reassembled"] != fragmented
+                or metadata["ip_fragment_count"] != (2 if fragmented else 0)
+                or partial.reassembled_datagrams != int(fragmented)
+            ):
+                raise AssertionError("选项原生导入完成帧时间或来源统计不符")
+        elif (
+            decoded
+            or partial.reassembled_datagrams
+            or partial.fragment_error_count != int(fragmented)
+            or not any("malformed" in error.lower() for error in partial.errors)
+        ):
+            # 非法首片在解析阶段被拒绝；先到尾片由文件 EOF 报告残片，不能算成功。
+            raise AssertionError("非法选项未隔离或残片统计错误")
+        checks.append(
+            {
+                **expected,
+                "native_messages": len(decoded),
+                "native_fragment_errors": partial.fragment_error_count,
+                "native_errors": partial.errors,
+            }
+        )
+    return checks
 
 
 def main() -> None:
