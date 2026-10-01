@@ -1,0 +1,6 @@
+# 仅浏览器验收镜像，不用于正式发行。防火墙只作用于测试容器网络命名空间。
+ARG LINUX_PACKAGE_IMAGE=someip-agent-linux:package
+FROM ${LINUX_PACKAGE_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends iptables \
+    && rm -rf /var/lib/apt/lists/*
+CMD ["bash"]

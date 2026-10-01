@@ -70,3 +70,49 @@ python scripts/create_update_manifest.py \
 随包提供、随包原生发生器启动，以及删除新包 Python 运行库后的真实启动失败与旧版回滚。
 JUnit、构建日志、应用日志、安装计划/状态与新旧包摘要均保留。准备阶段拒绝与启动后回滚
 分别验证。正式发布源、浏览器真实点击、跨 Linux 发行版和规模长稳不能由这一组 API 测试推导。
+
+## 真实浏览器点击验收
+
+浏览器验收使用独立镜像安装测试防火墙工具，不增加正式发行包依赖。
+Docker 必须使用独立 bridge 网络，禁止 `--network host`；仅发布宿主
+`127.0.0.1:18765`。脚本在容器自己的网络命名空间拒绝外连，只允许回环通信、
+浏览器入站端口和已建立连接的响应，不修改宿主防火墙或车辆网卡。
+Docker Desktop 的内部网络在当前环境无法映射本机端口，不能直接用它代替上述方案。
+
+先在无网络容器中构建一次真实第二版本，再使用新证据目录操作浏览器：
+
+```bash
+mkdir -p build/browser-fixture-new-run
+docker run --rm --init --network none \
+  -v "$PWD/build/browser-fixture-new-run:/evidence" \
+  someip-agent-linux:package \
+  python packaging/linux/prepare_update_fixture.py \
+    --output /evidence/fixture --native-binary /workspace/build/native/soa_partner
+make linux-browser-image
+make linux-browser-update-test \
+  LINUX_BROWSER_EVIDENCE=build/browser-success-new-run \
+  LINUX_BROWSER_FIXTURE=build/browser-fixture-new-run/fixture/new
+# 另一个新目录验收启动失败回滚，不覆盖成功记录。
+make linux-browser-update-test BROWSER_UPDATE_CASE=linux-rollback \
+  LINUX_BROWSER_EVIDENCE=build/browser-rollback-new-run \
+  LINUX_BROWSER_FIXTURE=build/browser-fixture-new-run/fixture/new
+```
+
+看到就绪提示后，浏览器访问本机端口，打开“模型与设置”，依次点击“检查更新”和
+“升级到最新版本”。必须先看到新版本与签名已验证；不调用安装 API 代替页面点击。
+测试完成真实重启/回滚、健康版本、安装状态与备份断言后保持进程运行，供浏览器核对；
+确认页面版本并保存截图后，回车清理本次临时进程。
+旧证据目录拒绝重用，发行包夹具只读挂载，清理只归还本次写入证据的所有权。
+
+本地成功点击的独立证据位于 `build/browser-update-917bbff-retry-evidence`：
+页面从 0.1.0 自动重载为 0.1.1，健康接口同步，升级状态 complete，旧版备份 0.1.0。
+JUnit 一项通过；当时旧清理脚本因试图 chown 只读夹具而退出 1，已保留异常并修正脚本，
+不能将功能断言通过误报为该次整个命令退出成功。
+首次未点击时的 180 秒等待超时保留在 `build/browser-update-917bbff-evidence`，不覆盖。
+这些仅证明临时信任源的浏览器链路，不证明正式最新版发布或正式信任源已配置。
+
+`build/browser-update-rollback-917bbff-evidence` 单独验收删除新包运行库后的真实启动失败：
+升级状态 failed、失败新目录 VERSION 为 0.1.1，恢复运行目录与健康版本均为 0.1.0。
+页面仍在线并保留旧版本，90 秒后显示通用重启超时提示；尚未实现明确的回滚状态展示。
+JUnit 一项通过，修正清理脚本后命令退出 0。发行包非交互升级回归 19 项通过（1 warning），
+8 项门禁/清理替身回归在 macOS 与 Linux 分别通过；后者不承担防火墙或真实升级证明。

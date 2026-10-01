@@ -28,6 +28,12 @@ jobs:
         uses: actions/checkout@v4
       - name: 构建固定版本原生镜像
         run: make native-image
+      - name: 浏览器验收脚本门禁与清理回归（不冒充真实点击）
+        run: >-
+          docker run --rm --init --network none
+          -v "$PWD/native/tests:/workspace/native/tests:ro"
+          someip-agent-vsomeip:test
+          python -m pytest native/tests/test_browser_update_runner.py -v
       - name: 编解码与虚拟网功能验收
         run: make native-test
       - name: 原生后端完整回归

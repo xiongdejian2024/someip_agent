@@ -1056,3 +1056,39 @@
 - 本轮设置页SSR回归、既有服务/抓包/身份适配器回归、前端类型检查与构建、Node语法、
   版本一致性和git diff检查通过。Vite既有大于500kB的bundle警告保留，不声明零warning。
   原生运行时和后端代码未改变；上轮CI只作为上轮证据，本轮新CI状态提交后单独查询。
+
+## 2026-10-01：真实浏览器发行包点击升级与失败回滚
+
+- 分类：实质进展。恢复目标前核实上次浏览器进程已终止：未点击时180秒超时，完整异常
+  保留于build/browser-update-917bbff-evidence，不因观察超时盲目重启活进程。
+  Docker内部网络探针容器内200、本机映射不可达；确认终态后改用独立bridge测试容器，
+  NET_ADMIN只用于本容器防火墙，默认出口DROP、入站仅18765及已建立连接/回环。
+  宿主只发布127.0.0.1:18765，不改宿主网卡/防火墙，不访问公网或车型网络。
+- 修正真实发行包UI测试仍依赖已清除STATIC_DIR环境变量的问题，改为验证包内网页与
+  实际GET /响应。默认API模式不改，UI模式不调用install API代替真实页面按钮点击。
+  新增专用测试Dockerfile和Make入口，iptables不成为正式包依赖；夹具可只读复用。
+- 复用917bbff前端和已验收large-array-dispatch原生二进制，临时源码副本构建0.1.1。
+  基线包SHA ead018e1fc514fdd57cf05100ea6aacb822deb0a781c2f3cd03b86f4a01c3108；
+  新包SHA 4c9a8720e48555aa4672095ba5ef81cf48686274dd54768d4e2094fcd02dbfcf。
+  这两个aarch64包只供本地测试，不是正式发布；仓库四处版本仍为0.1.0。
+- build/browser-update-917bbff-retry-evidence：真实浏览器检查后签名已验证，点击升级后
+  页面自动重载0.1.1，健康接口0.1.1，安装状态complete，previous版本0.1.0。
+  保存前后完整页面snapshot/截图并实际查看；JUnit一项通过。旧清理代码递归chown
+  只读fixture使该次命令退出1，异常保留，未冒充整个命令成功。
+- build/browser-update-rollback-917bbff-evidence：另一次真实点击，新程序因移除运行库
+  退出255，升级器failed且恢复旧版0.1.0；失败新目录0.1.1保留。页面/健康正常0.1.0，
+  90秒后通用重启超时提示可见，尚没有明确回滚提示。JUnit一项通过、修正清理后退出0。
+  对应UI打印当时仍沿用“新版本”字样，现改为按成功/回滚场景描述，不靠提示文字判成功。
+- 门禁提前拒绝非法UID:GID、证据根符号链接、已存在JUnit/测试目录、PYTHONPATH及非Linux
+  模式。清理只改本次输出、跳过只读fixture，并保留原始失败码；8项真实shell替身回归
+  在macOS和Linux分别通过，加入独立无网络CI，不将替身命令当作防火墙/点击升级证明。
+- build/browser-update-api-regression-evidence：同发行包19项签名升级/失败回滚回归全部
+  通过，1项既有StarletteDeprecationWarning保留。测试容器无产品源码挂载/PYTHONPATH；
+  Linux容器无系统keyring后端的错误完整堆栈保留，不宣称运行日志零error。
+- 上轮917bbff的CI36866386434已completed/success，实际日志保留在本轮证据目录：
+  前端SSR/类型/构建通过，源码和安装包各266虚拟网、431后端、47审计与12权限回归通过，
+  16短负载阶段verified；Linux ZIP SHA为394572d4da4d4624f4612f20d1b194255e740c430b0e6e49b2ce342992f1b9e2，
+  19升级回滚及无Python/SDK干净运行通过。普通无原生环境后端351通过/80跳过单独记录，
+  不把跳过当原生验收。新提交CI仍需另查。
+- 本轮不实现Bootes或后续IPv6，不提交保留的两个IPv6草稿；正式更新信任源尚缺，
+  用户真实业务源布局/部署与运行覆盖仍待推进，完整目标保持active。

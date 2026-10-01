@@ -11,6 +11,9 @@ LINUX_UPDATE_EVIDENCE ?= build/linux-update-evidence
 LINUX_CLEAN_IMAGE ?= someip-agent-linux:runtime
 LINUX_CLEAN_EVIDENCE ?= build/linux-clean-evidence
 LINUX_RUNTIME_BASE ?= debian:bookworm-slim
+LINUX_BROWSER_IMAGE ?= someip-agent-linux:browser-test
+LINUX_BROWSER_EVIDENCE ?= build/browser-update-evidence
+LINUX_BROWSER_FIXTURE ?= $(LINUX_BROWSER_EVIDENCE)/fixture/new
 NATIVE_IPV6 := --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 --sysctl net.ipv6.conf.lo.disable_ipv6=0
 
 ifeq ($(OS),Windows_NT)
@@ -19,7 +22,7 @@ else
 VENV_PYTHON := $(VENV)/bin/python
 endif
 
-.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows native-image native-compile native-test native-regression native-installed-test native-performance package-linux linux-update-test linux-clean-test
+.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows native-image native-compile native-test native-regression native-installed-test native-performance package-linux linux-update-test linux-clean-test linux-browser-image linux-browser-update-test
 
 help:
 	@echo "install          安装后端开发依赖和前端依赖"
@@ -40,6 +43,7 @@ help:
 	@echo "package-linux    复用已验证原生镜像构建 Linux 完整发行包"
 	@echo "linux-update-test 隔离测试真实发行包的签名升级、重启与失败回滚"
 	@echo "linux-clean-test  无 Python/SDK 的干净 Linux 镜像验收"
+	@echo "linux-browser-update-test 真实浏览器点击发行包升级，仅映射本机回环并禁止容器外连"
 
 $(VENV_PYTHON):
 	$(PYTHON) -m venv $(VENV)
@@ -116,6 +120,21 @@ native-performance:
 
 package-linux: build-frontend
 	docker build --build-arg NATIVE_IMAGE=$(NATIVE_IMAGE) -f packaging/linux/Dockerfile -t $(LINUX_PACKAGE_IMAGE) .
+
+linux-browser-image:
+	docker build --build-arg LINUX_PACKAGE_IMAGE=$(LINUX_PACKAGE_IMAGE) -f packaging/linux/Dockerfile.browser-test -t $(LINUX_BROWSER_IMAGE) .
+
+linux-browser-update-test:
+	mkdir -p $(LINUX_BROWSER_EVIDENCE)
+	docker run --rm --init -it --cap-add NET_ADMIN --network bridge \
+	  --sysctl net.ipv6.conf.all.disable_ipv6=1 \
+	  --publish 127.0.0.1:18765:18765 \
+	  -v "$(CURDIR)/native/tests:/workspace/native/tests:ro" \
+	  -v "$(CURDIR)/backend/tests:/workspace/backend/tests:ro" \
+	  -v "$(CURDIR)/$(LINUX_BROWSER_EVIDENCE):/workspace/build/browser-update-evidence" \
+	  -v "$(CURDIR)/$(LINUX_BROWSER_FIXTURE):/workspace/build/browser-update-evidence/fixture/new:ro" \
+	  -e SOMEIP_AGENT_EVIDENCE_OWNER="$$(id -u):$$(id -g)" \
+	  $(LINUX_BROWSER_IMAGE) bash native/tests/run_browser_update.sh $(BROWSER_UPDATE_CASE)
 
 linux-update-test:
 	mkdir -p $(LINUX_UPDATE_EVIDENCE)

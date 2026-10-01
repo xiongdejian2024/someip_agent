@@ -217,8 +217,15 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
             with urllib.request.urlopen(request, timeout=20) as response:
                 assert not json.load(response)[0]["running"]
         if ui_mode:
-            static_dir = Path(os.environ["SOMEIP_AGENT_STATIC_DIR"])
+            # 发行包必须使用自身网页；不能依赖源码挂载或被移除的 STATIC_DIR 覆盖。
+            static_dir = (
+                root / "_internal" / "web"
+                if packaged
+                else Path(os.environ["SOMEIP_AGENT_STATIC_DIR"])
+            )
             assert (static_dir / "index.html").is_file(), "先构建前端再执行浏览器升级验收"
+            with urllib.request.urlopen(url.removesuffix("/api/v1") + "/", timeout=2) as response:
+                assert b"<html" in response.read(), "浏览器入口必须由真实应用提供网页"
             print(
                 f"浏览器升级验收已就绪：http://127.0.0.1:{port}；仅修改临时安装目录 {root}",
                 flush=True,
@@ -246,8 +253,9 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
             with urllib.request.urlopen(url.removesuffix("/api/v1") + "/", timeout=2) as response:
                 assert b"<html" in response.read()
         if ui_mode:
-            print("真实签名升级、重启、新版本健康检查及旧版本备份断言均通过", flush=True)
-            input("浏览器确认新版本页面后，回车清理本次临时进程：")
+            outcome = "启动失败后旧版回滚" if failure else "新版本重启及旧版本备份"
+            print(f"真实签名升级、{outcome}及健康检查断言均通过", flush=True)
+            input("浏览器确认恢复后的页面版本后，回车清理本次临时进程：")
     finally:
         if process and process.poll() is None:
             process.terminate()
