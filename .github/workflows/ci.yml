@@ -115,6 +115,7 @@ jobs:
           native/tests/test_evidence_permissions.py native/tests/test_recovery_virtual.py
           native/tests/test_sat_wti_virtual.py
           native/tests/test_arxml_composite_virtual.py
+          native/tests/test_large_array_virtual.py native/tests/benchmark_member_ipc.py
           native/tests/test_ipv4_options_virtual.py native/tests/ipv4_options_sender.py
           native/tests/ipv4_option_vectors.py
           native/tests/benchmark_virtual.py native/tests/performance_metrics.py

@@ -122,6 +122,10 @@ public:
                 if(count!=items->size())throw std::runtime_error("VSA_LINEAR 有效数量与 payload 元素数量不一致");
             }
             if (!items->is_array()) throw std::runtime_error("数组参数必须为列表");
+            // 实际元素预算与源声明上界分离；错误定长值在编码循环前拒绝。
+            if(items->size()>max_frame)throw std::runtime_error("实际数组元素数量超过运行预算");
+            if(schema.contains("length") && items->size()!=number(schema["length"]))
+                throw std::runtime_error("定长数组长度错误");
             if(schema.contains("max_length") && items->size()>number(schema["max_length"]))
                 throw std::runtime_error("变长数组元素数量超限");
             Bytes body;
@@ -130,7 +134,6 @@ public:
             for(size_t i=0;i<items->size();++i)
                 encode_one(body,schema.at("element"),(*items)[i],body_offset,last && i+1==items->size());
             if (schema.contains("length")) {
-                if (items->size() != number(schema["length"])) throw std::runtime_error("定长数组长度错误");
                 if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
             } else length_prefix(data,body.size(),schema,little);
             data.insert(data.end(), body.begin(), body.end());
@@ -269,6 +272,7 @@ public:
         return data;
     }
     static Json decode(const Json &schema, const Bytes &data) {
+        if(data.size()>max_frame)throw std::runtime_error("payload 超限");
         size_t offset=0; auto value=decode_one(data,offset,schema);
         if (offset!=data.size()) throw std::runtime_error("payload 存在尾随数据");
         return value;

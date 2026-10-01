@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import io
 import json
 import logging
 import os
+import re
 import socket
 import time
 from collections.abc import Iterator
@@ -84,27 +86,86 @@ def recv_data_from(conn: socket.socket, *, deadline: float | None = None) -> byt
     return recv_exact(conn, size, deadline=deadline)
 
 
+_JSON_TOKENS = re.compile(r'[{}\[\]"\\]')
+_NONSPACE = re.compile(r"[^ \r\n\t]")
+
+
+class _MemberFrames:
+    """只找 SAT 文档边界，不解析 JSON；每段仅扫描一次，解码仍使用标准库。"""
+
+    def __init__(self) -> None:
+        self.buffer = io.StringIO()
+        self.size = 0
+        self.depth = 0
+        self.quoted = False
+        self.escaped = False
+
+    def _append(self, fragment: str) -> None:
+        self.size += len(fragment.encode("utf-8"))
+        if self.size > MAX_FRAME:
+            raise ValueError("成员消息大小超限")
+        self.buffer.write(fragment)
+
+    def feed(self, text: str) -> Iterator[str]:
+        position = 0
+        while position < len(text):
+            if self.depth == 0:
+                start = _NONSPACE.search(text, position)
+                if start is None:
+                    return
+                position = start.start()
+                if text[position] != "{":
+                    raise ValueError("成员消息必须为 JSON 对象")
+            begin = position
+            skip_until = begin + int(self.escaped)
+            self.escaped = False
+            complete = False
+            # C 正则跳过大段纯文本/数字，避免 Python 逐字符处理大型 args/hex。
+            for token in _JSON_TOKENS.finditer(text, position):
+                index, char = token.start(), token.group()
+                if index < skip_until:
+                    continue
+                if self.quoted:
+                    if char == "\\":
+                        skip_until = index + 2
+                        self.escaped = index + 1 == len(text)
+                    elif char == '"':
+                        self.quoted = False
+                elif char == '"':
+                    self.quoted = True
+                elif char in "{[":
+                    self.depth += 1
+                elif char in "}]":
+                    self.depth -= 1
+                    if self.depth == 0:
+                        self._append(text[begin : index + 1])
+                        frame = self.buffer.getvalue()
+                        self.buffer.seek(0)
+                        self.buffer.truncate(0)
+                        self.size = 0
+                        position = index + 1
+                        complete = True
+                        yield frame
+                        break
+            if not complete:
+                self._append(text[begin:])
+                return
+
+
 def member_messages(conn: socket.socket) -> Iterator[dict[str, Any]]:
-    """成员通道是 JSON 文档流；正确处理拆包、粘包、字符串中的 }{ 与多字节字符。"""
+    """成员流分片只定位边界，完整文档才调用 JSONDecoder；保留 UTF-8/帧预算。"""
     utf8 = codecs.getincrementaldecoder("utf-8")()
     decoder = json.JSONDecoder()
-    buffered = ""
+    frames = _MemberFrames()
     while True:
         chunk = conn.recv(8192)
         if not chunk:
-            if buffered.strip():
+            utf8.decode(b"", final=True)
+            if frames.depth:
                 raise EOFError("原生成员连接在 JSON 消息中途关闭")
             return
-        buffered += utf8.decode(chunk)
-        if len(buffered.encode("utf-8")) > MAX_FRAME:
-            raise ValueError("成员消息大小超限")
-        while buffered.strip():
-            buffered = buffered.lstrip()
-            try:
-                message, end = decoder.raw_decode(buffered)
-            except json.JSONDecodeError:
-                break
+        for frame in frames.feed(utf8.decode(chunk)):
+            message = decoder.decode(frame)
             if not isinstance(message, dict):
                 raise ValueError("成员消息必须为 JSON 对象")
-            buffered = buffered[end:]
             yield message

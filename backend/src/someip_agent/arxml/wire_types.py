@@ -107,8 +107,10 @@ class WireTypeResolver:
                 size = int(size_text or "", 10)
             except ValueError as exc:
                 raise WireTypeError(f"ARRAY-SIZE 非法: {size_text}") from exc
-            if not 1 <= size <= 65536:
-                raise WireTypeError("ARRAY-SIZE 必须在 1-65536 范围内")
+            # 声明仅形成类型图，不按上界展开/分配元素。实际值由原生 Codec、
+            # IPC 帧和传输各自限制；不能以单个 UDP 报文大小拒绝 TCP 类型声明。
+            if not 1 <= size <= 0xFFFFFFFF:
+                raise WireTypeError("ARRAY-SIZE 必须在 uint32 正整数范围内")
             semantics = _value(child, "ARRAY-SIZE-SEMANTICS", direct=True)
             if semantics not in {"FIXED-SIZE", "VARIABLE-SIZE"}:
                 raise WireTypeError("数组缺少明确 ARRAY-SIZE-SEMANTICS")

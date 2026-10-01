@@ -4,7 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from audit_service_names import audit_names
+from audit_service_names import audit_names, audit_vsa_declarations
+from lxml import etree
 from someip_agent.arxml.parser import ArxmlParser
 from someip_agent.domain.models import ArxmlModel, ServiceDefinition
 
@@ -87,3 +88,27 @@ def test_bad_or_ambiguous_sources_cannot_claim_name_verification(change):
         definitions[0]["service_id"] = True
     with pytest.raises((ValueError, TypeError)):
         audit_names(model, definitions, communication)
+
+
+@pytest.mark.parametrize("bits,successful", [(32, True), (16, False)])
+def test_vsa_graph_audit_preserves_success_and_failure_evidence(
+    bits, successful, caplog
+):
+    fixtures = Path(__file__).resolve().parents[2] / "backend/tests/fixtures"
+    root = etree.fromstring((fixtures / "composite_service.arxml").read_bytes())
+    extra = etree.fromstring((fixtures / "vsa_type.xml").read_bytes())
+    extra.xpath(".//*[local-name()='BASE-TYPE-SIZE']")[0].text = str(bits)
+    extra.xpath(".//*[local-name()='ARRAY-SIZE']")[0].text = "1048576"
+    root.xpath("//*[local-name()='AR-PACKAGE']/*[local-name()='ELEMENTS']")[0].extend(
+        extra
+    )
+    report = audit_vsa_declarations(etree.tostring(root))
+    assert report["declared_count"] == 1 and not report["runtime_verified"]
+    assert report["resolved_count"] == int(successful)
+    assert report["error_count"] == int(not successful)
+    if successful:
+        assert report["declarations"][0]["max_elements"] == 1048576
+        assert not report["errors"]
+    else:
+        assert "容量不足" in report["errors"][0]["error"]
+        assert any(record.exc_info for record in caplog.records)

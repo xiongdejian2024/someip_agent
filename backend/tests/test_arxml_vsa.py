@@ -161,3 +161,47 @@ def test_parser_projects_vsa_as_array_with_original_dictionary_metadata():
     assert schema["fields"][1]["vsa"]["size_name"] == "validElements"
     assert schema["fields"][1]["type"] == "array"
     assert not model.warnings
+
+
+@pytest.mark.parametrize("maximum", [65537, 150000, 1048576, 3000000, 0xFFFFFFFF])
+def test_large_vsa_declaration_is_not_a_payload_allocation(maximum):
+    root = source(32)
+    size = root.xpath(
+        "//*[local-name()='IMPLEMENTATION-DATA-TYPE']["
+        "*[local-name()='SHORT-NAME']='LinearWords']//*[local-name()='ARRAY-SIZE']"
+    )[0]
+    size.text = str(maximum)
+    schema = resolver(root).resolve("/Composite/LinearWords")
+    assert schema["max_length"] == maximum
+    assert schema["element"] == {"type": "uint16"}
+    assert len(str(schema)) < 300  # 类型图不随声明上界展开。
+    assert (
+        apply_layout(schema, "MOST-SIGNIFICANT-BYTE-FIRST", "64", None, None, classic_cp44=True)[
+            "length_bytes"
+        ]
+        == 4
+    )
+
+
+@pytest.mark.parametrize("maximum", [0, -1, 0x100000000])
+def test_array_declaration_rejects_values_outside_native_uint32(maximum):
+    root = source(32)
+    root.xpath(
+        "//*[local-name()='IMPLEMENTATION-DATA-TYPE']["
+        "*[local-name()='SHORT-NAME']='LinearWords']//*[local-name()='ARRAY-SIZE']"
+    )[0].text = str(maximum)
+    with pytest.raises(WireTypeError, match="uint32 正整数"):
+        resolver(root).resolve("/Composite/LinearWords")
+
+
+def test_large_fixed_array_retains_declaration_without_expanding_elements():
+    root = source()
+    root.xpath(
+        "//*[local-name()='IMPLEMENTATION-DATA-TYPE']["
+        "*[local-name()='SHORT-NAME']='FixedWords']//*[local-name()='ARRAY-SIZE']"
+    )[0].text = "1048576"
+    assert resolver(root).resolve("/Composite/FixedWords") == {
+        "type": "array",
+        "length": 1048576,
+        "element": {"type": "uint16"},
+    }

@@ -981,3 +981,52 @@
   全后端 format-check 另发现3个既有未格式化测试文件，未做无关修改。本轮未测性能/长稳；
   原生迁移、Classic/OEM header/session/文本类型、大数组、IPv6分片、规模长稳以及正式信任
   升级源和真实升级按钮验收仍需继续，完整目标保持 active。
+
+## 2026-10-01：大数组声明、成员 JSON 分片与原生 IPC 调度
+
+- 源 ARRAY-SIZE 现在接受 uint32 正整数声明，不按声明上界展开或分配元素；真实数组、
+  4 MiB payload/IPC 帧和传输限制仍分别检查。定长数组不匹配在编码循环前拒绝，原生
+  decode 入口拒绝实际 payload 超限；不是把运行时预算直接提高到声明最大值。
+- 固定 vsomeip/lxml/标准库依赖不变。Python 成员流分片只增量定位文档边界，完整文档才
+  调用标准 JSONDecoder；仍保留 SAT 连续 JSON、UTF-8、转义、粘包和逐文档字节预算。
+  不新增 JSON 语义解析器，不改变业务字典或 socket 契约。
+- 第一轮大数组独立短测通过，但完整安装包验收出现 IPC 慢消费者队列超限与中途 EOF。
+  降低 Python 重复解码后仍发生断连，且失败不限于字段通知；事件通知也出现过。
+  build/large-array-installed-evidence、large-array-ipc-verified-evidence 和
+  large-array-field-thread-evidence 均保留失败日志/堆栈/抓包。线上 payload 正确不等于 Python
+  完整收到；不将微测加速或带诊断回调的单次绿色结果冒充功能修复。
+- 核对固定 SDK 的 Boost.Asio dispatch 实现后，Connection::send 在当前 socket executor
+  内立即登记输出预算并启动首帧，外部调用仍调度到 executor；避免本已在 IO 上下文内的
+  输出再排至 post 队尾。1000 帧/16 MiB 输出预算和 50 ms 测试周期未放宽。
+  新 CTest 检查当前 executor 内的预算、连续 JSON/长度帧及输出顺序与排空。
+- 镜像 someip-agent-vsomeip:large-array-dispatch-test 为
+  4ec99662ea30b75d681798b391888c63e8e1b6ca4c87da636dd3da4cae2ed231，固定 SDK/上游补丁
+  检查及 3 项 CTest 通过；wheel SHA 为
+  ce93114c7d4af8d511d42a26c6acfc559f7eb9da7e5a2d8bacb0918c9b29bd49，原生二进制 SHA 为
+  1501d08940c647a52204602d754150014a50f1037782f1b4803bc1293efd2c03。
+- build/large-array-dispatch-source-evidence 使用安装模块、非 root、network=none 和只读
+  三份原文件核对：131 个服务同名/同 ID；73 个 VSA 类型图全部解析，包括先前 10 个超过
+  65536 的上界。布局错误由 112 降为 103，而不是仅减去 23：解除数组声明门禁后，有些
+  信号暴露下一级布局错误。当前为 74 缺失数组宽度、28 缺失明确 transformation、1 空结构；
+  177 部署错误及 2228 引用绑定不变，完整异常栈仍在 parse.log，runtime_verified=false。
+  没有激活车型、猜测 STRING 布局或复制车辆端点。
+- 新 TCP 双字节序测试用 70000 个 uint16，源声明上界 1048576，实际数组 140000 字节、
+  复合 payload 140036 字节；沿用 SAT 字典初始化验证 RPC、事件、字段读写/通知和拒绝。
+  每组 7 对 RPC、16 个人工黄金向量，与产品 libtins/vsomeip 离线重组逐消息交叉核对；另有
+  8 项真实抓包副本篡改拒绝检查。测试不带诊断回调/定时快照，仅失败时保留线程堆栈。
+- build/large-array-dispatch-installed-evidence 完整安装包验收通过 168+98=266 虚拟网、
+  431 后端、29+7+11=47 审计/源名和 12 权限/清理；7 份 JUnit 均零失败/错误/跳过。
+  26872 帧/5036 原生消息、既有 1316 黄金向量、16 分片、40 组选项、114 正常双身份 RPC 对
+  与 32 恢复对核验通过；大数组新增 32 向量保存在两个独立 audit.json，未冒充既有向量。
+  8 故障 case/16 刻意不回答请求与既有 3 项后端 warning 保留，采集内核丢包为 0。
+  无产品源码挂载/PYTHONPATH，模块来自 site-packages；3 轮串行专项另在
+  build/large-array-dispatch-repeat-{1,2,3}-evidence 各通过 10 项、无跳过，均保留独立 PCAP。
+- Ruff、变更文件格式、IPC 模块严格 mypy、版本/前端类型/服务适配器、shell/diff 检查通过。
+  全后端 mypy 仍有 catalog.py/parser.py 的 9 个既有错误，两文件与基线提交完全相同；
+  未称全量类型检查成功。build/large-array-dispatch-performance-evidence 的 16 阶段短负载
+  全部逐序号 verified，1600 次 RPC/13192 事件完整核对、采集内核丢包 0；TCP 10 ms 阶段
+  软件时间倒退 1 次、并发 RPC 的数字序号逆序均保留，口径与数值见性能文档，不以微测
+  或已产生消息完整交付代替严格周期/长稳承诺。
+- 本节不以类型图解析或有限复测替代完整迁移、最大声明数量、UDP 大包、IPv6 分片、
+  多服务重负载、长稳或正式升级源验收。
+  Bootes/Windows 按用户要求不在当前范围，完整目标继续 active。

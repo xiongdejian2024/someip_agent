@@ -7,9 +7,63 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from someip_agent.arxml.parser import ArxmlParser
+from lxml import etree
+from someip_agent.arxml.parser import ArxmlParser, _element_path
+from someip_agent.arxml.wire_types import WireTypeError, WireTypeResolver
 
 logger = logging.getLogger(__name__)
+
+
+def audit_vsa_declarations(content):
+    """只核对明确标注 profile 的 Implementation 类型图，不猜测 STRING/部署。"""
+    root = etree.fromstring(
+        content,
+        etree.XMLParser(
+            resolve_entities=False,
+            no_network=True,
+            load_dtd=False,
+        ),
+    )
+    if root.getroottree().docinfo.doctype:
+        raise ValueError("类型审计禁止 DTD")
+    index = {}
+    for node in root.iter():
+        if not isinstance(node.tag, str) or etree.QName(node).localname not in {
+            "SW-BASE-TYPE",
+            "IMPLEMENTATION-DATA-TYPE",
+        }:
+            continue
+        path = _element_path(node)
+        if path in index:
+            raise ValueError(f"类型审计完整路径重复：{path}")
+        index[path] = node
+    types = WireTypeResolver(index)
+    declarations, errors = [], []
+    for path, node in index.items():
+        if not node.xpath("./*[local-name()='DYNAMIC-ARRAY-SIZE-PROFILE']"):
+            continue
+        try:
+            schema = types.resolve(path)
+            declarations.append(
+                {
+                    "type_path": path,
+                    "max_elements": schema["max_length"],
+                    "indicator_type": schema["vsa"]["size_type"],
+                    "profile": schema["vsa"]["profile"],
+                }
+            )
+        except WireTypeError as exc:
+            logger.exception("源 VSA 类型图审计失败：%s", path)
+            errors.append({"type_path": path, "error": str(exc)})
+    return {
+        "scope": "仅完整引用类型图，不证明部署布局或最大报文可发送",
+        "declarations": declarations,
+        "errors": errors,
+        "declared_count": len(declarations) + len(errors),
+        "resolved_count": len(declarations),
+        "error_count": len(errors),
+        "runtime_verified": False,
+    }
 
 
 def name_index(rows):
@@ -158,6 +212,7 @@ def main():
             json.loads(sources["service_define"]),
             json.loads(sources["communication_define"]),
         )
+        result["vsa_type_graph"] = audit_vsa_declarations(sources["arxml"])
         result["source_sha256"] = {
             key: hashlib.sha256(data).hexdigest() for key, data in sources.items()
         }

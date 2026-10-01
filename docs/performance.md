@@ -249,3 +249,64 @@ Python 仍逐条接收/回调；线上较小抖动不代表整个仿真链路没
 后续源名称修正的功能镜像为 `ipc-source-names-test`，与此对照镜像的 Python wheel 不同，
 原生二进制 SHA 相同。该修正只影响 ARXML 服务选取/目录元数据；本表仍严格引用上述同镜像
 对照，不将最终功能镜像冒充本次已测对象。
+
+## 大数组成员 JSON 分片热点微测
+
+2026-10-01，`build/large-array-member-ipc-benchmark.json` 对照确定提交
+`35dd6d8b2ba4ef721f64fb6085e89183cc66a476` 的成员接收函数与当前实现。
+输入为相同的 735045 字节 JSON 文档，分成 90 个 8192 字节以内片段；包含 70000 元素
+参数及原始 payload 的十六进制文本。三轮交错测量，标准 JSON 解码后的对象逐轮精确相等。
+
+```bash
+PYTHONPATH=backend/src .venv/bin/python native/tests/benchmark_member_ipc.py \
+  --baseline-revision 35dd6d8 --output build/member-ipc-new-measurement.json
+```
+
+| 实现 | 每文档 JSON 解码尝试 | 三轮耗时 ms |
+|---|---:|---|
+| 提交基线：每个 partial chunk 尝试解码 | 90 | 45.308 / 45.783 / 45.364 |
+| 增量边界定位，完整文档才解码 | 1 | 4.472 / 4.282 / 4.403 |
+
+当前模块 SHA-256 为 `42c076113b1b4b0c6239621e25fe4b27b88655fb80502070e50647e14a9c1eeb`。
+复核当前源文件与微测记录相同。仅使用标准库正则定位边界，仍由标准 JSONDecoder 做实际
+解析；生产帧限制、SAT 连续文档与 UTF-8/转义语义没有放宽。
+
+这只是内存分片处理的局部热点，不含网络、原生 payload 编解码、嵌套 args 的业务解析、
+业务回调或长稳负载，不能把耗时差值当作 GIL/解释器纯成本或整条链路加速比例。
+优化后完整虚拟网仍出现过原生 IPC 队列超限，故另行修改 executor 内预算登记/发送调度并
+执行真实 RPC/通知/字段与抓包验收；不以本表替代功能通过或性能承诺。
+
+## 大数组/IPC 调度修改后的同安装包短负载复测
+
+`build/large-array-dispatch-performance-evidence/report.json` 使用镜像
+`someip-agent-vsomeip:large-array-dispatch-test`、原生二进制
+`1501d08940c647a52204602d754150014a50f1037782f1b4803bc1293efd2c03` 和上述 Python 成员模块。
+完整功能验收及 3 轮大数组复测结束、没有其他本项目构建/验收容器运行后开始；仍是 M1
+宿主上的 4 vCPU Linux Docker、Python 3.11.2、vsomeip 3.5.10，宿主调度没有锁定。
+无产品源码/PYTHONPATH，SAT 模块来自 site-packages，IPC 两端 TCP_NODELAY 实际值均开启。
+
+```bash
+make native-performance NATIVE_IMAGE=someip-agent-vsomeip:large-array-dispatch-test \
+  NATIVE_PERFORMANCE_EVIDENCE=build/large-array-dispatch-performance-new-run
+```
+
+16 阶段全部 verified：1600 次 RPC 返回、3200 条请求/响应及 13192 条已产生事件逐序号核对。
+RPC 失败、原生 error、线上/客户端缺失、重复、非预期序号和采集内核丢包均为 0；另有
+12 项权限/清理和 10 项统计回归通过。TCP 32 字节四并发的请求/响应各有 5 次数字序号逆序，
+保留在报告中，不把并发提交次序冒充协议交付顺序或丢包。
+
+完整 Python RPC 各配置速率约 52.0–304.0 RPC/s，P99 为 15.168–36.098 ms；没有因局部
+JSON 热点变快而消除 Python/socket/业务回调成本，也未做同调度条件的多轮原生前后 A/B。
+以下为 1 ms 目标周期阶段；P99 是线上相邻消息的软件时间间隔，不是单向/RPC 时延。
+
+| 路径 | 传输 | 客户端收到数 | 条/秒 | 线上间隔 P99 ms |
+|---|---|---:|---:|---:|
+| Python 逐条 | UDP | 3000 | 1000.0 | 1.857 |
+| 原生 sequence | UDP | 3001 | 999.5 | 1.301 |
+| Python 逐条 | TCP | 3000 | 1000.0 | 1.935 |
+| 原生 sequence | TCP | 2996 | 997.7 | 1.749 |
+
+10 ms 原生 UDP/TCP 分别产生并收到 298/297 条，约 99.1/98.9 条每秒；低于目标频率但
+已产生消息均完整核对。该 TCP 阶段 PCAP 软件时间出现 1 次倒退，最小相邻间隔 -2.780 ms，
+报告原样保留，客户端单调时间没有倒退；不能用这些软件时间统计证明严格周期达标。
+本次不是 70000 元素数组的吞吐测试、最大负载或长稳；大数组功能另有独立抓包与有限复测。

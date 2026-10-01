@@ -4,7 +4,10 @@ import json
 import logging
 import os
 import subprocess
+import sys
+import threading
 import time
+import traceback
 from copy import deepcopy
 from pathlib import Path
 
@@ -34,7 +37,13 @@ WIDTHS = (0, 1, 2, 4)
 @pytest.mark.parametrize("struct_width", WIDTHS)
 @pytest.mark.parametrize("array_width", WIDTHS)
 def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
-    transport, byte_order, struct_width, array_width, alignment=8, vsa_bits=None
+    transport,
+    byte_order,
+    struct_width,
+    array_width,
+    alignment=8,
+    vsa_bits=None,
+    large_count=None,
 ):
     port = (
         (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
@@ -59,6 +68,11 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
             (WORKSPACE / "backend/tests/fixtures/vsa_type.xml").read_bytes()
         )
         extra.xpath(".//*[local-name()='BASE-TYPE-SIZE']")[0].text = str(vsa_bits)
+        if large_count is not None:
+            assert transport == "tcp" and vsa_bits == 32
+            port = 31000 + (byte_order == "little")
+            extra.xpath(".//*[local-name()='ARRAY-SIZE']")[0].text = "1048576"
+            value["samples"] = [0x1234, 0xABCD] * (large_count // 2)
         root.xpath("//*[local-name()='AR-PACKAGE']/*[local-name()='ELEMENTS']")[
             0
         ].extend(extra)
@@ -66,7 +80,10 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
             if reference.text == "/Composite/FixedWords":
                 reference.text = "/Composite/LinearWords"
         content = etree.tostring(root)
-        value["samples"] = {"validElements": 2, "words": value["samples"]}
+        value["samples"] = {
+            "validElements": len(value["samples"]),
+            "words": value["samples"],
+        }
     content = content.replace(b"<ALIGNMENT>8", f"<ALIGNMENT>{alignment}".encode())
     if byte_order == "little":
         content = content.replace(
@@ -89,6 +106,7 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
     model = ArxmlParser().parse(content, "composite_service.arxml")
     assert not model.warnings
     processes, handles, partners = [], [], []
+    diagnostic_dir = None
     try:
         for role, address, peer, app_id in (
             ("server", "10.77.0.1", "10.77.0.2", 0x7711),
@@ -156,6 +174,8 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
                     attach=True,
                 )
             )
+            if role == "client":
+                diagnostic_dir = directory
         server, client = partners
         key = "EnvelopeService_client"
         assert client.wait_for_service_reconnect(key, timeout=10)
@@ -247,7 +267,10 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
                 for invalid in (
                     {"validElements": 1, "words": [1, 2]},
                     {"validElements": -1, "words": []},
-                    {"validElements": 4, "words": [1, 2, 3, 4]},
+                    {
+                        "validElements": 1048577 if large_count is not None else 4,
+                        "words": [1, 2, 3, 4],
+                    },
                     {"validElements": True, "words": [1]},
                 )
             )
@@ -262,6 +285,25 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
                 if response["failtype"] != "FAILTYPE_SUCCESS":
                     break
             assert calls == expected_calls
+    except Exception:
+        if large_count is not None:
+            logger.exception("大数组复合业务失败")
+            frames = sys._current_frames()
+            stacks = {
+                thread.name: traceback.format_stack(frames[thread.ident])
+                for thread in threading.enumerate()
+                if thread.ident in frames
+            }
+            logger.error("大数组失败时 Python 线程堆栈：%s", stacks)
+            if diagnostic_dir is not None:
+                (diagnostic_dir / "python-failure.json").write_text(
+                    json.dumps(
+                        {"thread_stacks": stacks},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+        raise
     finally:
         for partner in partners:
             partner.close()

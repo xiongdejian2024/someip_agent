@@ -65,6 +65,8 @@ public:
         socket.get_option(option);
         return option.value();
     }
+    // 仅在 socket executor 内观测，包含正在写的帧；不跨线程访问队列。
+    std::size_t queued_output_bytes() const { return out_bytes_; }
     void send(const Json &message) {
         std::string body = message.dump(-1, ' ', true);
         if(body.size()>max_frame) {
@@ -79,7 +81,9 @@ public:
             body = prefix.str() + body;
         }
         auto self = shared_from_this();
-        boost::asio::post(socket.get_executor(), [self, body = std::move(body)] {
+        // 当前 executor 内立即登记预算/启动首帧，避免重解码任务之前的额外 post
+        // 积压；外部线程仍由 Asio 调度，socket 与队列保持同一个执行上下文。
+        boost::asio::dispatch(socket.get_executor(), [self, body = std::move(body)] {
             if (!self->socket.is_open()) return;
             if (self->out_.size() >= 1000 || self->out_bytes_ + body.size() > 16 * 1024 * 1024) {
                 log_error("ipc.backpressure",std::runtime_error("IPC 慢消费者队列超限"));

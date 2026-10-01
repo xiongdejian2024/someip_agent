@@ -139,6 +139,38 @@ int main() {
             rejects([&]{Codec::encode(unknown,value);});
             rejects([&]{Codec::decode(unknown,expected);});
         }
+        // 声明百万元素不分配百万个值；实际 70000 个 uint16 跨过旧上界。
+        for(auto little:{false,true}) {
+            Json large={{"type","array"},{"max_length",1048576},{"length_bytes",4},
+                {"byte_order",little?"little":"big"},
+                {"element",Json{{"type","uint16"},{"byte_order",little?"little":"big"}}},
+                {"vsa",Json{{"profile","VSA_LINEAR"},{"size_name","validElements"},
+                    {"payload_name","words"},{"size_type","uint32"}}}};
+            Json words=Json::array();Bytes expected;
+            const uint32_t wire_size=140000;
+            for(size_t i=0;i<4;++i)expected.push_back((wire_size>>((little?i:3-i)*8))&0xff);
+            for(size_t i=0;i<70000;++i) {
+                uint16_t word=i%2?0xabcd:0x1234;words.push_back(word);
+                expected.push_back(little?word&0xff:word>>8);
+                expected.push_back(little?word>>8:word&0xff);
+            }
+            Json value={{"validElements",70000},{"words",std::move(words)}};
+            require(Codec::encode(large,value)==expected,"大 VSA 字节长度/元素数量黄金编码错误");
+            require(Codec::decode(large,expected)==value,"大 VSA 源字典解码错误");
+            auto narrow=large;narrow["length_bytes"]=2;
+            rejects([&]{Codec::encode(narrow,value);});
+            large["max_length"]=65536;
+            rejects([&]{Codec::encode(large,value);});
+            rejects([&]{Codec::decode(large,expected);});
+        }
+        Json actual_limit={{"type","array"},{"max_length",UINT32_MAX},
+            {"element",Json{{"type","uint64"}}}};
+        auto oversized=Json::array();for(size_t i=0;i<max_frame/8+1;++i)oversized.push_back(0);
+        rejects([&]{Codec::encode(actual_limit,oversized);});
+        rejects([&]{Codec::decode(Json{{"type","bytes"}},Bytes(max_frame+1));});
+        actual_limit["length"]=UINT32_MAX;
+        rejects([&]{Codec::encode(actual_limit,Json::array({0}));});
+        rejects([&]{Codec::decode(actual_limit,Bytes{});});
         rejects([]{number(Json(-1));});
         rejects([]{bounded_number(Json(65536),65535,"service_id");});
         std::cout<<Json{{"message","原生编解码基础类型、字节序、数组及异常边界测试通过"}}.dump()<<std::endl;
