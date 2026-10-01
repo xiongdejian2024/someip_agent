@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from lxml import etree
 
-from someip_agent.domain.models import ClassicSignalBinding
+from someip_agent.domain.models import ClassicHeaderProperties, ClassicSignalBinding
 
 from .wire_types import WireTypeError, _value
 
@@ -51,11 +51,12 @@ class ClassicReferenceResolver:
                 self._ambiguous.add(path)
             else:
                 self._index[path] = element
-        self._targets: dict[str, set[tuple[str, str, str]]] = {}
+        self._targets: dict[str, set[tuple[str, str, Literal["input", "output", "data"]]]] = {}
         for mapping in root.xpath(
             "//*[local-name()='SENDER-RECEIVER-TO-SIGNAL-MAPPING' "
             "or local-name()='CLIENT-SERVER-TO-SIGNAL-MAPPING']"
         ):
+            relations: list[tuple[str, str, Literal["input", "output", "data"]]]
             if etree.QName(mapping).localname == "SENDER-RECEIVER-TO-SIGNAL-MAPPING":
                 relations = [("SYSTEM-SIGNAL-REF", "TARGET-DATA-PROTOTYPE-REF", "data")]
             else:
@@ -162,10 +163,65 @@ class ClassicReferenceResolver:
             raise WireTypeError("Classic 同一参数存在冲突或缺失的 payload 布局")
         return layouts[0]
 
+    def _header_properties(
+        self, signal: etree._Element, transformer_paths: list[str]
+    ) -> list[ClassicHeaderProperties]:
+        """按完整引用保存所有原始变体；缺失字段显式为空，不选择第一个变体。"""
+        variants = signal.xpath(
+            ".//*[local-name()='SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS-CONDITIONAL']"
+        )
+        records = []
+        for path in dict.fromkeys(transformer_paths):
+            technology = self._resolve(path, "TRANSFORMATION-TECHNOLOGY")
+            descriptions = technology.xpath(
+                "./*[local-name()='TRANSFORMATION-DESCRIPTIONS']"
+                "/*[local-name()='SOMEIP-TRANSFORMATION-DESCRIPTION']"
+            )
+            # 非唯一 description 不投影它的值，避免把同值多变体当成已确定部署。
+            description = descriptions[0] if len(descriptions) == 1 else None
+            matched = [
+                variant
+                for variant in variants
+                if self._references(variant, "TRANSFORMER-REF") == [path]
+            ]
+            for props in matched or [None]:
+                records.append(
+                    ClassicHeaderProperties(
+                        transformer_path=path,
+                        signal_props_present=props is not None,
+                        description_count=len(descriptions),
+                        protocol_raw=_value(technology, "PROTOCOL", direct=True),
+                        transformer_version_raw=_value(technology, "VERSION", direct=True),
+                        header_length_bits_raw=_value(technology, "HEADER-LENGTH"),
+                        message_type_raw=(
+                            _value(props, "MESSAGE-TYPE", direct=True)
+                            if props is not None
+                            else None
+                        ),
+                        session_handling_sr_raw=(
+                            _value(props, "SESSION-HANDLING-SR", direct=True)
+                            if props is not None
+                            else None
+                        ),
+                        signal_interface_version_raw=(
+                            _value(props, "INTERFACE-VERSION", direct=True)
+                            if props is not None
+                            else None
+                        ),
+                        description_interface_version_raw=(
+                            _value(description, "INTERFACE-VERSION", direct=True)
+                            if description is not None
+                            else None
+                        ),
+                    )
+                )
+        return records
+
     def resolve(self, triggering_path: str) -> list[ResolvedClassicBinding]:
         triggering = self._resolve(triggering_path, "PDU-TRIGGERING")
         pdu_path = _value(triggering, "I-PDU-REF")
         pdu = self._resolve(pdu_path, "I-SIGNAL-I-PDU")
+        assert pdu_path is not None  # _resolve 已拒绝缺失引用。
         mappings = pdu.xpath(
             "./*[local-name()='I-SIGNAL-TO-PDU-MAPPINGS']"
             "/*[local-name()='I-SIGNAL-TO-I-PDU-MAPPING']"
@@ -176,8 +232,10 @@ class ClassicReferenceResolver:
         for mapping in mappings:
             signal_path = _value(mapping, "I-SIGNAL-REF")
             signal = self._resolve(signal_path, "I-SIGNAL")
+            assert signal_path is not None
             system_path = _value(signal, "SYSTEM-SIGNAL-REF")
             self._resolve(system_path, "SYSTEM-SIGNAL")
+            assert system_path is not None
             targets = self._targets.get(system_path or "", set())
             # 相同目标的多 ECU 上下文引用可去重，不同业务目标不能任取第一个。
             if len(targets) != 1:
@@ -231,6 +289,7 @@ class ClassicReferenceResolver:
                         start_position=start_position,
                         transformation_paths=transformations,
                         transformer_paths=transformers,
+                        header_properties=self._header_properties(signal, transformers),
                     ),
                     target=target,
                 )

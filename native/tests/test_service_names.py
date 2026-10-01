@@ -7,7 +7,13 @@ import pytest
 from audit_service_names import audit_names, audit_vsa_declarations
 from lxml import etree
 from someip_agent.arxml.parser import ArxmlParser
-from someip_agent.domain.models import ArxmlModel, ServiceDefinition
+from someip_agent.domain.models import (
+    ArxmlModel,
+    ClassicHeaderProperties,
+    ClassicSignalBinding,
+    EventDefinition,
+    ServiceDefinition,
+)
 
 
 def inputs():
@@ -23,6 +29,49 @@ def inputs():
     # 同一服务可能有多个 ECU/client 行，不能误判为多个业务服务。
     communication = [{"vlan_list": [{"service_list": definitions * 2}]}]
     return model, definitions, deepcopy(communication)
+
+
+def test_header_raw_counts_deduplicate_repeated_ecu_bindings_without_runtime_claim():
+    model, definitions, communication = inputs()
+    metadata = ClassicHeaderProperties(
+        transformer_path="/T/Transformer",
+        signal_props_present=True,
+        description_count=1,
+        message_type_raw="0",
+        session_handling_sr_raw="SESSION-HANDLING-ACTIVE",
+    )
+    binding = ClassicSignalBinding(
+        triggering_path="/Trigger/ECU1",
+        pdu_path="/PDU/Event",
+        mapping_path="/PDU/Event/Mapping",
+        signal_path="/Signal/Event",
+        system_signal_path="/SystemSignal/Event",
+        target_path="/I/SourceService/Event",
+        direction="data",
+        start_position=0,
+        transformation_paths=["/T/Transformation"],
+        transformer_paths=["/T/Transformer"],
+        header_properties=[metadata],
+    )
+    other = binding.model_copy(deep=True)
+    other.triggering_path = "/Trigger/ECU2"
+    model.services[0].events = [
+        EventDefinition(name="Event", classic_bindings=[binding, other])
+    ]
+    before = model.model_dump()
+    result = audit_names(model, definitions, communication)
+    headers = result["classic_header_metadata"]
+    assert headers["unique_signal_variant_count"] == 1
+    assert headers["message_type_raw_counts"] == {"0": 1}
+    assert headers["session_handling_sr_raw_counts"] == {"SESSION-HANDLING-ACTIVE": 1}
+    assert not headers["runtime_verified"] and not result["runtime_verified"]
+    assert model.model_dump() == before
+    # 相同内容的两个源变体仍有歧义，不能因 JSON 相同合并成一个。
+    for record in model.services[0].events[0].classic_bindings:
+        record.header_properties.append(metadata.model_copy(deep=True))
+    headers = audit_names(model, definitions, communication)["classic_header_metadata"]
+    assert headers["unique_signal_variant_count"] == 2
+    assert headers["message_type_raw_counts"] == {"0": 2}
 
 
 def test_names_match_two_sources_without_applying_vehicle_endpoints():

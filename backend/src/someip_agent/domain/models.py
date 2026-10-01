@@ -68,6 +68,21 @@ class SignalDefinition(BaseModel):
     wire_error: str | None = None
 
 
+class ClassicHeaderProperties(BaseModel):
+    """保留 transformer 原始属性，不把模型枚举映射为线上报文类型。"""
+
+    transformer_path: str
+    signal_props_present: bool
+    description_count: int
+    protocol_raw: str | None = None
+    transformer_version_raw: str | None = None
+    header_length_bits_raw: str | None = None
+    message_type_raw: str | None = None
+    session_handling_sr_raw: str | None = None
+    signal_interface_version_raw: str | None = None
+    description_interface_version_raw: str | None = None
+
+
 class ClassicSignalBinding(BaseModel):
     """Classic 部署的完整源引用；不是已验证的 payload 布局。"""
 
@@ -81,6 +96,7 @@ class ClassicSignalBinding(BaseModel):
     start_position: int
     transformation_paths: list[str]
     transformer_paths: list[str]
+    header_properties: list[ClassicHeaderProperties] = Field(default_factory=list)
 
 
 class MethodDefinition(BaseModel):

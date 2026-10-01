@@ -19,6 +19,11 @@ using Json = nlohmann::json;
 using Tcp = boost::asio::ip::tcp;
 constexpr std::size_t max_frame = 4 * 1024 * 1024;
 
+inline std::size_t ipc_write_extent(const boost::system::error_code &error,
+                                  std::size_t transferred,std::size_t frame_size) {
+    return error || transferred>=frame_size ? 0 : frame_size-transferred;
+}
+
 inline bool ipc_tcp_no_delay() {
     const auto *value=std::getenv("SOMEIP_AGENT_IPC_TCP_NODELAY");
     if(!value || std::string(value)=="1")return true;
@@ -86,7 +91,9 @@ public:
         boost::asio::dispatch(socket.get_executor(), [self, body = std::move(body)] {
             if (!self->socket.is_open()) return;
             if (self->out_.size() >= 1000 || self->out_bytes_ + body.size() > 16 * 1024 * 1024) {
-                log_error("ipc.backpressure",std::runtime_error("IPC 慢消费者队列超限"));
+                log_error("ipc.backpressure",std::runtime_error("IPC 慢消费者队列超限，待写帧="+
+                    std::to_string(self->out_.size())+"，待写字节="+std::to_string(self->out_bytes_)+
+                    "，新增字节="+std::to_string(body.size())));
                 self->close(); // 慢消费者不能无限占用原生数据面内存。
                 return;
             }
@@ -164,7 +171,13 @@ private:
     }
     void write() {
         auto self = shared_from_this();
-        boost::asio::async_write(socket, boost::asio::buffer(out_.front()), [self](auto ec, auto) {
+        const auto frame_size=out_.front().size();
+        // Asio 默认 transfer_all 每次最多64KiB；大文档会反复与重解码争抢执行器。
+        // 用公开 completion condition 提交本帧剩余数据，短写/背压仍由 Asio 处理。
+        boost::asio::async_write(socket, boost::asio::buffer(out_.front()),
+            [frame_size](const boost::system::error_code &error,std::size_t transferred){
+                return ipc_write_extent(error,transferred,frame_size);
+            }, [self](auto ec, auto) {
             if (ec) { self->close(); return; }
             self->out_bytes_ -= self->out_.front().size();
             self->out_.pop_front();

@@ -149,6 +149,67 @@ def test_complete_reference_chain_is_not_permission_to_guess_classic_payload():
         build_native_bundle(model, request, Settings(_env_file=None))
 
 
+def test_header_properties_preserve_raw_values_and_model_roundtrip():
+    tree = root()
+    props = node(tree, "SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS-CONDITIONAL")
+    node(props, "MESSAGE-TYPE").text = "0"
+    service = parse(tree).services[0]
+    binding = service.events[0].classic_bindings[0]
+    metadata = binding.header_properties[0]
+    assert metadata.message_type_raw == "0"  # 不把数值0转换成 REQUEST 或 NOTIFICATION。
+    assert metadata.session_handling_sr_raw == "SESSION-HANDLING-ACTIVE"
+    assert metadata.protocol_raw == "SOMEIP"
+    assert metadata.transformer_version_raw == "1.0.0"
+    assert metadata.header_length_bits_raw == "64"
+    assert metadata.description_interface_version_raw == "1"
+    assert metadata.signal_interface_version_raw is None
+    assert metadata.signal_props_present and metadata.description_count == 1
+    assert service.model_validate_json(service.model_dump_json()) == service
+    legacy = binding.model_dump()
+    legacy.pop("header_properties")
+    assert binding.model_validate(legacy).header_properties == []
+    assert service.deployment_errors
+
+
+def test_missing_signal_header_props_are_explicit_not_inherited_from_other_signal():
+    service = parse(root()).services[0]
+    bindings = service.methods[0].classic_bindings
+    for binding in bindings:
+        metadata = binding.header_properties[0]
+        assert not metadata.signal_props_present
+        assert metadata.message_type_raw is metadata.session_handling_sr_raw is None
+        assert metadata.description_interface_version_raw == "1"
+
+
+def test_multiple_signal_variants_are_preserved_not_first_value_wins():
+    tree = root()
+    props = node(tree, "SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS-CONDITIONAL")
+    node(props, "MESSAGE-TYPE").text = "0"
+    other = deepcopy(props)
+    node(other, "MESSAGE-TYPE").text = "3"
+    props.getparent().append(other)
+    service = parse(tree).services[0]
+    metadata = service.events[0].classic_bindings[0].header_properties
+    assert len(metadata) == 2
+    assert {item.message_type_raw for item in metadata} == {"0", "3"}
+    assert service.events[0].signals[0].wire_schema is None
+    assert service.deployment_errors
+
+
+def test_multiple_transformer_descriptions_do_not_project_first_interface_version():
+    tree = root()
+    description = node(tree, "SOMEIP-TRANSFORMATION-DESCRIPTION")
+    other = deepcopy(description)
+    node(other, "INTERFACE-VERSION").text = "2"
+    description.getparent().append(other)
+    service = parse(tree).services[0]
+    metadata = service.events[0].classic_bindings[0].header_properties[0]
+    assert metadata.description_count == 2
+    assert metadata.description_interface_version_raw is None
+    assert service.events[0].signals[0].wire_schema is None
+    assert service.deployment_errors
+
+
 def test_return_reference_to_different_operation_cannot_overwrite_call_target():
     tree = root()
     node(tree, "RETURN-SIGNAL-REF").getparent().remove(node(tree, "RETURN-SIGNAL-REF"))

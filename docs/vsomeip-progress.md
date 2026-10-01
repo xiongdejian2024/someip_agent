@@ -1092,3 +1092,57 @@
   不把跳过当原生验收。新提交CI仍需另查。
 - 本轮不实现Bootes或后续IPv6，不提交保留的两个IPv6草稿；正式更新信任源尚缺，
   用户真实业务源布局/部署与运行覆盖仍待推进，完整目标保持active。
+
+## 2026-10-01：Classic 原始头属性与大数组原生交付复验
+
+- 分类：实质进展。上轮 da62c51 的 CI 36871190128 已 completed/success，实际日志保存于
+  build/receive-fairness-installed-evidence/prior-ci.log；源码/安装包各266虚拟网、431后端、
+  16短负载阶段和Linux升级/干净运行通过。这是上轮证据，不作为本轮修改的通过证明。
+- Classic binding 新增 header_properties，保存完整 transformer 引用对应的所有原始 props
+  变体、缺失状态和 description 数量。原文0仍是字符串0，不猜 OEM 枚举、线上类型或
+  session 语义；非唯一 description 不选首值，旧模型空列表兼容，部署门禁不解除。
+  四项解析回归与源审计回归覆盖这些边界及相同内容的多变体不合并。
+- build/classic-header-source-evidence/names.json：131源名称/Service ID一致、73个VSA
+  类型图解析、103布局错误/177部署错误保持可见，1067成员/2228引用绑定；新增2223条
+  去重header记录，原文0/1/2/3分别953/491/491/288，SR session均active，runtime_verified=false。
+  所有错误堆栈保留于parse.log，不激活车型、不复制车辆端点、不把原始属性统计当运行验收。
+- build/classic-header-virtual-evidence 的旧二进制源码挂载回归出现167通过/1失败，
+  大端70000元素字段通知时IPC断连；后续虚拟网/审计/后端未执行，不能以旧绿色覆盖。
+  新增有界接收FIFO：每次执行一条再让出Asio，保持顺序且退出清空；待处理输入1000条/
+  16MiB（payload+头）超限明确非零退出。输出1000帧/16MiB、4MiB单帧和50ms周期不放宽。
+- 仅修改接收调度的镜像 receive-fairness-test 仍167通过/1失败，证据单独保留于
+  build/receive-fairness-installed-evidence。新增原生日志给出25帧、16633894待写字节和
+  665355新增字节；公平让出单测通过不等于大数组故障修复，不据此归因于Python本身。
+- 去除无实际监控连接时的大payload trace构造；有消费者时仍保留完整trace，成员交付和
+  原始payload_hex不变。十六进制转换使用已有Boost.algorithm::hex_lower，替代逐字节流
+  格式化，不新增包/协议栈；CTest验证全部256字节、空输入、大小写和原有黄金字节。
+  接收FIFO的独立CTest验证非IO线程提交、FIFO、公平让出、第二批启动、退出和双预算门禁。
+- 中间镜像 someip-agent-vsomeip:receive-hex-test 为
+  5493586edf0e8045a2cc457b82711918937c9407e40dd40ec47c69a893e63908，4项CTest通过；
+  原生二进制SHA d70accfd706cedae298f9792f1548df666a0e3a6bd5c0b2c2f4927f962bd7d76，
+  wheel构建SHA bf0737213f2705509ba5e47bd562a239334a70fb42ad0797a8e755da806569b1。
+  build/receive-hex-array-evidence 的10项大数组专项通过；不把单次短测当作长稳或最大负载。
+- 该中间镜像的完整安装包回归在build/receive-hex-installed-evidence通过266虚拟网、435后端、
+  48审计/名称、12权限/清理，7份JUnit零失败/错误/跳过；26931帧/5069原生消息、1316黄金
+  向量、16分片、40组选项、114正常双身份RPC对/32恢复对均核对一致，采集内核丢包为0。
+  另两轮专项与离线审计并行：repeat-2通过10项，repeat-3小端字段通知断连（9通过/1失败）；
+  不把完整矩阵的一次通过或CPU局部优化当作稳定修复，失败堆栈/PCAP保留。
+- 核对固定SDK的Boost.Asio completion_condition.hpp：默认transfer_all每次最多提交65536
+  字节。大IPC文档因此多次续写并与解码任务竞争。本轮改用公开completion condition返回
+  当前帧剩余长度，不手写TCP发送/重组；短写、异步重试和错误仍由Asio处理，帧/队列预算
+  与线上发生器周期不变。IPC CTest新增两个1MiB文档在真实socket双模式有序交付，验证
+  剩余长度、完成和错误条件，限时15秒，失败完整堆栈保留。
+- 新镜像 someip-agent-vsomeip:ipc-large-write-test 为
+  4cac8e2aab1d147b7b3b16f44061787ef3d6790a5a4e27db3c9cd2d9d53e434e，4项CTest通过；
+  原生二进制SHA c6fba843210451bf5af1b3bc3e70978b02a54d60de67e06383dcf748c0609589，
+  wheel构建SHA保持bf0737213f2705509ba5e47bd562a239334a70fb42ad0797a8e755da806569b1。
+  本机ipc.hpp SHA与镜像内实际输入一致，避免用前一阶段镜像验证后一阶段源码。
+- build/ipc-large-write-array-{1,2,3}-evidence 三轮串行专项各10项通过、无跳过，均有双字节序
+  原生RPC/事件/字段交付、独立PCAP和黄金/产品重组核对。开始前中间镜像验收进程已退出，
+  未并行本项目其他构建/验收；仍是有限功能复测，不证明极限吞吐、严格周期或长稳。
+  最终镜像完整安装包回归已启动，证据目录build/ipc-large-write-installed-evidence，不能将
+  前一镜像的完整矩阵或三轮专项冒充此次全部通过。后续CI也必须按本轮提交单独检查。
+- 本轮57项Classic/layout/名称单测、Ruff和变更文件格式、两个变更模块严格mypy、前端
+  类型/服务适配器/设置页SSR、版本一致性和diff检查通过；未声称全后端mypy成功。
+  旧warning与所有失败证据保留，不实现Bootes/后续IPv6/Windows，不提交两个IPv6草稿。
+  真实业务源部署解释和正式发布信任源仍未完成，完整目标保持active。

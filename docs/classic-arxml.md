@@ -26,7 +26,13 @@
 无响应标记仍属于浏览投影，不能仅凭 sender/receiver 接口推导线上 RequestNoReturn；后续必须
 核对 I-SIGNAL props 和实际请求/响应部署。
 源文件中的数值 `MESSAGE-TYPE` 也不能直接作为线上报文类型字节。4.4.0 的模型枚举定义与
-协议编码须分别校验，见 [System Template 表 7.13](https://www.autosar.org/fileadmin/standards/R18-10_R4.4.0_R1.5.0/CP/AUTOSAR_TPS_SystemTemplate.pdf)；本阶段不解释该未验证属性。
+协议编码须分别校验，见 [System Template 表 7.13](https://www.autosar.org/fileadmin/standards/R18-10_R4.4.0_R1.5.0/CP/AUTOSAR_TPS_SystemTemplate.pdf)；本阶段只保存原文，不解释该未验证属性。
+
+每条 binding 的 `header_properties` 按完整 transformer 引用保存所有 I-SIGNAL props 变体：
+protocol、transformer version、header length、message type、SR session 和 interface version。
+原文 0 保持字符串 `"0"`，不转为线上 REQUEST。缺失 props 显式记录，不从 call/return 的
+另一方向借值；多个 description 只记录数量，不任取首个 interface version。旧模型缺少此
+列表时使用空列表，新增元数据不会解除部署门禁。
 
 ## 歧义和安全门禁
 
@@ -97,3 +103,8 @@ uint32 indicator/类型图解析成功，10个因旧声明上界拒绝。最新
 103条、部署错误177条；其他缺失数组宽度、无绑定布局、空结构与重复引用仍有门禁，
 完整堆栈保存在各自 parse.log，不覆盖旧失败记录。
 源引用/显式布局解析成功不是车型全部服务可用。
+
+`build/classic-header-source-evidence/names.json` 另保存 2223 条按信号/变体去重的 header
+记录：原文 message type 0/1/2/3 分别为 953/491/491/288，SR session 均为 active。
+它们来自已绑定成员，不冒充源文件全部 props，更不代表车型服务已启动；131 名称/ID、
+103 布局错误、177 部署错误及 `runtime_verified=false` 均保留。

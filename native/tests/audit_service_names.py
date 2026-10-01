@@ -126,6 +126,14 @@ def audit_names(model, definitions, communications):
             + [field.signal for field in service.fields if field.signal is not None]
         )
     ]
+    # 同一 I-SIGNAL 可能因多个 ECU 引用重复出现；属性统计按信号/transformer/变体去重。
+    header_records = {
+        (binding.signal_path, index, props.model_dump_json()): props
+        for service in model.services
+        for member in [*service.methods, *service.events]
+        for binding in member.classic_bindings
+        for index, props in enumerate(binding.header_properties)
+    }
     return {
         "scope": "仅源服务名称与 Service ID；不证明序列化、端点、方法或线上功能可用",
         "service_count": len(matches),
@@ -159,6 +167,23 @@ def audit_names(model, definitions, communications):
             for service in model.services
             for member in [*service.methods, *service.events]
         ),
+        "classic_header_metadata": {
+            "scope": "只保留源原始属性，不确认 OEM 枚举映射或线上 header/session 语义",
+            "unique_signal_variant_count": len(header_records),
+            "message_type_raw_counts": dict(
+                Counter(
+                    props.message_type_raw or "<missing>"
+                    for props in header_records.values()
+                )
+            ),
+            "session_handling_sr_raw_counts": dict(
+                Counter(
+                    props.session_handling_sr_raw or "<missing>"
+                    for props in header_records.values()
+                )
+            ),
+            "runtime_verified": False,
+        },
         "deployment_error_count": sum(
             len(service.deployment_errors) for service in model.services
         ),

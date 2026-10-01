@@ -1,5 +1,6 @@
 #pragma once
 #include "application.hpp"
+#include "dispatch.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <map>
 #include <set>
@@ -43,6 +44,7 @@ struct Member {
 };
 class Runtime {
     boost::asio::io_context &io_;
+    std::shared_ptr<ReceiveDispatcher> receiver_ = std::make_shared<ReceiveDispatcher>(io_);
     Json catalog_;
     std::string bind_, default_application_;
     std::map<std::string,uint16_t> configured_applications_;

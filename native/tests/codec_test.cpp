@@ -10,6 +10,15 @@ template<class Function> void rejects(Function function) {
 }
 int main() {
     try {
+        Bytes all_bytes;
+        std::ostringstream reference;
+        for(unsigned int value=0;value<256;++value) {
+            all_bytes.push_back(static_cast<uint8_t>(value));
+            reference<<std::hex<<std::setw(2)<<std::setfill('0')<<value;
+        }
+        require(hex({}).empty(),"空 payload 十六进制转换错误");
+        require(hex(all_bytes)==reference.str(),"所有字节的小写十六进制转换不一致");
+        require(unhex(hex(all_bytes))==all_bytes,"所有字节的十六进制往返不一致");
         for(auto type:{"uint8","uint16","uint32","uint64","int8","int16","int32","int64"}) {
             Json schema={{"type",type}};
             Json value=std::string(type)[0]=='i'?Json(-1):Json(42);

@@ -1,5 +1,6 @@
 #pragma once
 #include "ipc.hpp"
+#include <boost/algorithm/hex.hpp>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -28,9 +29,11 @@ inline uint32_t bounded_number(const Json &value,uint32_t maximum,const char *la
     return result;
 }
 inline std::string hex(const Bytes &data) {
-    std::ostringstream out;
-    for (auto byte : data) out << std::hex << std::setw(2) << std::setfill('0') << int(byte);
-    return out.str();
+    // 使用已有 Boost 的字节转换，避免大 payload 每个字节都经过流格式化。
+    std::string out;
+    out.reserve(data.size()*2);
+    boost::algorithm::hex_lower(data.begin(),data.end(),std::back_inserter(out));
+    return out;
 }
 inline Bytes unhex(const std::string &text) {
     if (text.size() % 2 || text.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)

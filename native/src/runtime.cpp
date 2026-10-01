@@ -47,13 +47,17 @@ std::shared_ptr<vsomeip::application> Runtime::application(const std::string &na
     // 包括默认路由 application。停止逻辑成员不销毁上下文，数量有界且会话不复用。
     if(applications_.size()>=16)throw std::runtime_error("单进程最多初始化 16 个 application，请建立独立进程");
     auto stack=std::make_unique<ApplicationStack>(name,configured->second,allowed_subscribers_,restricted_,
-        [this,name](auto message){boost::asio::post(io_,[this,name,message]{receive(name,message);});});
+        [this,name](auto message){
+            receiver_->submit(static_cast<std::size_t>(message->get_payload()->get_length())+16,
+                [this,name,message]{receive(name,message);});
+        });
     auto app=stack->application();applications_.emplace(name,std::move(stack));return app;
 }
 Runtime::~Runtime() { shutdown(); }
 void Runtime::shutdown() {
     if(shutting_down_)return;
     shutting_down_=true;
+    receiver_->stop();
     std::vector<std::string> keys;
     for (auto &[key,m] : members_) keys.push_back(key);
     for (auto &key : keys) stop_member(key);
@@ -359,6 +363,11 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
 }
 void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payload,const std::string &direction,
                     uint8_t type,uint16_t client,uint16_t session,uint8_t code) {
+    // 没有实际监控连接时不构造大型 trace；业务交付仍包含原始 payload_hex。
+    monitors_.erase(std::remove_if(monitors_.begin(),monitors_.end(),[](const auto &weak){
+        auto connection=weak.lock();return !connection || !connection->socket.is_open();
+    }),monitors_.end());
+    if(monitors_.empty())return;
     Json message={{"action","trace"},{"function",api.name},{"member",m->key},{"direction",direction},
         {"service_id",m->service},{"instance_id",m->instance},{"method_id",api.id},{"client_id",client},
         {"session_id",session},{"message_type",type},{"return_code",code},{"payload_hex",hex(payload)},
