@@ -279,7 +279,9 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             if (m->timer) m->timer->cancel();
             m->timer=std::make_shared<boost::asio::steady_timer>(io_);m->count=0;
             auto epoch=++m->generator_epoch;
-            auto now=std::chrono::steady_clock::now();generator(m,args,epoch,now,now);result=true;
+            // 配置只复制一次，异步 tick 共享不可变快照，不能借用控制请求的生命周期。
+            auto cfg=std::make_shared<const Json>(args);
+            auto now=std::chrono::steady_clock::now();generator(m,cfg,epoch,now,now);result=true;
         } else if (function=="generator_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
             ++m->generator_epoch;if(m->timer)m->timer->cancel();result=true;
@@ -454,20 +456,20 @@ void Runtime::receive(std::shared_ptr<vsomeip::message> message) {
         }
     } catch(const std::exception &error) {log_error("someip.receive",error);}
 }
-void Runtime::generator(std::shared_ptr<Member> m,Json cfg,uint64_t epoch,std::chrono::steady_clock::time_point started,
+void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cfg,uint64_t epoch,std::chrono::steady_clock::time_point started,
                         std::chrono::steady_clock::time_point deadline) {
     if(!m->active || m->generator_epoch!=epoch)return;
     double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
-    auto g=cfg.at("generator");std::string kind=g.value("kind","constant");
+    const auto &g=cfg->at("generator");std::string kind=g.value("kind","constant");
     double lo=g.value("minimum",0.0),hi=g.value("maximum",100.0),period=g.value("period_seconds",5.0);
     if(period<=0)throw std::runtime_error("信号周期必须为正数");
     double value=g.value("initial",0.0);
     if(kind=="sine")value=(lo+hi)/2+(hi-lo)/2*std::sin(2*3.141592653589793*elapsed/period);
     else if(kind=="ramp")value=lo+(hi-lo)*std::fmod(elapsed,period)/period;
-    else if(kind=="sequence" && !g.value("sequence",Json::array()).empty())value=g.at("sequence")[m->count%g.at("sequence").size()];
+    else if(kind=="sequence" && g.contains("sequence") && !g.at("sequence").empty())value=g.at("sequence")[m->count%g.at("sequence").size()];
     else if(kind=="random") {static std::mt19937 rng(0);value=std::uniform_real_distribution<double>(lo,hi)(rng);}
     else if(kind!="constant" && kind!="sequence")throw std::runtime_error("未知发生器类型");
-    auto &api=m->apis.at(cfg.at("function").get<std::string>());
+    auto &api=m->apis.at(cfg->at("function").get<std::string>());
     std::string signal=g.value("signal_name","value"),type=g.value("data_type","float32");
     Json scalar=value;
     if(type=="boolean")scalar=value!=0;
@@ -476,7 +478,7 @@ void Runtime::generator(std::shared_ptr<Member> m,Json cfg,uint64_t epoch,std::c
     else if(type=="bytes")scalar=hex(Bytes{static_cast<uint8_t>(std::clamp(value,0.0,255.0))});
     m->last_value=value;++m->count;
     notify(m,api,Codec::encode(api.input,Json{{signal,scalar}}));
-    auto interval=std::chrono::milliseconds(cfg.value("interval_ms",100));
+    auto interval=std::chrono::milliseconds(cfg->value("interval_ms",100));
     deadline+=interval;
     if(deadline<std::chrono::steady_clock::now())deadline=std::chrono::steady_clock::now()+interval;
     m->timer->expires_at(deadline);

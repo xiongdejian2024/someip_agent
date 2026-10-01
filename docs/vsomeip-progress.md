@@ -514,3 +514,56 @@
   独立线上应用身份、完整 IPv4 选项/IPv6 分片、故障/长稳/吞吐/抖动矩阵、厂商心跳内部语义、
   Windows 实机安装升级和正式签名最新版发布源仍有门禁，完整目标保持 active。本轮代码、
   测试与验收记录提交推送；新远程 CI 独立观察，不能用本机成功替代远程结论。
+
+## 2026-10-01 分层短负载基线与发生器配置复制优化
+
+- 确认工作树从 a8e8950 开始，仅继续本轮自有改动。现有 SAT 适配器、原生 PCAP 导入器、
+  dpkt、pytest 和标准库足够测量，无新增包、自写 socket 客户端或协议栈。把既有 veth 建网
+  抽成共享 helper，仍只在 --network none 临时容器使用，未修改宿主/车辆网卡。
+- 新增安装包性能入口 make native-performance：UDP/TCP 各 4 个 RPC 阶段（32/1024 字节
+  blob、1/4 并发、各 200 次）和 4 个事件阶段（Python 逐条/原生 sequence，10/1 ms，3 秒），
+  共 16 阶段。完整保留 PCAP、手工黄金字节、逐序号线上/客户端核对、采集丢包、P50/95/99、
+  软件时间、各自原生 PID CPU/RSS 和 Python 总 CPU，核对 PID starttime 与安装包真实路径。
+  RPC 包含 Python 请求、socket、业务 echo 回调和返回，不能称纯原生延迟；Python 通知调用
+  无提交回执，原生 emitted_count 也只是尝试通知数，均与真实线上/客户端观察分别比较。
+- 优化前发现 generator 每 tick 深复制整个配置、generator 与 sequence；先保存同机基线，
+  再改启动时一次复制 shared_ptr<const Json> 不可变快照和 const 引用。保留字典接口、
+  定时器跳过策略与停止 epoch，新增空/缺失序列、调用方后续字典修改和停止后不再通知的
+  UDP/TCP 回归。单次 1 ms 对照服务 CPU 从 UDP 51.5%/TCP 53.1% 降至 34.2%/35.2%，
+  仍约 999 条/秒；低频 UDP P99 反而变差，不宣称所有抖动改善。原始数据、全部表格和
+  计数/时间边界写入 docs/performance.md，不把短测当最大吞吐、硬实时、HIL 或长稳承诺。
+- 第一份基线 profile-04 抓包内核丢 2362 帧，仅解出 93/2869 条事件，客户端却收到完整
+  2869 条，明确标 observation_failed。保留 build/performance-baseline-evidence，去除
+  逐 packet 的 -U 强制刷新、增加 16 MiB 缓冲，仍 immediate-mode、SIGINT 后等待 flush；
+  重新测得 build/performance-buffered-baseline-evidence 和
+  build/performance-optimized-comparison-evidence 各 4 阶段全部完整、采集丢包为 0。
+- build/performance-installed-evidence 的完整 16 阶段均 verified：1600 RPC 成功返回，
+  3200 条请求/响应与 13204 条事件逐序号核对，全部采集内核丢包为 0。线上间隔与客户端
+  回调时间分别保留，TCP 合并消息的零间隔及并发 RPC 数字序号乱序不隐藏。verified 仅表示
+  此次已产生消息完整核对，不代表达到目标频率、CPU/P99 门限或所有线上负载条件。
+- 功能验收首次使用旧 -U 采集器，170 项虚拟网通过但抓包缺失复合黄金向量；日志确认采集
+  丢了 466 帧，失败目录 build/performance-functional-installed-evidence 保留，不称完整
+  验收通过。功能 runner 同步改采集缓冲并增加就绪等待、退出状态和唯一内核丢包计数门禁。
+  初版就绪判断抢读尚未创建的日志，失败清理 SIGINT 早于处理器安装后进入等待；两份部分
+  证据 build/performance-source-evidence、build/performance-final-installed-evidence 保留，
+  仅结束自己启动的 tcpdump。修正文件存在判断、TERM+五秒有界等待/KILL 保底。新权限
+  夹具复用原样 helper，实测提前退出和忽略信号的清理分支，禁止覆盖既有 report/profile。
+- 最终源码 build/performance-final-source-evidence 与不挂产品源码安装包
+  build/performance-verified-installed-evidence 各通过 120+50=170 虚拟网、10 审计、10 权限、
+  268 后端；逐份 JUnit 核对零失败/错误/跳过。各有 932 个黄金向量和 16 组分片；源码
+  17284 帧/3261 条解码消息，安装包 16730 帧/3289 条；两份日志与审计均确认内核采集丢包 0。
+  另有 build/performance-runner-regression-evidence 的最终 12 权限/清理+10 统计共 22 项
+  回归，以及 build/performance-final-runner-evidence 的最终入口同样 22 项+4 负载阶段通过。
+  使用临时哨兵报告实测旧证据目录被拒绝、原内容不变，不拿旧失败目录反复重写。
+- 产品镜像 someip-agent-vsomeip:performance-test 重新编译，CTest 两项通过；镜像 SHA-256
+  a4ee828f0d7a998954c46576ff1f5d8ef913e717e06fad56e685df35f0584813。源码与镜像二进制 SHA
+  一致为 aff31f69de53d7409887e7ef71fe470739f285fc69afbcbaf6a28b17d234606d；Python 产品未改，
+  wheel SHA 保持 ce8bc6d7fa746aa43a3ff57c0c0a25d7eae3a2d01fb36930b37205f3b9c8a59a。
+  后续测试脚本通过只读挂载验收；Ruff、shell/YAML 语法、版本一致性、diff 空白检查通过。
+  CI 接入完整 16 阶段和独立证据 artifact，不对共享 runner 凭空指定性能阈值。
+- a8e8950 的远程 run 36813869182 已终态：Linux 原生/安装包、前后端通过，Windows 中文
+  pwsh 语法通过；整体 failure 仍在 build-native.ps1 第 27 行 CaptureTriplet/OverlayTriplets/
+  Npcap Packet_ROOT 未配置门禁，安装器与上传跳过。未绕过 SDK/null 捕获后端门禁。
+  Windows 实机、长稳/多服务/故障完整性能矩阵、独立线上应用身份、完整 IP/ARXML/OEM 语义
+  以及正式签名最新版发布源仍需继续；完整目标保持 active。本轮代码与记录提交推送，新
+  提交的远程 CI 独立核对，不能把本机短负载结果说成远程或整体完成。

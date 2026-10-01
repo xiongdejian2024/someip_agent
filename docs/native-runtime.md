@@ -25,6 +25,7 @@ make native-image
 make native-test
 make native-regression
 make native-installed-test
+make native-performance NATIVE_PERFORMANCE_EVIDENCE=build/performance-new-run
 ```
 
 `native-regression` 先完成编译再运行后端，禁止在同一输出目录同时重链接二进制和启动测试。
@@ -38,6 +39,11 @@ make native-installed-test
 `native-installed-test` 使用先前构建的镜像，仅挂载测试与证据目录，不设置 PYTHONPATH；
 先验证各产品模块均来自 site-packages，再执行相同虚拟网和全部后端回归。
 安装包证据独立保存在 `build/installed-evidence/`，不能与源码挂载验收混为一谈。
+
+`native-performance` 也只挂载测试和证据，校验 site-packages 来源，按 16 个短阶段分别测
+Python RPC/逐条通知/原生 sequence。保存 PCAP、逐序号审计、P50/P95/P99、CPU 与 RSS。
+每次指定新目录；verified 不表示达到频率/P99 门限，不把控制链路延迟冒充纯协议栈性能。
+测量口径、首次采集丢包与修复、同机复制优化对照见[性能证据](performance.md)。
 
 输出证据在 `build/virtual-evidence/`：JUnit、原生日志、接口信息、PCAP 与黄金报文审计 JSON。
 抓包审计核对 UDP/TCP 请求、响应、字段通知、周期浮点事件，以及 Offer/StopOffer/Subscribe/Ack。

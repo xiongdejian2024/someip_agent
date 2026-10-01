@@ -63,7 +63,7 @@ class Runtime {
     void subscribe(std::shared_ptr<Member>, const std::string &, bool);
     bool has_other_event_consumer(const std::shared_ptr<Member> &, uint16_t) const;
     void notify(std::shared_ptr<Member>, const Api &, const Bytes &);
-    void generator(std::shared_ptr<Member>, Json, uint64_t, std::chrono::steady_clock::time_point,
+    void generator(std::shared_ptr<Member>, std::shared_ptr<const Json>, uint64_t, std::chrono::steady_clock::time_point,
                    std::chrono::steady_clock::time_point);
     void event_cycle(std::shared_ptr<Member>, uint64_t, std::chrono::steady_clock::time_point);
     void trace(std::shared_ptr<Member>, const Api &, const Bytes &, const std::string &,

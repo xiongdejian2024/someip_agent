@@ -29,6 +29,8 @@ jobs:
         run: make native-regression
       - name: 不挂载源码的安装包虚拟网与后端验收
         run: make native-installed-test
+      - name: 安装包短负载与逐序号线上核验
+        run: make native-performance
       - name: 保留抓包、日志和测试报告
         if: always()
         uses: actions/upload-artifact@v4
@@ -42,6 +44,13 @@ jobs:
         with:
           name: vsomeip-installed-evidence
           path: build/installed-evidence/
+          if-no-files-found: error
+      - name: 保留性能采样、逐序号审计和抓包
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsomeip-performance-evidence
+          path: build/performance-evidence/
           if-no-files-found: error
 
   backend-test:
@@ -78,6 +87,11 @@ jobs:
           native/tests/test_evidence_permissions.py native/tests/test_recovery_virtual.py
           native/tests/test_sat_wti_virtual.py
           native/tests/test_arxml_composite_virtual.py
+          native/tests/benchmark_virtual.py native/tests/performance_metrics.py
+          native/tests/test_performance_metrics.py
+
+      - name: 性能统计口径回归
+        run: python -m pytest native/tests/test_performance_metrics.py
 
       - name: 执行后端测试
         run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing

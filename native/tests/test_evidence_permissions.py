@@ -9,11 +9,20 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture
-def sandbox():
+@pytest.fixture(
+    params=[
+        ("run_virtual.sh", "virtual-evidence"),
+        ("run_performance.sh", "performance-evidence"),
+    ]
+)
+def sandbox(request):
     assert os.geteuid() == 0, "权限回归需在原生验收容器内以 root 执行"
-    with tempfile.TemporaryDirectory(prefix="someip-evidence-permissions-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="someip-evidence-permissions-"
+    ) as temporary:
         root = Path(temporary)
+        runner, evidence_name = request.param
+        evidence = root / "build" / evidence_name
         root.chmod(0o755)
         build = root / "build"
         build.mkdir()
@@ -23,37 +32,45 @@ def sandbox():
         # 在首条网络设置处中断，真实 shell EXIT trap 必须保留失败并归还证据。
         command = commands / "ip"
         command.write_text(
-            "#!/bin/bash\nmkdir -m 700 build/virtual-evidence/private\n"
-            "printf '%s\\n' '临时测试日志' > build/virtual-evidence/private/log\n"
-            "chmod 600 build/virtual-evidence/private/log\nexit 42\n"
+            f"#!/bin/bash\nmkdir -m 700 build/{evidence_name}/private\n"
+            f"printf '%s\\n' '临时测试日志' > build/{evidence_name}/private/log\n"
+            f"chmod 600 build/{evidence_name}/private/log\nexit 42\n"
         )
         command.chmod(0o755)
         # 副本不再次执行权限回归自身；后续真实网络步骤在首条 ip 命令处中断。
         preflight = commands / "python"
         preflight.write_text("#!/bin/bash\nexit 0\n")
         preflight.chmod(0o755)
-        source = Path(__file__).with_name("run_virtual.sh").read_text()
+        source = Path(__file__).with_name(runner).read_text()
+        helper = root / "native" / "tests" / "virtual_network.sh"
+        helper.parent.mkdir(parents=True)
+        helper.write_text(Path(__file__).with_name("virtual_network.sh").read_text())
         assert source.count("cd /workspace\n") == 1
-        script = root / "run_virtual.sh"
+        script = root / runner
         # 测试副本仅改工作目录；清理与权限代码原样执行，不改产品脚本。
-        script.write_text(source.replace("cd /workspace\n", f"cd {shlex.quote(str(root))}\n"))
-        yield root, commands, script
+        script.write_text(
+            source.replace("cd /workspace\n", f"cd {shlex.quote(str(root))}\n")
+        )
+        yield root, commands, script, evidence
 
 
-def run(sandbox, owner="12345:12345"):
-    _root, commands, script = sandbox
+def run(sandbox, owner="12345:12345", timeout=5):
+    _root, commands, script, _evidence = sandbox
     environment = {**os.environ, "PATH": str(commands) + ":" + os.environ["PATH"]}
     environment["SOMEIP_AGENT_EVIDENCE_OWNER"] = owner
     return subprocess.run(
-        ["bash", str(script)], env=environment, capture_output=True, timeout=5, check=False
+        ["bash", str(script)],
+        env=environment,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
     )
 
 
 def test_failed_run_returns_private_evidence_to_non_root_runner(sandbox):
-    root, _commands, _script = sandbox
+    root, _commands, _script, evidence = sandbox
     result = run(sandbox)
     assert result.returncode == 42, result.stderr.decode()
-    evidence = root / "build" / "virtual-evidence"
     assert evidence.is_dir()
     for path in [evidence, *evidence.rglob("*")]:
         assert path.stat().st_uid == path.stat().st_gid == 12345
@@ -84,18 +101,18 @@ def test_failed_run_returns_private_evidence_to_non_root_runner(sandbox):
 
 
 def test_invalid_owner_fails_before_creating_evidence(sandbox):
-    root, _commands, _script = sandbox
+    _root, _commands, _script, evidence = sandbox
     result = run(sandbox, owner="runner;other")
     assert result.returncode == 1
     assert "UID:GID" in result.stderr.decode()
-    assert not (root / "build" / "virtual-evidence").exists()
+    assert not evidence.exists()
 
 
 def test_evidence_root_symlink_is_rejected_without_changing_target(sandbox):
-    root, _commands, _script = sandbox
+    root, _commands, _script, evidence = sandbox
     target = root / "not-evidence"
     target.mkdir(mode=0o700)
-    (root / "build" / "virtual-evidence").symlink_to(target, target_is_directory=True)
+    evidence.symlink_to(target, target_is_directory=True)
     result = run(sandbox)
     assert result.returncode == 1
     assert "符号链接" in result.stderr.decode()
@@ -104,7 +121,7 @@ def test_evidence_root_symlink_is_rejected_without_changing_target(sandbox):
 
 
 def test_cleanup_failure_never_masks_original_exit_code(sandbox):
-    _root, commands, _script = sandbox
+    _root, commands, _script, _evidence = sandbox
     chown = commands / "chown"
     chown.write_text("#!/bin/bash\nprintf '%s\\n' '测试所有权归还失败' >&2\nexit 77\n")
     chown.chmod(0o755)
@@ -114,14 +131,52 @@ def test_cleanup_failure_never_masks_original_exit_code(sandbox):
 
 
 def test_cleanup_does_not_follow_nested_symlink(sandbox):
-    root, commands, _script = sandbox
+    root, commands, _script, evidence = sandbox
     outside = root / "build" / "outside-evidence"
     outside.mkdir(mode=0o700)
     command = commands / "ip"
     command.write_text(
-        "#!/bin/bash\nln -s ../outside-evidence build/virtual-evidence/link\nexit 42\n"
+        f"#!/bin/bash\nln -s ../outside-evidence {shlex.quote(str(evidence))}/link\nexit 42\n"
     )
     result = run(sandbox)
     assert result.returncode == 42
     assert outside.stat().st_uid == 0 and outside.stat().st_mode & 0o777 == 0o700
-    assert (root / "build" / "virtual-evidence" / "link").lstat().st_uid == 12345
+    assert (evidence / "link").lstat().st_uid == 12345
+
+
+@pytest.mark.parametrize(
+    "sandbox", [("run_virtual.sh", "virtual-evidence")], indirect=True
+)
+def test_capture_exit_before_ready_fails_instead_of_starting_tests(sandbox):
+    _root, commands, _script, evidence = sandbox
+    (commands / "ip").write_text("#!/bin/bash\nexit 0\n")
+    capture = commands / "tcpdump"
+    capture.write_text("#!/bin/bash\nexit 43\n")
+    capture.chmod(0o755)
+    result = run(sandbox)
+    assert result.returncode == 1, result.stderr.decode()
+    assert "采集进程提前退出" in result.stderr.decode()
+    assert not (evidence / "junit.xml").exists()
+
+
+@pytest.mark.parametrize(
+    "sandbox", [("run_virtual.sh", "virtual-evidence")], indirect=True
+)
+def test_capture_ignoring_signals_is_killed_with_bounded_cleanup(sandbox):
+    _root, commands, _script, evidence = sandbox
+    (commands / "ip").write_text("#!/bin/bash\nexit 0\n")
+    (commands / "python").write_text(
+        '#!/bin/bash\nif [[ "$*" == *native/tests/test_virtual.py* ]]; then exit 42; fi\nexit 0\n'
+    )
+    capture = commands / "tcpdump"
+    capture.write_text(
+        "#!/usr/bin/python3\nimport signal, sys, time\n"
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "print('listening on', file=sys.stderr, flush=True)\ntime.sleep(60)\n"
+    )
+    capture.chmod(0o755)
+    result = run(sandbox, timeout=10)
+    assert result.returncode == 42, result.stderr.decode()
+    assert "五秒内未退出" in result.stderr.decode()
+    assert (evidence / "tcpdump.log").stat().st_uid == 12345

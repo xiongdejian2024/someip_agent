@@ -5,6 +5,7 @@ NATIVE_IMAGE ?= someip-agent-vsomeip:test
 NATIVE_BASE ?= debian:bookworm-slim
 NATIVE_SDK ?= upstream
 NATIVE_INSTALLED_EVIDENCE ?= build/installed-evidence
+NATIVE_PERFORMANCE_EVIDENCE ?= build/performance-evidence
 NATIVE_IPV6 := --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 --sysctl net.ipv6.conf.lo.disable_ipv6=0
 
 ifeq ($(OS),Windows_NT)
@@ -13,7 +14,7 @@ else
 VENV_PYTHON := $(VENV)/bin/python
 endif
 
-.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows native-image native-compile native-test native-regression native-installed-test
+.PHONY: help install install-backend install-frontend check-version lint test typecheck build-frontend ci dev-backend dev-frontend docker-up docker-down package-windows native-image native-compile native-test native-regression native-installed-test native-performance
 
 help:
 	@echo "install          安装后端开发依赖和前端依赖"
@@ -30,6 +31,7 @@ help:
 	@echo "native-test      编译原生核心并运行隔离虚拟以太网功能测试"
 	@echo "native-regression 在真实原生运行时上执行全部后端测试，禁止跳过"
 	@echo "native-installed-test 不挂载产品源码，验收镜像内已安装的包与二进制"
+	@echo "native-performance 不挂载产品源码，记录 RPC/逐条通知/原生发生器负载证据"
 
 $(VENV_PYTHON):
 	$(PYTHON) -m venv $(VENV)
@@ -95,3 +97,11 @@ native-installed-test:
 	  -v "$(CURDIR)/$(NATIVE_INSTALLED_EVIDENCE):/workspace/build/virtual-evidence" \
 	  -e SOMEIP_AGENT_EVIDENCE_OWNER="$$(id -u):$$(id -g)" \
 	  $(NATIVE_IMAGE) bash native/tests/run_installed.sh
+
+native-performance:
+	mkdir -p $(NATIVE_PERFORMANCE_EVIDENCE)
+	docker run --rm --init --privileged --network none $(NATIVE_IPV6) \
+	  -v "$(CURDIR)/native/tests:/workspace/native/tests:ro" \
+	  -v "$(CURDIR)/$(NATIVE_PERFORMANCE_EVIDENCE):/workspace/build/performance-evidence" \
+	  -e SOMEIP_AGENT_EVIDENCE_OWNER="$$(id -u):$$(id -g)" \
+	  $(NATIVE_IMAGE) bash native/tests/run_performance.sh $(PERFORMANCE_ARGS)

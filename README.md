@@ -43,6 +43,8 @@ SAT 适配器可监督本实例拥有的原生进程，检测控制循环持续�
 离线 PCAP 已接入相同原生重组/解码路径，Python 仅聚合展示，不保留纯 Python 解析回退。
 IPv4 分片已接入成熟重组库，但不代表支持所有 IP 流量。当前状态与复现命令见
 [原生运行时](docs/native-runtime.md)和[执行记录](docs/vsomeip-progress.md)。
+已补充同机的 RPC、逐条 Python 通知和原生序列发生器短负载证据，分别核对线上与客户端
+交付；数值与口径见[性能证据](docs/performance.md)，不作为硬实时、线速或长稳承诺。
 
 ## 本地开发
 

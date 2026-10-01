@@ -11,6 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 import dpkt
+from performance_metrics import kernel_capture_drops
 from someip_agent.protocol.sd import SdPayload
 from someip_agent.protocol.someip import SomeIpDecodeError, decode_many
 
@@ -759,10 +760,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="虚拟以太网黄金报文审计")
     parser.add_argument("pcap", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--capture-log", type=Path)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     try:
+        drops = None
+        if args.capture_log is not None:
+            drops = kernel_capture_drops(args.capture_log.read_text())
+            if drops:
+                raise AssertionError(f"采集内核丢了 {drops} 帧，不能声明抓包完整")
         result = audit(args.pcap)
+        if drops is not None:
+            result["kernel_capture_drops"] = drops
         args.output.write_text(
             json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
         )

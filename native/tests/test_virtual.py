@@ -284,6 +284,49 @@ def test_native_periodic_generator_and_stop(partners):
     )
 
 
+@pytest.mark.parametrize("sequence", [[], None])
+def test_native_sequence_empty_or_absent_retains_initial_and_stops(partners, sequence):
+    server, client, _ = partners
+    generator = {
+        "kind": "sequence",
+        "signal_name": "value",
+        "data_type": "float32",
+        "initial": 64.5,
+    }
+    if sequence is not None:
+        generator["sequence"] = sequence
+    server.sim_operator.send_request(
+        "generator_start",
+        {
+            "member": "DoorService_server",
+            "function": "UpdateSampleEvent",
+            "interval_ms": 10,
+            "generator": generator,
+        },
+    )
+    # 返回后修改调用方字典不得影响原生异步配置；空序列仍按既有 initial 语义发包。
+    generator["initial"] = 99.5
+    for _ in range(3):
+        client.empty_event_list()
+        assert client.ck_coming_event(
+            "DoorService_client", "Sample", {"value": 64.5}, timeout=2
+        ) == {"value": 64.5}
+    server.sim_operator.send_request("generator_stop", {"member": "DoorService_server"})
+    count = server.sim_operator.send_request("running_service")["DoorService_server"][
+        "emitted_count"
+    ]
+    assert count >= 3
+    time.sleep(0.1)
+    client.empty_event_list()
+    assert client.ck_no_event("DoorService_client", "Sample", timeout=0.1)
+    assert (
+        server.sim_operator.send_request("running_service")["DoorService_server"][
+            "emitted_count"
+        ]
+        == count
+    )
+
+
 def test_stop_offer_reconnect_and_incremental_start(partners):
     server, client, _ = partners
     server.stop_single_partner("DoorService_server")
