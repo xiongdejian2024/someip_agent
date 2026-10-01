@@ -12,8 +12,9 @@ class WireTypeError(ValueError):
     """类型缺失、歧义或尚未实现的序列化布局。"""
 
 
-def _value(element: etree._Element, name: str) -> str | None:
-    values = element.xpath(f".//*[local-name()='{name}']/text()")
+def _value(element: etree._Element, name: str, *, direct: bool = False) -> str | None:
+    axis = "./*" if direct else ".//*"
+    values = element.xpath(f"{axis}[local-name()='{name}']/text()")
     unique = {str(value).strip() for value in values if str(value).strip()}
     if len(unique) > 1:
         raise WireTypeError(f"{name} 有多个不同值，不能选择第一个")
@@ -92,14 +93,15 @@ class WireTypeResolver:
             if len(children) != 1:
                 raise WireTypeError("复合类型 ARRAY 必须有唯一元素类型")
             child = children[0]
-            size_text = _value(child, "ARRAY-SIZE")
+            # 每一维只读自己的元数据，不能把内层数组的不同长度视为外层歧义。
+            size_text = _value(child, "ARRAY-SIZE", direct=True)
             try:
                 size = int(size_text or "", 10)
             except ValueError as exc:
                 raise WireTypeError(f"ARRAY-SIZE 非法: {size_text}") from exc
             if not 1 <= size <= 65536:
                 raise WireTypeError("ARRAY-SIZE 必须在 1-65536 范围内")
-            semantics = _value(child, "ARRAY-SIZE-SEMANTICS")
+            semantics = _value(child, "ARRAY-SIZE-SEMANTICS", direct=True)
             if semantics not in {"FIXED-SIZE", "VARIABLE-SIZE"}:
                 raise WireTypeError("数组缺少明确 ARRAY-SIZE-SEMANTICS")
             return {

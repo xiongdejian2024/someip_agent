@@ -33,7 +33,7 @@ class TransformationResolver:
                     ".//*[contains(local-name(), 'TLV') or contains(local-name(), 'TLY')]"
                 ):
                     self._unsupported.add(key)
-        # 细粒度覆盖含上下文引用；未支持前拒绝受影响元素，不能静默退回全局属性。
+        # 细粒度覆盖含上下文引用；未支持前保守拒绝全模型自动初始化，不能忽略覆盖。
         self._fine_grained = bool(
             root.xpath("//*[local-name()='SOMEIP-DATA-PROTOTYPE-TRANSFORMATION-PROPS']")
         )

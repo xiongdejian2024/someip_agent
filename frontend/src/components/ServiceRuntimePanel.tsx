@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, describeApiError } from '../api/client'
 import { logError, logInfo } from '../api/logger'
+import { byteOrderOverride, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
 import type { NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
 import { Icon } from './Icon'
@@ -9,7 +10,7 @@ import './ServiceRuntimePanel.css'
 export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefinition; demo: boolean }) {
   const [role, setRole] = useState<'client' | 'server'>('client')
   const [transport, setTransport] = useState<'internal' | 'udp' | 'tcp'>('internal')
-  const [byteOrder, setByteOrder] = useState<'big' | 'little'>('big')
+  const [byteOrder, setByteOrder] = useState<ByteOrderSelection>('arxml')
   const [applicationId, setApplicationId] = useState('0x3401')
   const [peer, setPeer] = useState('10.77.0.2')
   const [port, setPort] = useState('30520')
@@ -39,7 +40,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const commandBusy = operations.has(commandKey)
   const requestsBusy = operations.has(`requests:${sessionId}`)
 
-  useEffect(() => { setInstance('') }, [selected?.id])
+  useEffect(() => { setInstance(''); setByteOrder('arxml') }, [selected?.id])
   useEffect(() => {
     let cancelled = false
     let polling = false
@@ -86,14 +87,14 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       members: {
         [selected.name]: {
           service: selected.path, deployment_path: selected.deploymentPath, role, transport,
-          instance_id: instanceId, byte_order: byteOrder,
+          instance_id: instanceId, ...byteOrderOverride(byteOrder),
           ...(transport === 'internal' ? {} : { peer_host: peer, port: Number(port) }),
         },
         ...(transport === 'internal' && includeInternalPeer ? {
           [`${selected.name}Peer`]: {
             service: selected.path, deployment_path: selected.deploymentPath,
             role: role === 'client' ? 'server' as const : 'client' as const,
-            transport: 'internal' as const, instance_id: instanceId, byte_order: byteOrder,
+            transport: 'internal' as const, instance_id: instanceId, ...byteOrderOverride(byteOrder),
           },
         } : {}),
       },
@@ -126,7 +127,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       <label>传输<select value={transport} onChange={event => setTransport(event.target.value as typeof transport)}><option value="internal">内部隔离（不发 SD）</option><option value="udp">UDP 在线</option><option value="tcp">TCP 在线</option></select></label>
       <label>部署实例<select value={instance || String(instances[0] ?? '')} onChange={event => setInstance(event.target.value)}>{instances.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>应用 ID<input value={applicationId} onChange={event => setApplicationId(event.target.value)} /></label>
-      <label>明确标量字节序<select value={byteOrder} onChange={event => setByteOrder(event.target.value as typeof byteOrder)}><option value="big">大端</option><option value="little">小端</option></select></label>
+      <label>序列化字节序<select value={byteOrder} onChange={event => setByteOrder(event.target.value as ByteOrderSelection)}><option value="arxml">遵循 ARXML（缺省标量大端）</option><option value="big">明确大端（冲突时拒绝）</option><option value="little">明确小端（冲突时拒绝）</option></select></label>
       {transport === 'internal' && <label className="service-runtime-checkbox"><input type="checkbox" checked={includeInternalPeer} onChange={event => setIncludeInternalPeer(event.target.checked)} />同一会话加入内部测试对端</label>}
       {transport !== 'internal' && <><label>授权对端 IPv4<input value={peer} onChange={event => setPeer(event.target.value)} /></label><label>服务端口<input value={port} onChange={event => setPort(event.target.value)} /></label></>}
       <button className="button primary" disabled={busy || demo || !selected?.deploymentPath} onClick={() => void start()}><Icon name="play" />初始化所选服务</button>

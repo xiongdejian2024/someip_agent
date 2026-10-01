@@ -33,15 +33,56 @@ def test_composite_types_mapping_field_order_and_deployment_are_explicit():
     assert signal.data_type == SignalDataType.STRUCT
     schema = signal.wire_schema
     assert schema["length_bytes"] == 2 and schema["byte_order"] == "big"
-    assert [field["name"] for field in schema["fields"]] == ["tag", "samples", "bytes", "nested"]
+    assert [field["name"] for field in schema["fields"]] == [
+        "tag",
+        "samples",
+        "bytes",
+        "matrix",
+        "nested",
+    ]
     fixed, variable = schema["fields"][1:3]
     assert fixed["length"] == 2 and fixed["length_bytes"] == 2
     assert variable["max_length"] == 3 and variable["length_bytes"] == 2
-    assert schema["fields"][3]["fields"][0]["type"] == "int16"
+    assert schema["fields"][3]["length"] == 2
+    assert schema["fields"][3]["element"]["length"] == 3
+    assert schema["fields"][3]["element"]["element"]["type"] == "uint8"
+    assert schema["fields"][4]["fields"][0]["type"] == "int16"
     assert model.services[0].methods[1].input_signals[0].wire_schema["type"] == "uint16"
     assert bundle(model).catalog["EnvelopeService"]["methods"]["Transform"]["input"]["fields"][
         0
     ] == {"name": "payload", **schema}
+    field = model.services[0].fields[0]
+    assert field.signal.wire_schema == schema
+    assert field.event_group_ids == [1]
+    catalog = bundle(model).catalog["EnvelopeService"]
+    assert catalog["methods"]["GetEnvelopeState"]["output"] == schema
+    assert catalog["methods"]["SetEnvelopeState"]["input"]["fields"][0] == {
+        "name": "EnvelopeState",
+        **schema,
+    }
+    assert catalog["events"]["UpdateEnvelopeStateEvent"]["schema"] == schema
+
+
+def test_inline_array_outer_metadata_cannot_be_borrowed_from_inner_dimension():
+    root = etree.fromstring(FIXTURE.read_bytes())
+    row = root.xpath(
+        "//*[local-name()='IMPLEMENTATION-DATA-TYPE-ELEMENT'][*[local-name()='SHORT-NAME']='row']"
+    )[0]
+    row.remove(row.xpath("./*[local-name()='ARRAY-SIZE']")[0])
+    model = parse(etree.tostring(root))
+    with pytest.raises(CatalogBuildError, match="ARRAY-SIZE"):
+        bundle(model)
+
+
+def test_inline_array_outer_semantics_cannot_be_borrowed_from_inner_dimension():
+    root = etree.fromstring(FIXTURE.read_bytes())
+    row = root.xpath(
+        "//*[local-name()='IMPLEMENTATION-DATA-TYPE-ELEMENT'][*[local-name()='SHORT-NAME']='row']"
+    )[0]
+    row.remove(row.xpath("./*[local-name()='ARRAY-SIZE-SEMANTICS']")[0])
+    model = parse(etree.tostring(root))
+    with pytest.raises(CatalogBuildError, match="SEMANTICS"):
+        bundle(model)
 
 
 def test_little_endian_is_not_overwritten_by_default_or_conflicting_ui():

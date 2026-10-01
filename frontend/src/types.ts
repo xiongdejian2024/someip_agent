@@ -89,7 +89,7 @@ export interface NativeServiceRequest {
     role: 'client' | 'server'
     transport: 'internal' | 'udp' | 'tcp'
     instance_id: number
-    byte_order: 'big' | 'little'
+    byte_order?: 'big' | 'little'
     peer_host?: string
     port?: number
   }>

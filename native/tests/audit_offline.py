@@ -138,7 +138,7 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
                     )
                 )
             )
-            if not count:
+            if count < expected.get("required_messages", 1):
                 raise AssertionError(
                     f"原生离线导入缺少 {name} 人工黄金消息: {expected}"
                 )

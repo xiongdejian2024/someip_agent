@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import socket
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import dpkt
 import pytest
 from audit_offline import audit as audit_native
-from audit_pcap import audit
+from audit_pcap import audit, composite_golden, composite_payload
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +89,7 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(
     assert checked["ipv4_fragment_packets"] == reference["ipv4_fragment_packets"]
     # 原生导入审计必须采用相同的实际分片/方向边界，而非从其他流借帧数。
     result = audit_native(path, checked, tmp_path)
-    assert len(result["golden_messages"]) == 204
+    assert len(result["golden_messages"]) == 932
     assert len(result["fragment_imports"]) == 16
     assert result["statistics"]["packet_count"] == len(frames) + 1
 
@@ -170,3 +171,58 @@ def test_paused_inflight_business_replay_is_rejected(tmp_path, captured):
     write_copy(path, frames, link_type, replay)
     with pytest.raises(AssertionError, match="在途请求被重放"):
         audit(path)
+
+
+def test_composite_manual_golden_anchors_and_all_field_width_profiles():
+    assert composite_payload("big", 0, 0) == "071234abcd0102010203040506fffe"
+    assert (
+        composite_payload("big", 2, 2)
+        == "001b0700041234abcd00020102000a000301020300030405060002fffe"
+    )
+    assert (
+        composite_payload("little", 2, 2)
+        == "1b000704003412cdab020001020a00030001020303000405060200feff"
+    )
+    vectors = composite_golden(defaultdict(lambda: 2))
+    assert len(vectors) == 768
+    assert len({(v["transport"], v["service_port"]) for v in vectors}) == 64
+    assert {v["struct_length_bytes"] for v in vectors} == {0, 1, 2, 4}
+    assert {v["array_length_bytes"] for v in vectors} == {0, 1, 2, 4}
+    assert all(
+        v["required_messages"]
+        == (2 if (v["method_id"], v["message_type"]) == (0x0101, 0) else 1)
+        for v in vectors
+    )
+
+
+def composite_counters():
+    return Counter(
+        {
+            (
+                v["transport"],
+                v["service_port"],
+                v["method_id"],
+                v["message_type"],
+                v["payload_hex"],
+            ): 2
+            for v in composite_golden(defaultdict(lambda: 2))
+        }
+    )
+
+
+def test_composite_audit_requires_both_getter_calls_and_changed_field_notification():
+    packets = composite_counters()
+    packets[("udp", 30530, 0x0101, 0, "")] = 1
+    with pytest.raises(AssertionError, match="黄金报文缺失"):
+        composite_golden(packets)
+    packets[("udp", 30530, 0x0101, 0, "")] = 2
+    packets[("tcp", 30593, 0x8101, 2, composite_payload("little", 4, 4, tag=8))] = 0
+    with pytest.raises(AssertionError, match="黄金报文缺失"):
+        composite_golden(packets)
+
+
+def test_composite_audit_rejects_invalid_request_not_just_callback_count():
+    packets = composite_counters()
+    packets[("udp", 30530, 1, 0, composite_payload("big", 0, 0, tag=99))] = 1
+    with pytest.raises(AssertionError, match="非法复合 ARXML 请求"):
+        composite_golden(packets)

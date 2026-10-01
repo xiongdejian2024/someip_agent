@@ -138,7 +138,7 @@ def audit(path: Path) -> dict:
                         port = next(
                             (
                                 port
-                                for port in range(30530, 30538)
+                                for port in range(30530, 30594)
                                 if port in (transport.sport, transport.dport)
                             ),
                             None,
@@ -648,35 +648,88 @@ def audit(path: Path) -> dict:
     }
 
 
+def composite_payload(order, struct_width, array_width, tag=7):
+    # 独立手工拼接，不导入产品 schema/Codec；整数常量与每一层字节长度分别推导。
+    def prefix(size, width):
+        return size.to_bytes(width, order) if width else b""
+
+    words = bytes.fromhex("1234abcd" if order == "big" else "3412cdab")
+    temperature = bytes.fromhex("fffe" if order == "big" else "feff")
+    rows = (
+        prefix(3, array_width)
+        + b"\x01\x02\x03"
+        + prefix(3, array_width)
+        + b"\x04\x05\x06"
+    )
+    body = (
+        bytes([tag])
+        + prefix(4, array_width)
+        + words
+        + prefix(2, array_width)
+        + b"\x01\x02"
+        + prefix(6 + 2 * array_width, array_width)
+        + rows
+        + prefix(2, struct_width)
+        + temperature
+    )
+    assert len(body) == 15 + 5 * array_width + struct_width
+    return (prefix(len(body), struct_width) + body).hex()
+
+
 def composite_golden(packets):
     checks = []
-    # 独立手工推导：长度以字节计；定长数组也有前缀；嵌套有符号整数使用补码。
-    vectors = {
-        ("big", 0): "0700041234abcd00020102fffe",
-        ("little", 0): "0704003412cdab02000102feff",
-        ("big", 2): "000f0700041234abcd000201020002fffe",
-        ("little", 2): "0f000704003412cdab020001020200feff",
-    }
-    for (order, width), payload in vectors.items():
+    widths = (0, 1, 2, 4)
+    for order, width, array_width in (
+        (order, width, array_width)
+        for order in ("big", "little")
+        for width in widths
+        for array_width in widths
+    ):
+        payload = composite_payload(order, width, array_width)
+        changed = composite_payload(order, width, array_width, tag=8)
         for transport in ("udp", "tcp"):
             port = (
                 30530
                 + (transport == "tcp")
                 + 2 * (order == "little")
-                + 4 * (width == 2)
+                + 4 * widths.index(width)
+                + 16 * widths.index(array_width)
             )
+            for (
+                observed_transport,
+                observed_port,
+                method,
+                kind,
+                actual,
+            ), count in packets.items():
+                if (
+                    count
+                    and (observed_transport, observed_port, method, kind)
+                    == (transport, port, 1, 0)
+                    and actual != payload
+                ):
+                    raise AssertionError(
+                        f"非法复合 ARXML 请求出现在实际报文: {transport} {port} {actual}"
+                    )
             scalar = "1234" if order == "big" else "3412"
-            for method, kind, expected in (
-                (1, 0, payload),
-                (1, 0x80, payload),
-                (2, 0, scalar),
-                (2, 0x80, scalar),
-                (0x8001, 2, payload),
+            for method, kind, expected, required in (
+                (1, 0, payload, 1),
+                (1, 0x80, payload, 1),
+                (2, 0, scalar, 1),
+                (2, 0x80, scalar, 1),
+                (0x8001, 2, payload, 1),
+                (0x0101, 0, "", 2),
+                (0x0101, 0x80, payload, 1),
+                (0x0101, 0x80, changed, 1),
+                (0x0102, 0, changed, 1),
+                (0x0102, 0x80, changed, 1),
+                (0x8101, 2, payload, 1),
+                (0x8101, 2, changed, 1),
             ):
                 count = packets[(transport, port, method, kind, expected)]
-                if not count:
+                if count < required:
                     raise AssertionError(
-                        f"复合 ARXML 黄金报文缺失: {transport} {order} {width} {method:#x} {kind:#x} {expected}"
+                        f"复合 ARXML 黄金报文缺失: {transport} {order} {width}/{array_width} {method:#x} {kind:#x} {expected}"
                     )
                 checks.append(
                     {
@@ -688,10 +741,15 @@ def composite_golden(packets):
                         "payload_hex": expected,
                         "byte_order": order,
                         "struct_length_bytes": width,
+                        "array_length_bytes": array_width,
+                        "array_semantics": "fixed"
+                        if array_width == 0
+                        else "variable_bounded",
                         "source_host": "10.77.0.2" if kind == 0 else "10.77.0.1",
                         "destination_host": "10.77.0.1" if kind == 0 else "10.77.0.2",
                         **({"client_id": 0x7722} if kind != 2 else {}),
                         "observed_segments": count,
+                        "required_messages": required,
                     }
                 )
     return checks
