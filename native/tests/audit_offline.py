@@ -14,6 +14,7 @@ import dpkt
 from audit_ipv4_options import option_key
 from someip_agent.config import Settings
 from someip_agent.pcap.importer import PcapImporter
+from someip_agent.protocol.sd_metadata import read_sd
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,13 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
         raise AssertionError("虚拟网文件未由真实原生运行时完整导入")
     counts = Counter()
     capture_counts = Counter()
+    native_sd_counts = Counter()
     for message in messages:
         metadata = message.metadata
+        if message.is_sd:
+            payload = read_sd(metadata)
+            for entry in payload.entries:
+                native_sd_counts[entry.name] += 1
         if (
             metadata["runtime"] != "vsomeip"
             or metadata["observation"] != "pcap_import"
@@ -161,6 +167,9 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
     ):
         if not result.sd_entry_counts[name]:
             raise AssertionError("原生导入缺少真实 SD 状态: " + name)
+    for name, amount in reference["sd_entries"].items():
+        if native_sd_counts[name] != amount or result.sd_entry_counts[name] != amount:
+            raise AssertionError(f"原生 SD 条目与独立字节审计计数不一致: {name}")
 
     fragment_checks = []
     for expected in reference["ipv4_fragment_packets"]:
@@ -231,6 +240,8 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
     return {
         "status": "verified",
         "statistics": result.model_dump(mode="json"),
+        "sd_decoder": "vsomeip-3.5.10",
+        "native_sd_entries": dict(native_sd_counts),
         "golden_messages": checks,
         "native_passive_capture_messages": dict(capture_counts),
         "fragment_imports": fragment_checks,

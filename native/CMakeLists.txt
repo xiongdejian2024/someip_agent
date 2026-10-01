@@ -13,9 +13,22 @@ set(VSOMEIP_SOURCE_DIR "/opt/vsomeip" CACHE PATH "固定版本 vsomeip 源码，
 if(NOT EXISTS "${VSOMEIP_SOURCE_DIR}/implementation/message/include/deserializer.hpp")
   message(FATAL_ERROR "必须指定固定版本的 VSOMEIP_SOURCE_DIR，不能用 Python 解码回退")
 endif()
+# 上游动态库隐藏 SD 模型符号；从同一固定 SDK 编译原实现，不复制或重写协议解析器。
+set(SD_SOURCE_DIR "${VSOMEIP_SOURCE_DIR}/implementation/service_discovery/src")
+add_library(vsomeip_sd_model STATIC
+    ${SD_SOURCE_DIR}/message_impl.cpp ${SD_SOURCE_DIR}/message_element_impl.cpp
+    ${SD_SOURCE_DIR}/entry_impl.cpp ${SD_SOURCE_DIR}/serviceentry_impl.cpp
+    ${SD_SOURCE_DIR}/eventgroupentry_impl.cpp ${SD_SOURCE_DIR}/option_impl.cpp
+    ${SD_SOURCE_DIR}/configuration_option_impl.cpp ${SD_SOURCE_DIR}/ip_option_impl.cpp
+    ${SD_SOURCE_DIR}/ipv4_option_impl.cpp ${SD_SOURCE_DIR}/ipv6_option_impl.cpp
+    ${SD_SOURCE_DIR}/load_balancing_option_impl.cpp ${SD_SOURCE_DIR}/protection_option_impl.cpp
+    ${SD_SOURCE_DIR}/selective_option_impl.cpp ${SD_SOURCE_DIR}/unknown_option_impl.cpp)
+target_include_directories(vsomeip_sd_model PRIVATE "${VSOMEIP_SOURCE_DIR}")
+target_link_libraries(vsomeip_sd_model PUBLIC vsomeip3 Boost::system Threads::Threads)
 add_library(network_decode STATIC src/wire.cpp src/ipv4_fragments.cpp src/capture_processor.cpp)
 target_include_directories(network_decode PUBLIC src ${LIBTINS_INCLUDE_DIRS} PRIVATE "${VSOMEIP_SOURCE_DIR}")
-target_link_libraries(network_decode PUBLIC vsomeip3 Boost::system nlohmann_json::nlohmann_json ${LIBTINS_LIBRARIES})
+target_sources(network_decode PRIVATE src/sd_decode.cpp)
+target_link_libraries(network_decode PUBLIC vsomeip_sd_model vsomeip3 Boost::system nlohmann_json::nlohmann_json ${LIBTINS_LIBRARIES})
 add_executable(soa_partner src/main.cpp src/application.cpp src/runtime.cpp src/network.cpp src/capture.cpp src/offline.cpp)
 target_include_directories(soa_partner PRIVATE "${PCAP_INCLUDE_DIR}")
 target_link_libraries(soa_partner PRIVATE network_decode "${PCAP_LIBRARY}" Threads::Threads)
@@ -30,6 +43,9 @@ endif()
 install(TARGETS soa_partner RUNTIME DESTINATION bin)
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(sd_decode_test tests/sd_decode_test.cpp)
+  target_link_libraries(sd_decode_test PRIVATE network_decode)
+  add_test(NAME 原生SD解码与完整性 COMMAND sd_decode_test)
   add_executable(codec_test tests/codec_test.cpp)
   target_include_directories(codec_test PRIVATE src)
   target_link_libraries(codec_test PRIVATE Boost::system nlohmann_json::nlohmann_json)

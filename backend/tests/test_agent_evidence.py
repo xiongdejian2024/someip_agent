@@ -168,15 +168,27 @@ async def test_truncated_payload_yields_evidence_error_not_guessed_value(tmp_pat
 
 
 def sd_entry(kind: int, ttl: int, service_id: int = 0x1234) -> SdEntry:
-    return SdEntry(kind, 0, 0, 0, 0, service_id, 2, 2, ttl, eventgroup_id=3)
+    return SdEntry(
+        kind,
+        0,
+        0,
+        0,
+        0,
+        service_id,
+        2,
+        2,
+        ttl,
+        minor_version=0 if kind == 1 else None,
+        eventgroup_id=3 if kind == 7 else None,
+        counter=0 if kind == 7 else None,
+    )
 
 
 @pytest.mark.asyncio
 async def test_sd_filters_actual_entry_service_and_distinguishes_zero_ttl(tmp_path) -> None:
     subject = agent(tmp_path)
-    payload = SdPayload(
-        entries=(sd_entry(1, 0), sd_entry(7, 0), sd_entry(7, 3), sd_entry(1, 3, 0x5678))
-    ).encode()
+    entries = (sd_entry(1, 0), sd_entry(7, 0), sd_entry(7, 3), sd_entry(1, 3, 0x5678))
+    payload = SdPayload(entries=entries).encode()
     await subject._monitor.publish(
         MonitorMessage(
             id="发现帧",
@@ -185,6 +197,29 @@ async def test_sd_filters_actual_entry_service_and_distinguishes_zero_ttl(tmp_pa
             is_sd=True,
             payload_hex=payload.hex(),
             payload_size=len(payload),
+            # 单元夹具仅验证展示/筛选；真正原生解码另由 UDP/PCAP 集成测试证明。
+            metadata={
+                "sd": {
+                    "schema_version": 1,
+                    "decoder": "vsomeip-3.5.10",
+                    "flags": 192,
+                    "entries": [
+                        {
+                            "entry_type": entry.entry_type,
+                            "service_id": entry.service_id,
+                            "instance_id": entry.instance_id,
+                            "major_version": entry.major_version,
+                            "ttl": entry.ttl,
+                            "minor_version": entry.minor_version,
+                            "eventgroup_id": entry.eventgroup_id,
+                            "counter": entry.counter,
+                            "option_indices": [[], []],
+                        }
+                        for entry in entries
+                    ],
+                    "options": [],
+                }
+            },
         )
     )
     result = await invoke(subject, "analyze_sd", service_id=0x1234)

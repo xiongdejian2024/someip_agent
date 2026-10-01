@@ -39,6 +39,7 @@ def prepare(root: Path, output: Path, native: Path) -> Path:
             source / relative,
             ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"),
         )
+    shutil.copy2(root / "native/CMakeLists.txt", source / "native/CMakeLists.txt")
     (source / "VERSION").write_text(version + "\n", encoding="utf-8")
     version_file = source / "backend/src/someip_agent/version.py"
     version_file.write_text(f'__version__ = "{version}"\n', encoding="utf-8")

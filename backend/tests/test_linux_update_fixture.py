@@ -30,9 +30,13 @@ def test_upgrade_fixture_uses_current_version_without_changing_original(
     (root / "backend/src/someip_agent/version.py").write_text(f'__version__ = "{baseline}"\n')
     (root / "frontend/package.json").write_text(json.dumps({"version": baseline}))
     shutil.copy2(repository / "scripts/check_version.py", root / "scripts/check_version.py")
+    shutil.copy2(repository / "native/CMakeLists.txt", root / "native/CMakeLists.txt")
     builds, installs = [], []
 
     def fake_build(source, output, native, _libraries):
+        assert (source / "native/CMakeLists.txt").read_bytes() == (
+            root / "native/CMakeLists.txt"
+        ).read_bytes()
         assert (source / "VERSION").read_text().strip() == expected
         assert f'version = "{expected}"' in (source / "backend/pyproject.toml").read_text()
         assert json.loads((source / "frontend/package.json").read_text())["version"] == expected

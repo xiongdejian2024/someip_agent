@@ -97,3 +97,19 @@ completed/success。实际日志`build/rollback-status-ci-evidence/ci.log`确认
 266项虚拟网、450项原生后端，16个短负载阶段verified、34项Linux升级/回滚及干净发行包
 验收通过；普通非原生后端370通过/80跳过是另一口径。Windows按当前范围跳过。
 这是上一提交的证据，不作为本轮EventGroup修改的新CI结果。
+
+2026-10-02 已核对EventGroup提交096eef7的CI36892657351为completed/success；
+实际日志在`build/classic-event-groups-ci-evidence/ci.log`，源码/安装包各266虚拟网与466后端，
+16短负载阶段、34Linux升级/回滚及干净发行包通过。
+
+后续SD原生模型迁移的本地独立安装包验收位于`build/sd-final-installed-evidence`：
+266虚拟网、530后端、59审计/名称与12权限/清理通过，7份JUnit无失败/错误/跳过；
+26628帧采集内核丢包0。监听/捕获/离线及智能体不再用Python解码SD字节，缺元数据明确报错。
+这不代表Python信号解码、车型源差异或正式升级信任源已解决；该SD版本CI仍须独立跟踪。
+
+源码ZIP版最终镜像另在`build/sd-source-zip-backend-evidence`完成533项安装包后端回归，
+零失败/错误/跳过；原生二进制和wheel构建SHA与上述266项虚拟网验收一致，未重复宣称新跑。
+`build/sd-linux-source-zip-update-evidence`的34项真实签名升级/回滚全部通过，
+`build/sd-linux-source-zip-clean-evidence`确认无Python/SDK的网页及原生发生器运行通过。
+全部命令退出0；此前目录归档版32通过/2失败和完整异常日志继续保留，不放宽准备超时。
+正式最新版发布信任源仍未配置；这些测试夹具结果不证明正式在线最新版可下载。

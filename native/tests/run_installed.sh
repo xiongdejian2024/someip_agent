@@ -15,6 +15,7 @@ logger = logging.getLogger("安装包验收")
 try:
     for name in (
         "someip_agent.runtime.network", "someip_agent.domain.models",
+        "someip_agent.protocol.sd_metadata",
         "someip_agent.soa.operator", "someip_agent.soa.partner",
         "someip_agent.soa.ipc",
         "someip_agent.update.service", "someip_agent.update.worker",

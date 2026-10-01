@@ -8,12 +8,16 @@ Classic Socket/SoAd 的完整引用绑定和明确未完成项见 [Classic ARXML
 - `backend/src/someip_agent/soa`：SAT 风格的 SOAOperator / S2sBaseClass，启动二进制后用 socket 初始化与调用。
 - 默认 `SimulationManager` 已改为原生进程控制，不保留 Python 发包回退。
 - 实时 UDP/TCP 端口监听已移到 `native/src/network.cpp`，复用固定版本 vsomeip 导出的解码器；
-  Python 网络模块只负责进程控制、监控对象化和 SD/信号展示分析，不绑定线上端口或解码 SOME/IP 头。
+  Python 网络模块只负责进程控制、监控对象化及信号展示，不绑定线上端口或解码 SOME/IP/SD 字节。
 - `native/src/capture.cpp` 使用 libpcap 读取指定 Ethernet 网卡，`capture_processor.cpp` 复用
   libtins 的双向 TCP 与 IPv4 分片重组器，协议头复用相同 vsomeip 解码器。
   Python 不读取网卡或重组 TCP/IP。
 - 离线 PCAP/PCAPNG 由 libpcap 读取，复用相同原生 TCP/IPv4 重组与 vsomeip 解码；
-  Python 只负责上传文件、控制 socket、展示聚合及 SD/信号分析，不保留 Python 底层解析回退。
+  Python 只负责上传文件、控制 socket、展示聚合及信号分析，不保留 Python SD 字节解码回退。
+- SD 监听/捕获/离线结果统一包含版本化 `metadata.sd`，由固定 SDK 模型原生解码，Python 仅
+  校验和投影；错误保留 `payload_hex` 与 `metadata.sd_error`，离线错误也进入导入摘要。
+  缺少元数据时明确失败，不用旧 Python 解码器重新解释原始字节。库符号/Counter 适配、
+  完整性检查及未知 Option 的边界见 [原生依赖](native-dependencies.md)。
 - 真实业务 ARXML 的 Classic 部署/文本布局仍有未覆盖项，不能把名称核对或测试夹具当作
   车型服务运行验收。逐项完成依据见 [本轮交付范围](current-delivery-scope.md)。
 - 用户已排除后续 IPv6 改动；已有 IPv6 UDP/TCP 保留，分片仍明确拒绝，不纳入本轮门槛。

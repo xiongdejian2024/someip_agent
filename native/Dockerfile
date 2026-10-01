@@ -14,7 +14,8 @@ RUN git clone --depth 1 --branch ${VSOMEIP_TAG} https://github.com/COVESA/vsomei
     && cmake --build vsomeip-build --target install -j1 && ldconfig
 # 默认使用上游阶段；已有同提交 SDK 可显式传入以便离线复用，桥接阶段仍核验源码提交。
 FROM ${NATIVE_SDK} AS build
-RUN test "$(git -C /opt/vsomeip rev-parse HEAD)" = c4e0db329da9b63f511f3c2456c040582daf9305
+RUN test "$(git -C /opt/vsomeip rev-parse HEAD)" = c4e0db329da9b63f511f3c2456c040582daf9305 \
+    && git -C /opt/vsomeip diff --exit-code HEAD -- interface implementation
 # 独立抓包依赖层：固定维护版本和局部 RFC 791 选项补丁，不静默改写原始报文。
 COPY native/patches/libtins-ipv4-options.patch /opt/libtins-ipv4-options.patch
 RUN git clone --depth 1 --branch v4.6 https://github.com/mfontanini/libtins.git /opt/libtins \
@@ -35,8 +36,9 @@ RUN cmake -S native -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     && ctest --test-dir build/native --output-on-failure
 COPY backend /workspace/backend
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install '/workspace/backend[dev]'
-# 完整后端回归中的升级夹具仅需这两份测试辅助文件；产品仍从 wheel 加载。
+# 完整后端回归需要版本校验、升级夹具与源码归档测试辅助文件；产品仍从 wheel 加载。
 COPY scripts/check_version.py /workspace/scripts/check_version.py
 COPY packaging/linux/prepare_update_fixture.py /workspace/packaging/linux/prepare_update_fixture.py
+COPY packaging/linux/build.py /workspace/packaging/linux/build.py
 ENV PATH=/opt/venv/bin:$PATH SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner
 CMD ["/workspace/build/native/soa_partner"]

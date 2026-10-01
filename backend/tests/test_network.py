@@ -259,7 +259,11 @@ async def test_native_process_exit_marks_failed_and_can_restart(manager):
 
 
 @pytest.mark.asyncio
-async def test_sd_summary_uses_actual_received_payload(manager):
+async def test_sd_summary_uses_actual_received_payload(manager, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("生产路径不得调用 Python SD 解码")
+
+    monkeypatch.setattr(SdPayload, "decode", forbidden)
     port = free_port()
     await manager.start(ListenerConfig(bind_host="127.0.0.1", port=port))
     sd = SdPayload(entries=(SdEntry(1, 0, 0, 0, 0, 0x1234, 1, 1, 3, minor_version=0),))
@@ -268,6 +272,28 @@ async def test_sd_summary_uses_actual_received_payload(manager):
     await until(lambda: manager.list()[0].received_count == 1)
     message = (await manager._monitor.list())[0]
     assert message.is_sd and "OfferService" in message.sd_summary
+    assert message.metadata["sd"]["decoder"] == "vsomeip-3.5.10"
+    assert message.metadata["sd"]["entries"][0]["service_id"] == 0x1234
+
+
+@pytest.mark.asyncio
+async def test_malformed_native_sd_keeps_raw_payload_and_does_not_stop_listener(manager):
+    port = free_port()
+    await manager.start(ListenerConfig(bind_host="127.0.0.1", port=port))
+    payload = bytes.fromhex("0000000000000000")  # 缺少原生要求的 options-length。
+    malformed = SomeIpMessage.build(
+        service_id=0xFFFF, method_id=0x8100, message_type=2, payload=payload
+    ).encode()
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+        sender.sendto(malformed, ("127.0.0.1", port))
+        sender.sendto(wire(), ("127.0.0.1", port))
+    await until(lambda: manager.list()[0].received_count == 2)
+    messages = await manager._monitor.list()
+    bad = next(message for message in messages if message.is_sd)
+    assert bad.payload_hex == payload.hex()
+    assert "sd_error" in bad.metadata and "sd" not in bad.metadata
+    assert "解析失败" in bad.sd_summary
+    assert manager.list()[0].running
 
 
 def test_missing_native_listener_returns_503(tmp_path):

@@ -1,4 +1,5 @@
 #include "wire.hpp"
+#include "sd_decode.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <implementation/message/include/deserializer.hpp>
 #include <implementation/message/include/message_impl.hpp>
@@ -25,12 +26,20 @@ Json decode_packet(const uint8_t *data, size_t size) {
     Bytes bytes;
     if (payload->get_length())
         bytes.assign(payload->get_data(), payload->get_data() + payload->get_length());
-    return {{"service_id", message->get_service()}, {"method_id", message->get_method()},
+    Json result={{"service_id", message->get_service()}, {"method_id", message->get_method()},
             {"client_id", message->get_client()}, {"session_id", message->get_session()},
             {"interface_version", message->get_interface_version()},
             {"message_type", static_cast<uint8_t>(message->get_message_type())},
             {"return_code", static_cast<uint8_t>(message->get_return_code())},
             {"payload_hex", hex(bytes)}, {"payload_size", bytes.size()},
             {"is_sd", message->get_service() == 0xFFFF && message->get_method() == 0x8100}};
+    if(result["is_sd"]==true) {
+        try {result["sd"]=decode_sd(data,size);}
+        catch(const std::exception &error) {
+            log_error("someip.sd.decode",error);
+            result["sd_error"]=error.what();
+        }
+    }
+    return result;
 }
 }

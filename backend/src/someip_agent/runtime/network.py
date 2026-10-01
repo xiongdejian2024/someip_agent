@@ -12,8 +12,7 @@ from uuid import uuid4
 
 from someip_agent.config import Settings
 from someip_agent.domain.models import ListenerConfig, ListenerStatus, MonitorMessage
-from someip_agent.protocol.sd import SdPayload
-from someip_agent.protocol.someip import SomeIpDecodeError
+from someip_agent.protocol.sd_metadata import project_sd
 from someip_agent.soa.ipc import read_frame
 from someip_agent.soa.operator import NativeOperationError, NativeRuntimeError, SOAOperator
 
@@ -256,13 +255,9 @@ class NetworkCaptureManager:
     def _to_monitor_message(packet: dict[str, Any]) -> MonitorMessage:
         passive = packet.get("observation") == "pcap_capture"
         summary = None
+        sd_metadata = {}
         if packet["is_sd"]:
-            # SD 文本摘要是展示层分析；不参与线上 SD 状态机和 SOME/IP 解码。
-            try:
-                summary = SdPayload.decode(bytes.fromhex(packet["payload_hex"])).summary()
-            except SomeIpDecodeError as exc:
-                logger.exception("SD 展示摘要解析失败", extra={"operation": "network.sd.summary"})
-                summary = f"SOME/IP-SD 解析失败: {exc}"
+            summary, sd_metadata = project_sd(packet, logger)
         return MonitorMessage(
             timestamp=datetime.fromtimestamp(
                 packet["received_at_ns"] / 1_000_000_000, timezone.utc
@@ -283,6 +278,7 @@ class NetworkCaptureManager:
             is_sd=packet["is_sd"],
             sd_summary=summary,
             metadata={
+                **sd_metadata,
                 "listener_id": packet["listener_id"],
                 "runtime": "vsomeip",
                 "observation": "pcap_capture" if passive else "socket_receive",

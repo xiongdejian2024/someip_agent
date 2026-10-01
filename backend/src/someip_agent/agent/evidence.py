@@ -21,7 +21,7 @@ from someip_agent.domain.models import (
     SimulationConfig,
 )
 from someip_agent.protocol.codec import SignalCodec
-from someip_agent.protocol.sd import SdPayload
+from someip_agent.protocol.sd_metadata import read_sd
 from someip_agent.runtime.monitor import MonitorStore
 
 logger = logging.getLogger(__name__)
@@ -389,7 +389,7 @@ class EvidenceTools:
         if len(message.payload_hex) > PAYLOAD_LIMIT * 2:
             return {"error": "SD payload 超过 64 KiB 诊断上限"}
         try:
-            payload = SdPayload.decode(bytes.fromhex(message.payload_hex))
+            payload = read_sd(message.metadata)
             entries = []
             for entry in payload.entries[:256]:
                 names = {

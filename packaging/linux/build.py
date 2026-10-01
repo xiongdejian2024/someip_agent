@@ -25,6 +25,19 @@ def digest(path: Path) -> str:
     return value.hexdigest()
 
 
+def archive_sdk(source: Path, target: Path) -> None:
+    """源码作为单独 ZIP 随包保留，避免升级准备逐文件展开上游源码树。"""
+    with zipfile.ZipFile(target, "x", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for path in sorted(source.rglob("*")):
+            relative = path.relative_to(source)
+            if ".git" in relative.parts:
+                continue
+            if path.is_symlink():
+                raise ValueError(f"SDK 源码归档不接受符号链接: {relative}")
+            if path.is_file():
+                bundle.write(path, relative)
+
+
 def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
     if sys.platform != "linux":
         raise RuntimeError("Linux 发行包必须在目标 Linux 架构上构建，不支持跨系统打包")
@@ -115,6 +128,9 @@ def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
         root / "native/patches/libtins-ipv4-options.patch", notices / "libtins.patch"
     )
     shutil.copy2(Path("/opt/vsomeip/LICENSE"), notices / "vsomeip-LICENSE")
+    # 原生 SD 模型直接静态编译固定 SDK；随发行包保留对应上游源码与本项目构建定义。
+    archive_sdk(Path("/opt/vsomeip"), notices / "vsomeip-source.zip")
+    shutil.copy2(root / "native/CMakeLists.txt", notices / "native-CMakeLists.txt")
     shutil.copy2(Path("/opt/libtins/LICENSE"), notices / "libtins-LICENSE")
     provenance = {
         "version": version,

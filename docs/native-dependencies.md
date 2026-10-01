@@ -3,6 +3,23 @@
 在线协议栈固定 vsomeip 3.5.10，提交 `c4e0db329da9b63f511f3c2456c040582daf9305`。
 抓包仍使用 libpcap、libtins 成熟解析/重组能力，不新增 Python 或自写 IP 重组回退。
 
+## 固定 SDK 的 SD 观测解码
+
+在线 SD 状态机仍由 vsomeip 动态库负责。监听、被动捕获与离线导入的 SD 展示解码复用
+同一 SDK 的 `implementation/service_discovery` 模型源码。上游动态库未导出这些模型符号，
+因此 CMake 直接静态编译 14 个上游源文件，不修改其协议实现或导出表。Docker 构建验证固定
+源码提交，并检查 `interface`/`implementation` 没有相对 HEAD 的修改。
+
+适配层检查完整帧/数组长度、Option 解码是否完整、引用索引及 4096 个 Entry/Option 配额；
+异常原生日志有堆栈，输出保留 `payload_hex` 和 `sd_error`。Python 仅校验/展示版本化元数据，
+不以旧 `SdPayload.decode` 回退。库将未知 Option type 归一为 255，不能用该值冒充原始类型；
+原始字节保留。固定库将线上的 Eventgroup Reserved/Counter 解码到 `get_reserved()`，
+适配层仅从该已解码字段取低四位，不使用未填充的 `get_counter()`。
+
+Linux 发行包在 `third-party/vsomeip-source.zip` 保存该固定 SDK 源码（不含 .git），同时保存许可与
+`native-CMakeLists.txt`。这项迁移不代表所有未知扩展可解码、硬实时达标或 Python 信号分析
+已经迁出；未支持的报文必须显式失败，不改变在线服务发现行为。
+
 ## libtins 固定输入
 
 - 上游标签：`v4.6`；提交：`2d2f7012d9f3a16d684a55ba39f1215b6aef5429`。

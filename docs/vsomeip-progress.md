@@ -1215,3 +1215,62 @@
 - 上一提交908cf05的CI36887461838已completed/success；实际日志保存在
   `build/rollback-status-ci-evidence/ci.log`，包括34项Linux升级/回滚与干净发行包验收。
   新提交CI独立跟踪，不借上一提交结果宣称本轮CI完成。正式升级信任源仍待提供，目标active。
+
+## 2026-10-02：SD 观测解码复用原生 SDK 模型
+
+- 按原目标继续迁移监听、被动捕获、PCAP 与智能体的 SD 解码。固定 vsomeip 动态库未导出
+  SD 模型符号，直接静态编译同一固定 SDK 的14个上游源文件，不重写协议模型或改上游导出表。
+  适配层校验完整帧/数组长度、Option 完整性、引用与4096条配额，输出版本化结构化结果；
+  错误保留原始 payload_hex、sd_error 与原生异常栈。Python 生产调用不再使用 SdPayload.decode，
+  缺元数据时也不回退；原 Python 模块保留用于测试向量/兼容工具，不作为生产解码器。
+- 首轮构建因缺少命名空间别名头明确失败，随后 CTest 捕获完整头偏移与 Counter getter 的
+  适配错误。固定 SDK 的 HEADER_SIZE=8，而 FULL_HEADER_SIZE=16；Eventgroup deserialize
+  保留 Counter 位于 get_reserved，未填充 get_counter。修正为完整头偏移及已解码字段低四位，
+  不改库源码或弱化非零 Counter 黄金断言。最终镜像5项CTest全部通过。
+- 最终镜像`someip-agent-vsomeip:sd-final-test`，ID
+  `09a573fb0d510854c12b5e490969b17540b6bd1620c40cd64071a350a14c69b4`；原生SHA
+  `3b5db6ca0394ace9c057e90d65ee58537c9599fcdd536d7cd20021e6e955ba64`；wheel构建SHA
+  `11d79b523e07bab7600d41c1455c6d9a035f66eeead55531ef5059f336f28a66`。
+  固定SDK提交与源码无修改核验通过；sd_metadata及三个生产调用模块的安装文件SHA与源码一致。
+- 首次专项容器漏设既有IPv6回环参数，102项中100通过/2失败，报告保留在
+  `build/sd-metadata-unit-evidence/native-targeted-junit.xml`，未把失败改成跳过。
+  标准参数的独立全量验收在`build/sd-final-installed-evidence`执行，不挂载产品源码。
+  266虚拟网功能已通过，采集26628帧/内核丢包0；原生5072条消息、1316黄金向量、16分片、
+  40组选项与114双身份RPC对/32恢复RPC对已核对。七类SD计数与独立字节审计逐项相等。
+  整轮命令最终退出0：266虚拟网、530后端、59审计/名称与12权限/清理全部通过，
+  7份JUnit零失败/错误/跳过，3项既有后端warning保留。另有人工SD黄金字节的七类条目
+  经真实原生PCAP导入到统计/智能体，逐项验证TTL、Counter=3与Eventgroup=7；
+  截断/尾随/引用越界保持原始报文与明确错误，不伪造Offer统计。未运行本轮独立性能矩阵。
+- 上一提交096eef7的CI36892657351已completed/success，实际日志在
+  `build/classic-event-groups-ci-evidence/ci.log`：源码/安装包各266虚拟网、466后端，16短负载
+  阶段verified、34Linux升级/回滚与干净发行包通过。这不是本轮SD二进制的性能/发行证据。
+- Linux发行包构建增加固定SDK源码（不含.git）、许可和原生构建定义的归档；本轮新发行包
+  初版归档为目录，升级夹具先因漏复制CMakeLists失败（完整栈保留于
+  `build/sd-linux-update-evidence/fixture-build.log`），修正后32项通过/2项发行升级失败，
+  `build/sd-linux-update-retry-evidence`保留502及30秒准备超时证据，旧程序仍保持运行。
+  不放宽超时，改为单独`vsomeip-source.zip`保留全部SDK文件，减少升级准备解压的文件数；
+  归档及夹具5项单元回归通过，未覆盖首轮失败。Docker Hub TLS失败的日志另保留；
+  复用已核验的本机Debian12基础镜像后，`build/sd-linux-clean-local-evidence`干净运行通过。
+  此处目录归档版的失败与通过均不冒充随后源码ZIP版的验收。
+- 源码ZIP版镜像`someip-agent-vsomeip:sd-source-zip-test`，ID
+  `2ed621e4ed35c86d7780436176c848fe714453284a15b0e4a7fde5d455307ea8`；5项CTest通过，
+  原生SHA与上述3b5db6ca版本完全一致，wheel构建SHA同为11d79b52版本。
+  `build/sd-source-zip-backend-evidence/junit.xml`的独立安装包完整后端533项通过，
+  零失败/错误/跳过，3项既有warning保留；新增3项源码归档测试，不挂载产品源码或PYTHONPATH。
+  同原生二进制/wheel的266项虚拟网证据引用上面的独立安装包验收，不称本次重跑虚拟网。
+- 最终Linux镜像`someip-agent-linux:sd-source-zip-test`，ID
+  `1e5a90c29787e4c2aadff9889d5b31e2837d4532c22972b477c6badd9bab3e60`；发行ZIP SHA
+  `d0cc3bb602b27cf07f8f1ecc4e567874525a3f07878d5c70efb5bc2a882f5fda`。
+  `build/sd-linux-package-evidence/source-zip-artifact-check.log`核对外层223个文件、内层
+  1171个SDK源文件；14个实际编译SD源逐字节与固定SDK一致，无.git和外层展开源码树。
+  包内原生SHA同3b5db6ca版本，许可与CMakeLists单独保留。
+- `build/sd-linux-source-zip-update-evidence`全流程命令退出0：34项HTTPS签名升级、
+  原子替换、重启与失败回滚通过，零失败/错误/跳过，1项既有warning保留；
+  未修改30秒升级准备门限，也未把测试0.1.1或测试签名密钥发布为正式最新版。
+  `build/sd-linux-source-zip-clean-evidence/result.json`为verified，干净Linux无Python/SDK，
+  网页、随包原生运行库及真实发生器通过；命令退出0，network=none。
+  基础镜像为已核验的本机Debian12缓存，不冒充此前Docker Hub TLS请求成功。
+- Ruff全后端及改动辅助脚本检查、11个改动Python文件格式与sd_metadata单模块mypy通过，
+  不称全项目格式/类型检查通过。本轮尚无新二进制独立性能矩阵；新提交CI须单独跟踪。
+  Python监控/智能体信号解码、车型源冲突及正式更新信任源仍是未完成项；
+  Bootes/后续IPv6/Windows按用户要求不扩展，目标保持active。

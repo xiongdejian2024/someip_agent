@@ -9,6 +9,7 @@ COPY packaging/linux /workspace/packaging/linux
 COPY scripts/check_version.py /workspace/scripts/check_version.py
 COPY docs/native-dependencies.md /workspace/docs/native-dependencies.md
 COPY native/patches /workspace/native/patches
+COPY native/CMakeLists.txt /workspace/native/CMakeLists.txt
 COPY frontend/dist /workspace/frontend/dist
 COPY frontend/package.json /workspace/frontend/package.json
 COPY VERSION /workspace/VERSION

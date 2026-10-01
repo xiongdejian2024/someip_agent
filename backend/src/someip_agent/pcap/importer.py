@@ -12,8 +12,7 @@ from typing import Any, Literal
 
 from someip_agent.config import Settings
 from someip_agent.domain.models import MonitorMessage, PcapEndpointStat, PcapImportResult
-from someip_agent.protocol.sd import SdPayload
-from someip_agent.protocol.someip import SomeIpDecodeError
+from someip_agent.protocol.sd_metadata import project_sd, read_sd
 
 from .native import PcapImportError as PcapImportError
 from .native import records
@@ -72,6 +71,7 @@ class PcapImporter:
         )
         number = captured_bytes = skipped_count = someip_packets = sd_packets = payload_bytes = 0
         summary: dict[str, Any] | None = None
+        sd_errors: list[str] = []
         try:
             with closing(records(content, self.settings, self.timeout)) as stream:
                 for frame in stream:
@@ -99,6 +99,8 @@ class PcapImporter:
                         if packet.get("frame_message_index") != index:
                             raise PcapImportError("原生 PCAP 帧内消息序号缺失或重复")
                         message = self._to_monitor_message(packet, number)
+                        if "sd_error" in message.metadata and len(sd_errors) < 100:
+                            sd_errors.append(f"帧 {number} SD: {message.metadata['sd_error']}")
                         payload_bytes += message.payload_size
                         if (
                             len(messages) + len(decoded) >= self.max_messages
@@ -157,7 +159,7 @@ class PcapImporter:
                 transport_counts=dict(transport_counts),
                 protocol_counts=dict(protocol_counts),
                 sd_entry_counts=dict(sd_entry_counts),
-                errors=summary["errors"],
+                errors=(summary["errors"] + sd_errors)[:100],
                 runtime=summary["runtime"],
                 link_type=summary["link_type"],
                 reassembled_datagrams=summary["reassembled_datagrams"],
@@ -201,8 +203,8 @@ class PcapImporter:
         counts: Counter[str],
     ) -> None:
         try:
-            payload = SdPayload.decode(bytes.fromhex(message.payload_hex))
-        except (ValueError, SomeIpDecodeError):
+            payload = read_sd(message.metadata)
+        except ValueError:
             logger.exception("离线 SD 展示分析失败", extra={"operation": "pcap.sd.analysis"})
             return
         for entry in payload.entries:
@@ -253,12 +255,9 @@ class PcapImporter:
     @classmethod
     def _to_monitor_message(cls, packet: dict[str, Any], number: int) -> MonitorMessage:
         sd_summary = None
+        sd_metadata = {}
         if packet["is_sd"]:
-            try:
-                sd_summary = SdPayload.decode(bytes.fromhex(packet["payload_hex"])).summary()
-            except SomeIpDecodeError as exc:
-                logger.exception("离线 SD 摘要分析失败", extra={"operation": "pcap.sd.summary"})
-                sd_summary = f"SOME/IP-SD 解析失败: {exc}"
+            sd_summary, sd_metadata = project_sd(packet, logger)
         timestamp = cls._to_datetime(packet["received_at_ns"])
         if timestamp is None:
             raise PcapImportError("原生 PCAP 消息缺少时间戳")
@@ -280,6 +279,7 @@ class PcapImporter:
             is_sd=packet["is_sd"],
             sd_summary=sd_summary,
             metadata={
+                **sd_metadata,
                 "pcap_frame": number,
                 "frame_message_index": packet["frame_message_index"],
                 "runtime": "vsomeip",
