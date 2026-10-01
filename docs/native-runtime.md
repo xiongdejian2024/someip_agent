@@ -413,6 +413,35 @@ application 隔离。同一服务/实例不能重复提供 server；运行中不
 审计回归在真实抓包副本篡改身份/会话/Payload、删包和重复时必须拒绝，不放宽既有黄金矩阵。
 这不是任意多节点、所有身份数量或生产实时性的验收声明。
 
+### 独立身份能力协商与故障恢复
+
+显式选择 `application_name` 时，Python 在 `start_config` / 增量启动之前通过 `ping` 确认
+`member_application_identity_v1` 能力和 `configured_applications` 声明，检查名称、非零唯一
+Client ID，并核对成员字典中可选的整数 `application_id`。不能仅凭 vsomeip 的 `3.5.10`
+版本字符串判断桥接功能：旧桥接也返回相同协议栈版本，却可能忽略新增成员字段。
+能力检查不缓存，原生进程重启或二进制更换后重新执行；默认字典和 tuple 不要求新增能力。
+
+声明只用于启动预检，不代表 application 已初始化。启动返回后、业务 socket 建立前，还要
+用 `running_service` 核对原生 `get_name` / `get_client` 的实际身份。能力缺失、声明不匹配
+或实际身份不一致均抛出 `NativeOperationError`，不能以请求配置填充实际身份或静默降级。
+attach 模式不为这种错误 reset 或终止外部进程；启动后的核对不提供整批配置的事务回滚。
+
+`test_identity_recovery_virtual.py` 覆盖 UDP/TCP × 拥有 server/client × SIGUSR1 异常退出/
+SIGSTOP 暂停的 8 组真实 veth 故障。暂停必须观测 `/proc` 的 State T；恢复只操作本实例
+拥有的进程。保留两个客户端的独立身份、不同订阅、响应回调和最新周期值，已停第三成员
+不复活，两个未完成 GetPosition 请求不重放。正常退出、重复启动返回码及显式 kill 的 SAT
+历史监督策略仍保持不变。
+
+专用服务 `0x6790`、端口 30760–30767 的独立 `audit_identity_recovery.py` 手工列出黄金字节，
+核对故障前后 32 对 RPC、16 个故意未应答请求、Client ID `0x7841` / `0x7842` 和时序，并与
+原生 PCAP 导入交叉核对。TCP 按真实 SYN 分代；进程重启允许 Session ID 计数重新开始，
+不错误要求其跨进程永久唯一。该短流测试审计器不是产品 TCP 解析回退，也不证明极限
+在途请求、任意迟到跨代响应、16 位回绕或长稳的全部边界。
+
+`check_legacy_identity.py` 可对指定 SHA-256 的真实旧二进制验证默认兼容、新能力拒绝和 attach
+所有权；只在 `--network none` 临时容器运行，传入旧二进制路径、`--sha256` 与新证据目录。
+旧二进制须来自已有受控制品，不能用 mock 回执冒充旧版本运行证据。
+
 ### SAT 缓存、周期通知与错误语义
 
 - 标准键为 `DoorService_client_1`，带名称的实例为 `DoorService_server_DoorService_BGM`；

@@ -331,8 +331,14 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         } else if (function=="generator_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
             ++m->generator_epoch;if(m->timer)m->timer->cancel();result=true;
-        } else if (function=="ping") result={{"runtime","vsomeip"},{"protocol",1},{"version","3.5.10"},
-            {"application_count",applications_.size()},{"pending_requests",pending_.size()}};
+        } else if (function=="ping") {
+            Json declared=Json::object();
+            for(const auto &[name,id]:configured_applications_)declared[name]=id;
+            result={{"runtime","vsomeip"},{"protocol",1},{"version","3.5.10"},
+                {"capabilities",Json::array({"member_application_identity_v1"})},
+                {"configured_applications",declared},
+                {"application_count",applications_.size()},{"pending_requests",pending_.size()}};
+        }
         else throw std::runtime_error("未知控制操作: "+function);
         conn->send({{"action","response"},{"function",function},{"result",result.dump()},{"failtype","FAILTYPE_SUCCESS"}});
     } catch (const std::exception &error) {

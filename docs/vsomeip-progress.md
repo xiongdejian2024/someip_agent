@@ -670,3 +670,54 @@
   未绕过授权 SDK/null 捕获门禁。Windows 实际编译、驱动、安装升级、正式签名最新版源、
   完整 SAT 厂商心跳、更多应用数量/多实例/故障长稳、IPv6 分片和完整 ARXML/OEM 仍需继续；
   整体目标保持 active，不能把本轮限定矩阵当成全部功能和发布完成。
+
+## 2026-10-01 独立身份能力门禁与真实进程故障恢复
+
+- 当前 GitHub 登录已核对有效；继续此前完整重构目标。上一提交 6a6f9a8 已在远程 main，
+  本轮开始时工作区干净，没有重复推送。参考 SAT 原始监督逻辑，保留 0/1/-9 不自动重启的
+  历史语义；只在自有 `--network none` 容器创建虚拟网，未操作宿主或车辆网卡。
+- 修复新 Python/旧二进制错配风险：显式身份启动前检查能力和声明，启动后、业务建链前
+  核对原生实际名称/ID。默认 SAT 字典不增加能力要求，增量重启与进程恢复不缓存握手结果。
+  独立 identity 模块与原生 ping 只负责控制契约，不自写 SOME/IP/SD/Client ID 分配。
+- 新增 29 项真实控制 socket 正反向回归，覆盖能力缺失/错误类型、协议版本、声明重复、
+  未声明选择、错误 ID、实际身份缺失/不一致、增量保留选择和更换运行时后重新检查。
+  拒绝必须保留完整异常堆栈；不能以期望身份填充实际观测。attach 错误不 reset/kill 外部进程，
+  启动后核对不冒充整批原生成员配置的事务回滚。
+- 用 ip-options-test 中真实旧二进制（SHA d89a1abd3e8b2b800c6196196edbae059d4f3b9abd0a39963ce2d17fc838309e）
+  验证新安装包：旧版本会接受新增成员字段且 ping 同为 vsomeip 3.5.10；新适配器在启动成员
+  前明确拒绝，既有成员状态未变、attach 外部进程未终止，默认字典仍可启动，自有进程退出码 0。
+  证据位于 build/identity-legacy-evidence/check；没有用 mock 冒充旧版本二进制。
+- 新增 8 项 UDP/TCP × 拥有 server/client × SIGUSR1/SIGSTOP 的真实故障恢复，focused 的
+  8 项通过。暂停先确认内核 State T，随后只结束无响应自有进程。恢复后两具名 Client ID、
+  差异订阅、回调及最新周期值保持；已停止第三成员不复活，未完成业务请求不重放。
+- 独立黄金审计使用专用服务/端口、手工黄金字节，不引用发送夹具；核对故障前后 32 对
+  RPC 和 16 个故意未应答请求。Client ID 为 0x7841/0x7842，方向、载荷、会话及时间阶段
+  与原生离线导入一致。TCP 按 SYN 分代，不将跨进程 Session ID 重置误判为永久唯一约束。
+- 源码 build/identity-source-evidence 与不挂产品源码安装包 build/identity-installed-evidence
+  各通过 130+98=228 虚拟网、315 后端、22 既有审计、7 新审计及 12 权限/清理；逐份最终
+  JUnit 零失败/错误/跳过，既有后端三项警告保留。源码 20961 帧/4289 条消息，安装包
+  20553 帧/4137 条消息。原 932 黄金向量、16 分片、40 选项、独立正常身份 114 对 RPC
+  和新增故障身份 32 对均完整核对，两份采集内核丢包为 0。新 7 项反向审计随后单独执行；
+  完成后纳入正式入口，不把后补测试冒充首次完整入口已有步骤。
+- 首次新反向审计的 handshake 用例失败：删的是未承载业务连接的握手，正常业务流仍完整。
+  保留源码 identity-audit-junit.xml（6 通过/1 失败）；仅修夹具，删除实际业务流的全部 SYN。
+  最终 identity-audit-verified-junit.xml 与安装包 identity-audit-junit.xml 各 7 项通过，
+  覆盖篡改身份/会话/Payload、缺失、重复、错误故障阶段和业务握手缺失，未放宽审计器。
+- 新产品镜像 someip-agent-vsomeip:identity-test 为
+  f48d99c4b88501ab7a0bdb242a26584c895aa635c675aedeab0611274f666eb2；源码与镜像二进制均为
+  b9d8a1edc5295e8df66469fd31c888cc49629893671a63a9651fb9f588faa141，wheel 构建 SHA 为
+  2fcf9cc18f4bc2207b44882db99113671cbe30ad4fe0ace4fe3d89078a557670。vsomeip/libtins 固定
+  输入与补丁未变，两项 CTest 通过；安装包模块来源为 site-packages，无产品源码/PYTHONPATH。
+- Ruff 检查及本轮修改文件格式、版本一致性、前端类型/构建、服务适配器、shell 语法与 diff
+  空白检查通过。首次适配器命令误用 frontend/scripts 路径，实际根目录 scripts 命令通过；
+  非产品故障未掩盖。前端已有大 chunk 警告保留，不做无关代码改写。
+- 新安装包 build/identity-performance-evidence 独立完成 16 阶段：1600 RPC 成功、3200
+  请求/响应与 13198 条事件逐序号核对，所有采集内核丢包为 0，另有 12 权限/清理和
+  10 统计回归通过。默认 application 基线不冒充双身份长稳；RPC P99 14.043–63.037 ms，
+  10 ms 原生 UDP/TCP 299/298 条，严格周期仍未达标。完整数值与口径见 docs/performance.md。
+- 上一提交 6a6f9a8 的远程 run 36825941351 已终态：Linux 原生/安装包/短负载、前后端成功，
+  Windows 在 build-native.ps1 第 28 行因 CaptureTriplet/OverlayTriplets/Packet_ROOT 未配置
+  拒绝，异常堆栈已核对。该结果不替代本轮新提交 CI，未绕过授权 SDK/null 捕获门禁。
+- 当前限定短故障矩阵不证明任意应用数量、多实例/长稳、极限在途请求和跨代迟到响应。
+  Windows 授权 SDK/捕获 triplet、实际驱动/安装升级、正式签名最新版源、完整 SAT 厂商心跳、
+  IPv6 分片与完整 ARXML/OEM 仍需继续；整体目标保持 active。

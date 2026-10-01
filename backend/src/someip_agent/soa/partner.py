@@ -17,6 +17,7 @@ from someip_agent.config import Settings
 from someip_agent.domain.models import ArxmlModel
 
 from .catalog import NativeCatalogRequest, build_native_bundle
+from .identity import prepare_identities, verify_identities
 from .info import PartnerKeyInfo as PartnerKeyInfo
 from .info import PartnerStartConfig as PartnerStartConfig
 from .ipc import member_messages
@@ -223,7 +224,9 @@ class S2sBaseClass(WTIAssertions):
             self.sim_operator.run_operator(self.domin)
         self.sim_operator.create_socket()
         configs = deepcopy(self._members_config(partner_members))
+        expected = prepare_identities(self.sim_operator, configs)
         addresses = self.sim_operator.send_request("start_config", json.dumps(configs))
+        verify_identities(self.sim_operator, expected, addresses)
         for key in list(self.partner_infos):
             if self._native_keys[key] not in addresses:
                 self._disconnect(key)
@@ -1111,7 +1114,9 @@ class S2sBaseClass(WTIAssertions):
                 )
             if previous:
                 cfg[alias] = {**deepcopy(previous), **config}
+        expected = prepare_identities(self.sim_operator, cfg)
         result = self.sim_operator.send_request("start_config_get_args", json.dumps(cfg))
+        verify_identities(self.sim_operator, expected, result)
         self._member_configs.update(
             {f"{alias}_{config['role']}": deepcopy(config) for alias, config in cfg.items()}
         )

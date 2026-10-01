@@ -44,16 +44,23 @@ def recovering_clients(request):
 
 
 @contextmanager
-def owned_partners(transport, owned_role, **options):
+def owned_partners(transport, owned_role, *, identity_port=None, **options):
+    prefix = (
+        f"identity-recovery-{identity_port}"
+        if identity_port
+        else f"recovery-{transport}"
+    )
     catalog = json.loads((ROOT / "catalog.json").read_text())
     catalog["DoorService"]["transport"] = transport
-    catalog_path = EVIDENCE / f"recovery-{transport}-catalog.json"
+    if identity_port:
+        catalog["DoorService"]["service_id"] = "0x6790"
+    catalog_path = EVIDENCE / f"{prefix}-catalog.json"
     catalog_path.write_text(json.dumps(catalog))
     handles, partners, remote = [], [], None
     root_logger = logging.getLogger()
     previous_level = root_logger.level
     log_handler = logging.FileHandler(
-        EVIDENCE / f"recovery-python-{transport}-{time.time_ns()}.log"
+        EVIDENCE / f"{prefix}-python-{time.time_ns()}.log"
     )
     log_handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -65,7 +72,7 @@ def owned_partners(transport, owned_role, **options):
             (owned_role, "10.77.0.1"),
             ("client" if owned_role == "server" else "server", "10.77.0.2"),
         ):
-            name = f"recovery_{node}"
+            name = f"recovery_{node}" + (f"_{identity_port}" if identity_port else "")
             config = json.loads((ROOT / f"{node}.json").read_text())
             config.update(
                 {
@@ -77,11 +84,36 @@ def owned_partners(transport, owned_role, **options):
                     "routing": name,
                 }
             )
+            if identity_port:
+                config["network"] = f"soa-identity-{node}-{identity_port}"
+                config["applications"] = [
+                    {"name": name, "id": "0x7850" if node == "server" else "0x7840"},
+                    *(
+                        [{"name": f"provider_{identity_port}", "id": "0x7851"}]
+                        if node == "server"
+                        else [
+                            {"name": f"consumer_a_{identity_port}", "id": "0x7841"},
+                            {"name": f"consumer_b_{identity_port}", "id": "0x7842"},
+                        ]
+                    ),
+                ]
+                config["services"] = json.loads((ROOT / "server.json").read_text())[
+                    "services"
+                ]
             for service in config.get("services", []):
                 service.pop("unreliable" if transport == "tcp" else "reliable", None)
+                if identity_port:
+                    service["service"] = "0x6790"
+                    service["reliable" if transport == "tcp" else "unreliable"] = str(
+                        identity_port
+                    )
+                    if node == "client":
+                        service["unicast"] = (
+                            "10.77.0.1" if owned_role == "server" else "10.77.0.2"
+                        )
                 for event in service.get("events", []):
                     event["is_reliable"] = transport == "tcp"
-            config_path = EVIDENCE / f"recovery-{node}-{transport}-config.json"
+            config_path = EVIDENCE / f"{prefix}-{node}-config.json"
             config_path.write_text(json.dumps(config))
             members = {
                 "DoorService": {
@@ -90,6 +122,20 @@ def owned_partners(transport, owned_role, **options):
                     "transport": transport,
                 }
             }
+            if identity_port:
+                members["DoorService"].update(
+                    {
+                        "service": "DoorService",
+                        "application_name": f"provider_{identity_port}"
+                        if node == "server"
+                        else f"consumer_a_{identity_port}",
+                    }
+                )
+                if node == "client":
+                    members["DoorService_1"] = {
+                        **members["DoorService"],
+                        "application_name": f"consumer_b_{identity_port}",
+                    }
             if node == owned_role:
                 operator = SOAOperator(
                     name,
@@ -97,16 +143,13 @@ def owned_partners(transport, owned_role, **options):
                     binary=os.environ["SOMEIP_AGENT_NATIVE_BINARY"],
                     catalog=catalog_path,
                     config=config_path,
-                    log_path=EVIDENCE
-                    / f"recovery-owned-{node}-{transport}-{time.time_ns()}.log",
+                    log_path=EVIDENCE / f"{prefix}-owned-{node}-{time.time_ns()}.log",
                 )
                 partner = S2sBaseClass(
                     members, operator=operator, **{"monitor_interval": 0.05, **options}
                 )
             else:
-                handle = (EVIDENCE / f"recovery-remote-{node}-{transport}.log").open(
-                    "ab"
-                )
+                handle = (EVIDENCE / f"{prefix}-remote-{node}.log").open("ab")
                 handles.append(handle)
                 remote = subprocess.Popen(
                     [
@@ -136,6 +179,8 @@ def owned_partners(transport, owned_role, **options):
             partners.append(partner)
         server, client = partners if owned_role == "server" else reversed(partners)
         assert client.wait_for_service_reconnect("DoorService_client", timeout=10)
+        if identity_port:
+            assert client.wait_for_service_reconnect("DoorService_client_1", timeout=10)
         assert (
             client if owned_role == "server" else server
         )._supervisor.thread is None  # attach 不拥有远端进程，不启动自动恢复。
