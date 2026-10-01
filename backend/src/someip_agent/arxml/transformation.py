@@ -10,6 +10,44 @@ from lxml import etree
 from .wire_types import WireTypeError, _value
 
 
+def apply_layout(
+    schema: dict[str, Any],
+    order: str | None,
+    alignment: str | None,
+    struct_width: str | None,
+    array_width: str | None,
+) -> dict[str, Any]:
+    """共享显式布局：长度以字节计，对齐属性以 bit 计，不覆盖源类型图。"""
+    orders = {"MOST-SIGNIFICANT-BYTE-FIRST": "big", "MOST-SIGNIFICANT-BYTE-LAST": "little"}
+    if order not in orders:
+        raise WireTypeError("序列化属性缺少明确 BYTE-ORDER")
+    try:
+        bits = int(alignment if alignment is not None else "8")
+    except ValueError as exc:
+        raise WireTypeError("ALIGNMENT 非法") from exc
+    if not 8 <= bits <= 2048 or bits % 8:
+        raise WireTypeError("ALIGNMENT 必须是 8-2048 bit 的整字节对齐")
+    result = deepcopy(schema)
+    pending = [result]
+    while pending:
+        node = pending.pop()
+        node["byte_order"] = orders[order]
+        if bits != 8:
+            node["alignment_bytes"] = bits // 8
+        kind = node["type"]
+        if kind in {"array", "struct"}:
+            value = array_width if kind == "array" else struct_width
+            if value not in {"0", "1", "2", "4"}:
+                raise WireTypeError(f"复合类型缺少或非法 {kind} LENGTH-FIELD: {value}")
+            node["length_bytes"] = int(value)
+            if kind == "array" and "length" not in node and value == "0":
+                raise WireTypeError("变长数组不能使用零长度字段")
+        pending.extend(node.get("fields", []))
+        if "element" in node:
+            pending.append(node["element"])
+    return result
+
+
 class TransformationResolver:
     def __init__(self, root: etree._Element, paths: dict[str, etree._Element]) -> None:
         self._paths = paths
@@ -63,33 +101,12 @@ class TransformationResolver:
         for child in props:
             if isinstance(child.tag, str) and etree.QName(child).localname not in supported:
                 raise WireTypeError(f"未支持序列化属性 {etree.QName(child).localname}")
-        order = _value(props, "BYTE-ORDER")
-        orders = {"MOST-SIGNIFICANT-BYTE-FIRST": "big", "MOST-SIGNIFICANT-BYTE-LAST": "little"}
-        if order not in orders:
-            raise WireTypeError("序列化属性缺少明确 BYTE-ORDER")
-        if _value(props, "ALIGNMENT") not in {None, "8"}:
-            raise WireTypeError("非 8-bit 对齐尚未支持，不能自动插入 padding")
         if _value(props, "SESSION-HANDLING") not in {None, "SESSION-HANDLING-INACTIVE"}:
             raise WireTypeError("额外 Transformer session 序列化尚未支持")
-        result = deepcopy(schema)
-        pending = [result]
-        while pending:
-            node = pending.pop()
-            node["byte_order"] = orders[order]
-            kind = node["type"]
-            if kind in {"array", "struct"}:
-                tag = (
-                    "SIZE-OF-ARRAY-LENGTH-FIELD"
-                    if kind == "array"
-                    else "SIZE-OF-STRUCT-LENGTH-FIELD"
-                )
-                value = _value(props, tag)
-                if value not in {"0", "1", "2", "4"}:
-                    raise WireTypeError(f"复合类型缺少或非法 {tag}: {value}")
-                node["length_bytes"] = int(value)
-                if kind == "array" and "length" not in node and value == "0":
-                    raise WireTypeError("变长数组不能使用零长度字段")
-            pending.extend(node.get("fields", []))
-            if "element" in node:
-                pending.append(node["element"])
-        return result
+        return apply_layout(
+            schema,
+            _value(props, "BYTE-ORDER"),
+            _value(props, "ALIGNMENT"),
+            _value(props, "SIZE-OF-STRUCT-LENGTH-FIELD"),
+            _value(props, "SIZE-OF-ARRAY-LENGTH-FIELD"),
+        )

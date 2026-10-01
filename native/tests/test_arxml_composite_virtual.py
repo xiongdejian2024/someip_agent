@@ -33,10 +33,10 @@ WIDTHS = (0, 1, 2, 4)
 @pytest.mark.parametrize("struct_width", WIDTHS)
 @pytest.mark.parametrize("array_width", WIDTHS)
 def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
-    transport, byte_order, struct_width, array_width
+    transport, byte_order, struct_width, array_width, alignment=8
 ):
     port = (
-        30530
+        (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
         + (transport == "tcp")
         + 2 * (byte_order == "little")
         + 4 * WIDTHS.index(struct_width)
@@ -45,6 +45,7 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
     content = (
         WORKSPACE / "backend/tests/fixtures/composite_service.arxml"
     ).read_bytes()
+    content = content.replace(b"<ALIGNMENT>8", f"<ALIGNMENT>{alignment}".encode())
     if byte_order == "little":
         content = content.replace(
             b"MOST-SIGNIFICANT-BYTE-FIRST", b"MOST-SIGNIFICANT-BYTE-LAST"
@@ -96,7 +97,7 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
             bundle = build_native_bundle(model, request, settings)
             directory = (
                 EVIDENCE
-                / f"composite-{transport}-{byte_order}-{struct_width}-{array_width}-{role}-{time.time_ns()}"
+                / f"composite-{alignment}-{transport}-{byte_order}-{struct_width}-{array_width}-{role}-{time.time_ns()}"
             )
             catalog, config = bundle.write(directory)
             (directory / "source.arxml").write_bytes(content)
@@ -232,3 +233,16 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
                 process.wait(timeout=5)
         for handle in handles:
             handle.close()
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+@pytest.mark.parametrize("byte_order", ["big", "little"])
+@pytest.mark.parametrize("alignment", [32, 64])
+@pytest.mark.parametrize("struct_width,array_width", [(1, 1), (2, 2)])
+def test_arxml_variable_alignment_with_absolute_prefix_offsets_over_veth(
+    transport, byte_order, alignment, struct_width, array_width
+):
+    # 同时验证 RPC、事件、字段 Getter/Setter/通知；保留相同 SAT 字典初始化入口。
+    test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
+        transport, byte_order, struct_width, array_width, alignment
+    )

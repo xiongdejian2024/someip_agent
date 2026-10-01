@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from lxml import etree
 
@@ -21,6 +22,9 @@ class ResolvedClassicBinding:
 class ClassicReferenceResolver:
     def __init__(self, root: etree._Element, element_path: Callable[[etree._Element], str]) -> None:
         self._path = element_path
+        self._fine_grained = bool(
+            root.xpath("//*[local-name()='SOMEIP-DATA-PROTOTYPE-TRANSFORMATION-PROPS']")
+        )
         self._index: dict[str, etree._Element] = {}
         self._ambiguous: set[str] = set()
         tags = {
@@ -75,6 +79,81 @@ class ClassicReferenceResolver:
         if element is None or etree.QName(element).localname != tag:
             raise WireTypeError(f"Classic 缺少明确 {tag} 完整引用: {reference}")
         return element
+
+    def apply_layout(
+        self, schema: dict[str, Any], bindings: list[ClassicSignalBinding]
+    ) -> dict[str, Any]:
+        """读取已绑定 I-SIGNAL 的显式 payload 布局；不解释 header/session 枚举。"""
+        from .transformation import apply_layout
+
+        if self._fine_grained:
+            raise WireTypeError("Classic 细粒度 SOMEIP-DATA-PROTOTYPE 覆盖尚未支持")
+        layouts = []
+        for binding in bindings:
+            if binding.start_position != 0:
+                raise WireTypeError("Classic transformer 非零 START-POSITION 尚未接通")
+            if len(binding.transformer_paths) != 1:
+                raise WireTypeError(
+                    "Classic payload 需要唯一 SOMEIP serializer，不忽略其他 transformer"
+                )
+            technology = self._resolve(binding.transformer_paths[0], "TRANSFORMATION-TECHNOLOGY")
+            if (
+                _value(technology, "PROTOCOL", direct=True) != "SOMEIP"
+                or _value(technology, "VERSION", direct=True) != "1.0.0"
+                or _value(technology, "TRANSFORMER-CLASS", direct=True) != "SERIALIZER"
+                or _value(technology, "HEADER-LENGTH") != "64"
+            ):
+                raise WireTypeError("Classic 需要明确 SOMEIP 1.0.0 SERIALIZER / 64-bit header")
+            descriptions = technology.xpath(
+                "./*[local-name()='TRANSFORMATION-DESCRIPTIONS']"
+                "/*[local-name()='SOMEIP-TRANSFORMATION-DESCRIPTION']"
+            )
+            if len(descriptions) != 1:
+                raise WireTypeError("Classic 缺少唯一 SOMEIP-TRANSFORMATION-DESCRIPTION")
+            description = descriptions[0]
+            if _value(description, "ALIGNMENT") is None:
+                raise WireTypeError("Classic description 缺少明确 ALIGNMENT，不能套用 AP 默认值")
+            supported_description = {"ALIGNMENT", "BYTE-ORDER", "INTERFACE-VERSION"}
+            if any(
+                isinstance(child.tag, str)
+                and etree.QName(child).localname not in supported_description
+                for child in description
+            ):
+                raise WireTypeError("Classic description 包含未支持属性")
+            signal = self._resolve(binding.signal_path, "I-SIGNAL")
+            variants = signal.xpath(
+                ".//*[local-name()='SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS-CONDITIONAL']"
+            )
+            if len(variants) != 1 or self._references(variants[0], "TRANSFORMER-REF") != [
+                binding.transformer_paths[0]
+            ]:
+                raise WireTypeError("Classic 缺少唯一且同 chain 的 I-SIGNAL props")
+            props = variants[0]
+            supported_props = {
+                "TRANSFORMER-REF",
+                "MESSAGE-TYPE",
+                "SESSION-HANDLING-SR",
+                "INTERFACE-VERSION",
+                "SIZE-OF-STRUCT-LENGTH-FIELDS",
+                "SIZE-OF-ARRAY-LENGTH-FIELDS",
+            }
+            if any(
+                isinstance(child.tag, str) and etree.QName(child).localname not in supported_props
+                for child in props
+            ):
+                raise WireTypeError("Classic I-SIGNAL props 包含未支持属性或 TLV 覆盖")
+            layouts.append(
+                apply_layout(
+                    schema,
+                    _value(description, "BYTE-ORDER"),
+                    _value(description, "ALIGNMENT"),
+                    _value(props, "SIZE-OF-STRUCT-LENGTH-FIELDS"),
+                    _value(props, "SIZE-OF-ARRAY-LENGTH-FIELDS"),
+                )
+            )
+        if not layouts or any(layout != layouts[0] for layout in layouts[1:]):
+            raise WireTypeError("Classic 同一参数存在冲突或缺失的 payload 布局")
+        return layouts[0]
 
     def resolve(self, triggering_path: str) -> list[ResolvedClassicBinding]:
         triggering = self._resolve(triggering_path, "PDU-TRIGGERING")

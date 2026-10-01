@@ -130,7 +130,7 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(
     assert checked["ipv4_fragment_packets"] == reference["ipv4_fragment_packets"]
     # 原生导入审计必须采用相同的实际分片/方向边界，而非从其他流借帧数。
     result = audit_native(path, checked, tmp_path)
-    assert len(result["golden_messages"]) == 932
+    assert len(result["golden_messages"]) == 1124
     assert len(result["fragment_imports"]) == 16
     assert len(result["ipv4_option_imports"]) == 40
     assert result["statistics"]["packet_count"] == len(frames) + 1
@@ -301,8 +301,9 @@ def test_composite_manual_golden_anchors_and_all_field_width_profiles():
         == "1b000704003412cdab020001020a00030001020303000405060200feff"
     )
     vectors = composite_golden(defaultdict(lambda: 2))
-    assert len(vectors) == 768
-    assert len({(v["transport"], v["service_port"]) for v in vectors}) == 64
+    assert len(vectors) == 960
+    assert len({(v["transport"], v["service_port"]) for v in vectors}) == 80
+    assert {v["alignment_bits"] for v in vectors} == {8, 32, 64}
     assert {v["struct_length_bytes"] for v in vectors} == {0, 1, 2, 4}
     assert {v["array_length_bytes"] for v in vectors} == {0, 1, 2, 4}
     assert all(
@@ -310,6 +311,29 @@ def test_composite_manual_golden_anchors_and_all_field_width_profiles():
         == (2 if (v["method_id"], v["message_type"]) == (0x0101, 0) else 1)
         for v in vectors
     )
+
+
+def test_variable_alignment_golden_uses_message_and_prefix_offsets():
+    assert composite_payload("big", 2, 2, alignment=64) == (
+        "001e0700041234abcd00020102000000000a000301020300030405060002fffe"
+    )
+    assert composite_payload("big", 1, 1, alignment=32) == (
+        "1707041234abcd020102000008030102030304050602fffe"
+    )
+    assert composite_payload("big", 1, 1, alignment=64) == (
+        "1b07041234abcd02010200000000000008030102030304050602fffe"
+    )
+
+
+@pytest.mark.parametrize("change", ["missing", "wrong_padding"])
+def test_alignment_audit_rejects_missing_or_wrong_wire_bytes(change):
+    packets = composite_counters()
+    payload = composite_payload("big", 1, 1, alignment=64)
+    packets[("udp", 30794 + 4 + 16, 1, 0, payload)] = 0
+    if change == "wrong_padding":
+        packets[("udp", 30814, 1, 0, composite_payload("big", 1, 1))] = 1
+    with pytest.raises(AssertionError, match="黄金报文缺失|非法复合"):
+        composite_golden(packets)
 
 
 def composite_counters():

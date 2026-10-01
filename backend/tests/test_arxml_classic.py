@@ -138,8 +138,12 @@ def test_duplicate_full_path_is_isolated_not_last_value_wins():
 def test_complete_reference_chain_is_not_permission_to_guess_classic_payload():
     model = parse(root())
     assert model.services[0].events[0].classic_bindings
-    # 标量的类型虽可解析，64-bit alignment/session 的 transformer 尚未实现。
-    assert model.services[0].events[0].signals[0].wire_schema == {"type": "uint16"}
+    # 显式标量布局已解析，但消息类型/session 未验证，不能因此解除服务门禁。
+    assert model.services[0].events[0].signals[0].wire_schema == {
+        "type": "uint16",
+        "byte_order": "big",
+        "alignment_bytes": 8,
+    }
     request = NativeCatalogRequest(members={"BodyService": {"role": "server"}})
     with pytest.raises(CatalogBuildError, match="Classic SOME/IP transformer"):
         build_native_bundle(model, request, Settings(_env_file=None))

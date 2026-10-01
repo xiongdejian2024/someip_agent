@@ -790,22 +790,52 @@ class ArxmlParser:
                 )
         resolver = WireTypeResolver(index, mappings)
         transformation = TransformationResolver(root, index)
+        classic = ClassicReferenceResolver(root, _element_path)
         for service in model.services:
             signals = [
-                (signal, method.path)
+                (
+                    signal,
+                    method.path,
+                    [
+                        binding
+                        for binding in method.classic_bindings
+                        if binding.direction in {direction, "data"}
+                        and (binding.direction != "data" or binding.target_path == signal.path)
+                    ],
+                )
                 for method in service.methods
-                for signal in [*method.input_signals, *method.output_signals]
+                for direction, parameters in (
+                    ("input", method.input_signals),
+                    ("output", method.output_signals),
+                )
+                for signal in parameters
             ]
             signals += [
-                (signal, event.path) for event in service.events for signal in event.signals
+                (
+                    signal,
+                    event.path,
+                    [
+                        binding
+                        for binding in event.classic_bindings
+                        if binding.target_path == signal.path
+                    ],
+                )
+                for event in service.events
+                for signal in event.signals
             ]
             signals += [
-                (field.signal, field.path) for field in service.fields if field.signal is not None
+                (field.signal, field.path, [])
+                for field in service.fields
+                if field.signal is not None
             ]
-            for signal, element_path in signals:
+            for signal, element_path, bindings in signals:
                 try:
                     schema = resolver.resolve(signal.type_ref)
-                    signal.wire_schema = transformation.apply(schema, element_path)
+                    signal.wire_schema = (
+                        classic.apply_layout(schema, bindings)
+                        if bindings
+                        else transformation.apply(schema, element_path)
+                    )
                     signal.data_type = SignalDataType(signal.wire_schema["type"])
                     if "byte_order" in signal.wire_schema:
                         signal.byte_order = signal.wire_schema["byte_order"]

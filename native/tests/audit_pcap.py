@@ -142,7 +142,7 @@ def audit(path: Path) -> dict:
                         port = next(
                             (
                                 port
-                                for port in range(30530, 30594)
+                                for port in (*range(30530, 30594), *range(30730, 30858))
                                 if port in (transport.sport, transport.dport)
                             ),
                             None,
@@ -653,7 +653,7 @@ def audit(path: Path) -> dict:
     }
 
 
-def composite_payload(order, struct_width, array_width, tag=7):
+def composite_payload(order, struct_width, array_width, tag=7, alignment=8):
     # 独立手工拼接，不导入产品 schema/Codec；整数常量与每一层字节长度分别推导。
     def prefix(size, width):
         return size.to_bytes(width, order) if width else b""
@@ -666,35 +666,45 @@ def composite_payload(order, struct_width, array_width, tag=7):
         + prefix(3, array_width)
         + b"\x04\x05\x06"
     )
-    body = (
+    first = (
         bytes([tag])
         + prefix(4, array_width)
         + words
         + prefix(2, array_width)
         + b"\x01\x02"
-        + prefix(6 + 2 * array_width, array_width)
+    )
+    # 仅变长 bytes 非末尾时补齐，计算基点包括 16 字节头及外层结构长度字段。
+    pad = (-(16 + struct_width + len(first))) % (alignment // 8) if array_width else 0
+    body = (
+        first + b"\x00" * pad + prefix(6 + 2 * array_width, array_width)
         + rows
         + prefix(2, struct_width)
         + temperature
     )
-    assert len(body) == 15 + 5 * array_width + struct_width
+    assert len(body) == 15 + 5 * array_width + struct_width + pad
     return (prefix(len(body), struct_width) + body).hex()
 
 
 def composite_golden(packets):
     checks = []
     widths = (0, 1, 2, 4)
-    for order, width, array_width in (
-        (order, width, array_width)
+    profiles = [
+        (order, width, array_width, 8)
         for order in ("big", "little")
         for width in widths
         for array_width in widths
-    ):
-        payload = composite_payload(order, width, array_width)
-        changed = composite_payload(order, width, array_width, tag=8)
+    ] + [
+        (order, width, width, alignment)
+        for order in ("big", "little")
+        for width in (1, 2)
+        for alignment in (32, 64)
+    ]
+    for order, width, array_width, alignment in profiles:
+        payload = composite_payload(order, width, array_width, alignment=alignment)
+        changed = composite_payload(order, width, array_width, tag=8, alignment=alignment)
         for transport in ("udp", "tcp"):
             port = (
-                30530
+                (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
                 + (transport == "tcp")
                 + 2 * (order == "little")
                 + 4 * widths.index(width)
@@ -745,6 +755,7 @@ def composite_golden(packets):
                         "message_type": kind,
                         "payload_hex": expected,
                         "byte_order": order,
+                        "alignment_bits": alignment,
                         "struct_length_bytes": width,
                         "array_length_bytes": array_width,
                         "array_semantics": "fixed"

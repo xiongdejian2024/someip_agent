@@ -60,6 +60,38 @@ int main() {
         require(hex(Codec::encode(bounded,Json::array({1,2})))=="020102","有界数组黄金字节错误");
         rejects([&]{Codec::encode(bounded,Json::array({1,2,3}));});
         rejects([&]{Codec::decode(bounded,unhex("03010203"));});
+        // 绝对偏移包含 SOME/IP 头和外层长度前缀，不能在临时 body 的起点重新对齐。
+        Json aligned={{"type","struct"},{"length_bytes",2},{"alignment_bytes",8},
+            {"fields",Json::array({
+                Json{{"name","tag"},{"type","uint8"},{"alignment_bytes",8}},
+                Json{{"name","items"},{"type","array"},{"length_bytes",1},{"max_length",3},
+                    {"alignment_bytes",8},{"element",Json{{"type","uint16"}}}},
+                Json{{"name","tail"},{"type","uint16"},{"alignment_bytes",8}}
+            })}};
+        Json aligned_value={{"tag",7},{"items",Json::array({0x1234})},{"tail",0xabcd}};
+        require(hex(Codec::encode(aligned,aligned_value))=="0008070212340000abcd","变长数组全消息对齐黄金字节错误");
+        require(Codec::decode(aligned,unhex("0008070212340000abcd"))==aligned_value,"变长对齐解码错误");
+        aligned_value["items"]=Json::array();
+        require(hex(Codec::encode(aligned,aligned_value))=="0008070000000000abcd","空变长数组未按绝对位置对齐");
+        require(Codec::decode(aligned,Codec::encode(aligned,aligned_value))==aligned_value,"空变长数组解码失败");
+        rejects([&]{Codec::decode(aligned,unhex("000607021234abcd"));});
+        aligned["fields"][1]["alignment_bytes"]=0;
+        rejects([&]{Codec::encode(aligned,aligned_value);});
+        aligned["fields"][1]["alignment_bytes"]=8;
+        aligned["fields"].erase(aligned["fields"].end()-1);
+        aligned_value.erase("tail");aligned_value["items"]=Json::array({0x1234});
+        require(hex(Codec::encode(aligned,aligned_value))=="000407021234","消息末尾不得自动加 padding");
+        require(Codec::decode(aligned,Codec::encode(aligned,aligned_value))==aligned_value,"末尾变长数组解码失败");
+        Json fixed={{"type","struct"},{"alignment_bytes",8},{"fields",Json::array({
+            Json{{"name","a"},{"type","uint8"},{"alignment_bytes",8}},
+            Json{{"name","b"},{"type","uint32"},{"alignment_bytes",8}}
+        })}};
+        require(hex(Codec::encode(fixed,Json{{"a",1},{"b",0x12345678}}))=="0112345678","固定成员被错误对齐");
+        Json strings={{"type","array"},{"length_bytes",2},{"alignment_bytes",8},
+            {"element",Json{{"type","string"},{"length_bytes",1},{"alignment_bytes",8}}}};
+        auto text_values=Json::array({"a","bc"});
+        require(hex(Codec::encode(strings,text_values))=="0009016100000000026263","变长元素数组黄金字节错误");
+        require(Codec::decode(strings,Codec::encode(strings,text_values))==text_values,"变长元素数组对齐解码失败");
         rejects([]{number(Json(-1));});
         rejects([]{bounded_number(Json(65536),65535,"service_id");});
         std::cout<<Json{{"message","原生编解码基础类型、字节序、数组及异常边界测试通过"}}.dump()<<std::endl;

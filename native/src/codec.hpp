@@ -40,6 +40,18 @@ inline Bytes unhex(const std::string &text) {
     return out;
 }
 class Codec {
+    static bool variable(const Json &schema) {
+        const std::string type=schema.value("type","struct");
+        if(type=="string" || type=="bytes")return true;
+        if(type=="array")return !schema.contains("length") || variable(schema.at("element"));
+        if(type=="struct")for(const auto &field:schema.at("fields"))if(variable(field))return true;
+        return false;
+    }
+    static size_t padding(const Json &schema,size_t position) {
+        auto alignment=bounded_number(schema.value("alignment_bytes",Json(1)),256,"对齐字节数");
+        if(!alignment)throw std::runtime_error("对齐字节数必须为正数");
+        return (alignment-position%alignment)%alignment;
+    }
     static void integer(Bytes &data, uint64_t value, size_t size, bool little) {
         if(size==0 || size>8)throw std::runtime_error("整数/长度字段宽度必须为 1 至 8 字节");
         for (size_t i = 0; i < size; ++i)
@@ -64,14 +76,21 @@ class Codec {
         integer(data,length,width,little);
     }
 public:
-    static void encode_one(Bytes &data, const Json &schema, const Json &value) {
+    static void encode_one(Bytes &data, const Json &schema, const Json &value,
+                           size_t message_offset=16,bool last=true) {
         const std::string type = schema.value("type", "struct");
         bool little = schema.value("byte_order", "big") == "little";
         if (type == "struct") {
             if (!value.is_object()) throw std::runtime_error("结构体参数必须为字典");
             Bytes body;
-            for (const auto &field : schema.at("fields"))
-                encode_one(body, field, value.at(field.at("name").get<std::string>()));
+            const auto &fields=schema.at("fields");
+            auto prefix=schema.value("length_bytes",0)==0?0:length_width(schema);
+            auto body_offset=message_offset+data.size()+prefix;
+            for(size_t i=0;i<fields.size();++i) {
+                const auto &field=fields[i];
+                encode_one(body,field,value.at(field.at("name").get<std::string>()),
+                           body_offset,last && i+1==fields.size());
+            }
             if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
             data.insert(data.end(),body.begin(),body.end());
         } else if (type == "array") {
@@ -79,7 +98,10 @@ public:
             if(schema.contains("max_length") && value.size()>number(schema["max_length"]))
                 throw std::runtime_error("变长数组元素数量超限");
             Bytes body;
-            for (const auto &item : value) encode_one(body, schema.at("element"), item);
+            auto prefix=schema.contains("length") && schema.value("length_bytes",0)==0?0:length_width(schema);
+            auto body_offset=message_offset+data.size()+prefix;
+            for(size_t i=0;i<value.size();++i)
+                encode_one(body,schema.at("element"),value[i],body_offset,last && i+1==value.size());
             if (schema.contains("length")) {
                 if (value.size() != number(schema["length"])) throw std::runtime_error("定长数组长度错误");
                 if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
@@ -121,8 +143,11 @@ public:
             }
             integer(data, v, bits/8, little);
         } else throw std::runtime_error("不支持的 payload 类型: " + type);
+        // 从整条 SOME/IP 消息起点计算；固定元素和全消息末尾不得自动补齐。
+        if(!last && variable(schema))data.insert(data.end(),padding(schema,message_offset+data.size()),0);
+        if(data.size()>max_frame)throw std::runtime_error("payload 超限");
     }
-    static Json decode_one(const Bytes &data, size_t &offset, const Json &schema) {
+    static Json decode_body(const Bytes &data, size_t &offset, const Json &schema,bool last) {
         const std::string type = schema.value("type", "struct");
         bool little = schema.value("byte_order", "big") == "little";
         if (type == "struct") {
@@ -134,8 +159,11 @@ public:
                 end=offset+length;
             }
             Json out = Json::object();
-            for (const auto &field : schema.at("fields"))
-                out[field.at("name").get<std::string>()] = decode_one(data, offset, field);
+            const auto &fields=schema.at("fields");
+            for(size_t i=0;i<fields.size();++i) {
+                const auto &field=fields[i];
+                out[field.at("name").get<std::string>()]=decode_one(data,offset,field,last && i+1==fields.size());
+            }
             if(prefixed && offset!=end)throw std::runtime_error("结构体长度字段与字段布局不一致");
             return out;
         }
@@ -151,7 +179,8 @@ public:
                 }
                 auto count = number(schema["length"]);
                 if (count > max_frame) throw std::runtime_error("数组长度超限");
-                for (uint32_t i=0; i<count; ++i) out.push_back(decode_one(data,offset,schema.at("element")));
+                for (uint32_t i=0; i<count; ++i)
+                    out.push_back(decode_one(data,offset,schema.at("element"),last && i+1==count));
                 if(prefixed && offset!=end)throw std::runtime_error("定长数组长度字段与元素布局不一致");
             } else {
                 size_t length = integer(data,offset,length_width(schema),little);
@@ -161,7 +190,8 @@ public:
                     if(schema.contains("max_length") && out.size()>=number(schema["max_length"]))
                         throw std::runtime_error("变长数组元素数量超限");
                     size_t before = offset;
-                    out.push_back(decode_one(data,offset,schema.at("element")));
+                    // 变长数组由长度字段界定；真正位于消息末尾的元素不消耗尾部 padding。
+                    out.push_back(decode_one(data,offset,schema.at("element"),false));
                     if (offset == before || offset > end) throw std::runtime_error("数组元素长度非法");
                 }
             }
@@ -190,6 +220,15 @@ public:
             return static_cast<int64_t>(value);
         }
         throw std::runtime_error("不支持的 payload 类型: "+type);
+    }
+    static Json decode_one(const Bytes &data,size_t &offset,const Json &schema,bool last=true) {
+        auto value=decode_body(data,offset,schema,last);
+        if(!last && variable(schema) && offset<data.size()) {
+            auto count=padding(schema,16+offset);
+            if(count>data.size()-offset)throw std::runtime_error("对齐 padding 截断");
+            offset+=count;
+        }
+        return value;
     }
     static Bytes encode(const Json &schema, const Json &value) {
         Bytes data; encode_one(data,schema,value);

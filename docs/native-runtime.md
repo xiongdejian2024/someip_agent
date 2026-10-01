@@ -578,9 +578,10 @@ SHA 为 `d2ca56b8fc5186a9f20a4b6c5d8309eaf2a7b21ea9051ab8fcb4108bb4d4442b`。
 布局门禁不等于源文件完全没有序列化配置。只读 XML 核对发现 1 个
 SOMEIP-TRANSFORMATION-DESCRIPTION（ALIGNMENT=64、明确大端），1 个 DATA-TRANSFORMATION、
 2271 个 SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS（样本 SESSION-HANDLING-SR=ACTIVE）；AP
-服务元素映射与 AP-SOMEIP-TRANSFORMATION-PROPS 均为 0。当前 resolver 仅覆盖 AP 元素
-映射，未把该 I-SIGNAL 引用链、对齐和 session 属性落实为业务布局；需后续明确解析与黄金字节
-验收，不能套用已有 8-bit 对齐/无 session 的 AP 夹具规则或删除门禁。
+服务元素映射与 AP-SOMEIP-TRANSFORMATION-PROPS 均为 0。当前已接通 Classic I-SIGNAL
+完整引用及显式字节序/结构数组长度字段，原生 Codec 已增加变长非末尾的绝对位置对齐；
+源文件缺失的复合长度字段、MESSAGE-TYPE 枚举和 active session 完整语义仍未接通，
+不能套用 AP fixture 或删除服务初始化门禁。详见 [Classic 显式布局](classic-arxml.md)。
 
 复现时显式指定三份源文件和新证据路径，不自动扫描/合并不同车型：
 

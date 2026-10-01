@@ -878,3 +878,56 @@
   检查通过；既有后端三项 warning 保留。本轮没有测线速、严格周期或规模长稳，既有性能
   数字不复制为新性能验收。正式信任升级源、真实 Classic/OEM payload、IPv6 分片和规模
   长稳仍需继续；Windows/Bootes 不要求实现，整体目标保持 active。
+
+## 2026-10-01：显式 Classic payload 布局与原生变长对齐
+
+- 上一轮只读分析核实当前默认仿真为原生数据面；本轮按持续目标恢复实现。工作树起始干净，
+  Bootes/Windows 仍排除，未使用子智能体，未改车辆网卡/原 ARXML/comm 配置。
+- 复用现有 lxml 与固定 vsomeip，不新增生产依赖。ClassicReferenceResolver 按 I-SIGNAL
+  完整链读取 serializer、description 和 props；明确 SOMEIP 1.0.0/SERIALIZER/header64。
+  显式结构/数组长度字段、字节序与对齐传播到嵌套 schema；请求/响应布局按绑定方向分别处理。
+  缺失宽度、未知/TLV/细粒度覆盖、多个变体、非零起始位置、多 transformer 和冲突仍拒绝。
+  完整 header/session/服务部署门禁不解除，不能把 payload 归一化叫做车型完整互操作。
+- 官方 4.4.0 Transformer 的 00037/00218/00259/00263 要求绝对消息偏移与变长非末尾补齐，
+  固定成员或全消息末尾不得统一补齐。本轮 Codec 同时考虑 16 字节 SOME/IP 头与嵌套前缀；
+  CTest 增加空数组、末尾、固定成员和变长元素数组的独立黄金字节/截断拒绝。
+  原生头、SD、订阅和通信继续由 vsomeip 处理，没有自写第二套协议状态机。
+- 使用 agent-reach 的 gh 路线观察原 run 36846054968，前后端成功；原生构建与安装包/短负载
+  阶段已实际继续到 Linux 打包环境步骤，不因观测超时重启。Jina 阅读超时、mcporter 不可用，
+  采用官方 AUTOSAR 搜索索引核对规范，没有把全文下载失败称为完整阅读。
+- 查阅固定 SDK 的 event::set_session 和 application_impl::get_session：通知有配置开关，
+  启用后与应用请求共享计数器，不能直接宣称满足 Classic 每 transformer 的 active session。
+  本机参考 autosarfactory 的 MESSAGE-TYPE 采用符号枚举，也未给 V6.12.0 的 0/1/2/3 数字
+  提供可验证解释；已询问原生成工具/枚举定义，继续实现其他序列化工作，不按名称相关性猜测。
+- 镜像 someip-agent-vsomeip:alignment-test 为
+  587dcd51545c50ef196e7e75792efcbcbd7515cc1d35e1a4211684c471f8a854，固定源码/补丁验证和
+  两项 CTest 通过。wheel SHA 为 3e72d019af851872a539002bf9d06e29e65cd381b31d8eb08667df30c2d84089；
+  二进制 SHA 为 20ef8c071388299b875592135a7b1a60f810e3accf76d913e9bab6b24d4b2a38。
+- build/alignment-source-evidence 用已安装 wheel、只读原文件、network=none 重新核对：
+  131 个源服务与 H47A/V_6_12_0 同名/同 ID，1067 成员/2228 绑定不变，177 部署错误和934 条
+  重复引用计数的布局错误仍保留。缺失复合 LENGTH-FIELD 的完整堆栈在 parse.log，报告仍
+  runtime_verified=false；没有激活车型或把车辆端点用于虚拟网。
+- 新增 16 项虚拟网对齐用例覆盖 UDP/TCP、双字节序、1/2 字节长度前缀，沿用 SAT 字典初始化
+  验证 RPC、事件、字段 Getter/Setter/通知；它们验证 AP 显式 fixture 到共用 Codec 的链路，
+  不冒充 Classic 车型运行。手工黄金审计新增 192 组精确向量，含缺失/错误 padding 拒绝。
+- 本轮错误命令 check_services_adapter/check_capture_adapter 的 MODULE_NOT_FOUND 堆栈
+  已保留，随后按 rg 定位正确的 scripts/check_service_adapters.mjs 并实际通过；不是增加空
+  脚本绕过验收。Ruff、版本一致性、前端类型、适配器、shell/diff 检查通过。
+- build/alignment-installed-evidence 首轮完整安装包验收通过 146+98=244 虚拟网、389 后端、
+  25+7+9=41 审计与12 权限/清理；7 份 JUnit 均零失败/错误/跳过。22612 帧/4635 消息，
+  1124 黄金向量、16 分片、40 组选项、114 正常双身份 RPC 对与32 恢复对均经独立审计及
+  原生导入核验，8 故障 case/16 刻意不回答请求保留，采集内核丢包0。无产品源码挂载或
+  PYTHONPATH，模块来自 site-packages；既有后端3 项 warning 保留，没有重测性能或长稳。
+- 首轮后进一步拒绝 Classic 缺失 ALIGNMENT 套用 AP 默认值，增加对应回归；最终镜像
+  someip-agent-vsomeip:alignment-final 为
+  6ec9a17eae44912c79ff9fd1ab2268c7e30a7153a8f702e50c0c31e847479608，固定输入/CTest 通过；
+  wheel 为 a81fd8983ec67bf0499205045972b0b10685220f76cd55434f1f4d1aa1e445c1。
+  二进制、parser/transformation 与首轮相同，Classic 模块新 SHA 为
+  676b74a014d6553539086c23b877cb1d268d4ffe389a87e4812346eaabe74f23；当前仓库与安装文件一致。
+  最终 wheel 的390 项后端回归通过，零失败/错误/跳过，保存在
+  build/alignment-final-backend-evidence/backend-regression.xml；最终原文件复核在
+  build/alignment-final-source-evidence，131 服务同名/同 ID、934 布局错误与绑定/部署计数
+  不变。未挂载产品源码。首轮389 项或虚拟网证据不是对最终新增拒绝检查的重复整网验收。
+- 上一提交386428b 的远端 run 36846054968 已确认 completed/success：前端、后端、原生、
+  虚拟网、安装包、短负载、Linux 发行包、真实签名升级/回滚及无 Python/SDK 运行全通过；
+  Windows 按配置 skipped。本轮修改的远端状态需以新提交/run 为准，旧绿不代表新提交已绿。

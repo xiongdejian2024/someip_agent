@@ -105,7 +105,7 @@ def test_little_endian_is_not_overwritten_by_default_or_conflicting_ui():
         (b"FIXED-SIZE", b"UNKNOWN-SIZE", "SEMANTICS"),
         (b"<SIZE-OF-STRUCT-LENGTH-FIELD>2", b"<SIZE-OF-STRUCT-LENGTH-FIELD>3", "LENGTH-FIELD"),
         (b"<SIZE-OF-ARRAY-LENGTH-FIELD>2", b"<SIZE-OF-ARRAY-LENGTH-FIELD>0", "变长数组"),
-        (b"<ALIGNMENT>8", b"<ALIGNMENT>32", "padding"),
+        (b"<ALIGNMENT>8", b"<ALIGNMENT>31", "整字节"),
         (
             b"/Composite/Layout</TRANSFORMATION-PROPS-REF>",
             b"/Other/Layout</TRANSFORMATION-PROPS-REF>",
@@ -141,6 +141,22 @@ def test_missing_transformation_cannot_apply_legacy_scalar_default_to_composite(
     assert model.services[0].methods[0].input_signals[0].wire_schema is None
     with pytest.raises(CatalogBuildError, match="transformation"):
         bundle(model)
+
+
+@pytest.mark.parametrize("bits", [32, 64])
+def test_explicit_alignment_propagates_without_inserting_fixed_member_padding(bits):
+    model = parse(FIXTURE.read_bytes().replace(b"<ALIGNMENT>8", f"<ALIGNMENT>{bits}".encode()))
+    schema = bundle(model).catalog["EnvelopeService"]["methods"]["Transform"]["input"]["fields"][0]
+    assert schema["alignment_bytes"] == bits // 8
+    assert schema["fields"][2]["alignment_bytes"] == bits // 8
+    assert schema["fields"][3]["element"]["alignment_bytes"] == bits // 8
+    assert [field["name"] for field in schema["fields"]] == [
+        "tag",
+        "samples",
+        "bytes",
+        "matrix",
+        "nested",
+    ]
 
 
 def test_ambiguous_application_mapping_cannot_choose_first():
