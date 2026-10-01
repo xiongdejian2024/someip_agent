@@ -1,4 +1,5 @@
 #include "codec.hpp"
+#include "payload_decode.hpp"
 
 using namespace agent;
 void require(bool condition,const char *message) {
@@ -10,6 +11,19 @@ template<class Function> void rejects(Function function) {
 }
 int main() {
     try {
+        Json observed={{"type","struct"},{"fields",Json::array({Json{{"name","sample"},{"type","uint16"}}})}};
+        auto batch=decode_payload_batch(Json{{"schema",observed},{"payloads",Json::array({"0032","ff","003200"})}});
+        require(batch["decoder"]=="someip-agent-native-codec" && batch["records"][0]["values"]["sample"]==50,
+                "原生观测批量解码来源或黄金值错误");
+        require(batch["records"][1].contains("error") && batch["records"][2].contains("error"),
+                "批量解码未保留截断或尾随错误");
+        rejects([&]{decode_payload_batch(Json{{"schema",observed},{"payloads",Json::array()}});});
+        rejects([&]{decode_payload_batch(Json{{"schema",observed},{"payloads",std::vector<std::string>(33,"0032")}});});
+        rejects([&]{decode_payload_batch(Json{{"schema",observed},{"payloads",Json::array({std::string(131074,'0')})}});});
+        rejects([&]{decode_payload_batch(Json{{"schema",observed},{"payloads",std::vector<std::string>(5,std::string(131072,'0'))}});});
+        Json nonfinite={{"type","struct"},{"fields",Json::array({Json{{"name","sample"},{"type","float32"}}})}};
+        require(decode_payload_batch(Json{{"schema",nonfinite},{"payloads",Json::array({"7f800000"})}})["records"][0].contains("error"),
+                "非有限原生值被静默序列化为null");
         Bytes all_bytes;
         std::ostringstream reference;
         for(unsigned int value=0;value<256;++value) {

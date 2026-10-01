@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ from someip_agent.domain.models import (
     ServiceDefinition,
     SignalDefinition,
 )
+from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.protocol.sd import SdEntry, SdPayload
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.simulator import SimulationManager
@@ -33,7 +35,15 @@ def service(identifier: int = 0x1234) -> ServiceDefinition:
             EventDefinition(
                 name="转速事件",
                 event_id=0x8001,
-                signals=[SignalDefinition(name="转速", data_type="uint16", minimum=0, maximum=100)],
+                signals=[
+                    SignalDefinition(
+                        name="转速",
+                        data_type="uint16",
+                        minimum=0,
+                        maximum=100,
+                        wire_schema={"type": "uint16"},
+                    )
+                ],
             )
         ],
     )
@@ -43,11 +53,24 @@ def agent(tmp_path: Any, services: list[ServiceDefinition] | None = None) -> Age
     settings = Settings(_env_file=None, data_dir=tmp_path, llm_api_key="测试凭据不发送")
     monitor = MonitorStore()
     model = services if services is not None else [service()]
+    # 工具编排单元测试显式模拟原生控制返回；真实解码另由native_payload集成验证。
+    decoder = Mock(spec=NativeSignalDecoder)
+
+    def decode(payload, signals):
+        if len(payload) != 4:
+            raise NativePayloadError("payload 截断")
+        return {signals[0].name: int(payload, 16)}
+
+    decoder.decode.side_effect = decode
+    decoder.decode_many.side_effect = lambda payloads, signals: [
+        {"values": decode(payload, signals)} for payload in payloads
+    ]
     return AgentService(
         LlmConfigurationService(settings),
         monitor,
         SimulationManager(monitor, settings),
         lambda: [s.model_dump(mode="json") for s in model],
+        decoder=decoder,
     )
 
 

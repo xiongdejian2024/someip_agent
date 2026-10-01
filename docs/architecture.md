@@ -19,7 +19,9 @@
 和离线重组由独立原生进程及成熟依赖执行。Python 保留 ARXML 投影、页面 API、SAT 风格
 字典初始化、IPC 和业务回调。逐条 Python 通知/RPC 仍经过 JSON、socket、线程调度及回调；
 监听/捕获/PCAP 的 SD 原始字节解码复用固定 vsomeip SDK 模型，Python 只读结构化结果，
-失败保留原始报文而不回退。监控和智能体的 Python 信号解码仍存在，不宣称全部数据分析已迁移。
+失败保留原始报文而不回退。监控与智能体的 payload 解码也复用在线调用使用的原生 Codec，
+按明确 ARXML wire_schema 经持久本地 socket 解码；Python 保留结构校验、物理比例换算与统计，
+不以旧 SignalCodec 回退。PCAP/统计按批次解码，原生通信在工作线程中执行，不阻塞页面事件循环。
 原生周期发生器只需提交配置一次，但客户端 Python 回调仍有成本。具体短负载证据与未达到
 严格周期的观测见 [性能证据](performance.md)，不能用 C++ 底座推导零开销或硬实时。
 

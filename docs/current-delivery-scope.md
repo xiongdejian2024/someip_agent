@@ -9,11 +9,11 @@
 
 | 要求 | 当前状态 | 可核验依据与限制 |
 |---|---|---|
-| 使用vsomeip重构底层 | 在线协议、发生器、监听和PCAP底层已接入原生 | 固定vsomeip 3.5.10；libpcap读取、libtins TCP/IPv4重组；Python不逐周期构包或绑定线上端口。真实业务ARXML布局仍需覆盖，不能因此宣称所有车型服务可用 |
-| 虚拟以太网逐功能验收 | 原生大帧版本完整复验与其提交CI已通过 | 独立64MiB采集复验266功能、435后端、48审计/名称及12权限通过，26804帧采集内核丢包为零；aed13eb的源码/安装包与完整发行CI成功。后续升级状态变更须另查新提交CI |
-| 参考SAT soa_partner调用方式 | 二进制/socket/字典接口已实现并回归 | SOAOperator/S2sBaseClass；字典初始化client/server、成员通道、RPC/事件/字段、回调及恢复。控制长度帧与成员连续JSON契约保留；原生大帧版本435项后端回归通过 |
+| 使用vsomeip重构底层 | 在线协议、发生器、监听、PCAP及观测payload均已接入原生 | 固定vsomeip 3.5.10；libpcap读取、libtins TCP/IPv4重组；SD复用上游原生模型，业务payload复用项目已有原生Codec，无Python解码回退。真实业务ARXML布局仍需覆盖，不能因此宣称所有车型服务可用 |
+| 虚拟以太网逐功能验收 | payload版本完整安装包复验通过，新提交CI须独立跟踪 | build/native-payload-installed-evidence命令退出0：266功能、575后端、59审计/名称和12权限通过，26601帧采集内核丢包0；旧CI不冒充新提交结果 |
+| 参考SAT soa_partner调用方式 | 二进制/socket/字典接口已实现并回归 | SOAOperator/S2sBaseClass；字典初始化client/server、成员通道、RPC/事件/字段、回调及恢复。控制长度帧与成员连续JSON契约保留；本轮575项安装包后端回归通过 |
 | 点击升级按钮升级最新版 | 临时信任源的新版真实点击升级/明确回滚已验收，正式发布链路未完成 | 新版从0.1.0自动重载到0.1.1及明确“已回滚至v0.1.0”分别有独立浏览器/健康/状态证据，Linux升级套件34项通过。新增安装ID查询和原子状态写入，不凭PID宣称健康；新提交CI须另查。正式发布源/验签公钥仍缺 |
-| 每轮修改提交GitHub | 按轮提交推送，分别报告各提交CI | aed13eb的CI36881157501已成功且读取实际日志；当前升级状态变更提交后必须另查新CI，不能套用旧绿色结果 |
+| 每轮修改提交GitHub | 按轮提交推送，分别报告各提交CI | 上一11c6318的CI36902227486已success并读取实际日志；本轮payload变更提交后必须另查新CI，不能套用旧绿色结果 |
 | 服务名来自ARXML和指定comm配置，不用SAT业务服务 | 名称/Service ID已只读核对，真实运行覆盖未完成 | V6.12.0与H47A/V_6_12_0共131个服务同名同ID。SAT仅参考接口；名称一致不证明payload/部署已可启动 |
 
 ## 仍需收尾的两类核心项
@@ -113,3 +113,12 @@ completed/success。实际日志`build/rollback-status-ci-evidence/ci.log`确认
 `build/sd-linux-source-zip-clean-evidence`确认无Python/SDK的网页及原生发生器运行通过。
 全部命令退出0；此前目录归档版32通过/2失败和完整异常日志继续保留，不放宽准备超时。
 正式最新版发布信任源仍未配置；这些测试夹具结果不证明正式在线最新版可下载。
+
+2026-10-02 监控/PCAP与智能体的原始payload解码已迁到同一原生Codec，生产模块不再调用
+旧Python SignalCodec；Python仍负责比例换算、统计及业务回调，本地socket并非零开销。
+本轮build/native-payload-installed-evidence完整退出0，266虚拟网、575后端、59审计/名称、
+12权限/清理通过，7份JUnit零失败/错误/跳过；26601帧采集内核丢包0。
+build/native-payload-linux-update-evidence的34项真实发行包升级/回滚通过；
+build/native-payload-linux-clean-final-evidence在无系统Python/编译器/SDK镜像中，经真实HTTP
+导入现有ARXML/PCAP黄金夹具，验证标量、嵌套、截断错误、原始payload和真实返回码，保留原生堆栈。
+这些人工夹具不证明车型业务源已全部运行，正式更新信任源也仍缺；新提交CI另行跟踪。

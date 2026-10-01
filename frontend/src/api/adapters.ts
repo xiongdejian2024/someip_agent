@@ -1,4 +1,4 @@
-import type { MonitorMessage, NetworkListener, PcapImportResult, ServiceDefinition, ServiceSignal } from '../types'
+import type { JsonValue, MonitorMessage, NetworkListener, PcapImportResult, ServiceDefinition, ServiceSignal } from '../types'
 
 interface RawSignal {
   name?: string
@@ -62,7 +62,7 @@ export interface RawMonitorMessage {
   payload_size?: number
   is_sd?: boolean
   sd_summary?: string | null
-  signal_values?: Record<string, number | string | boolean>
+  signal_values?: Record<string, JsonValue>
   metadata?: Record<string, unknown>
 }
 
@@ -230,6 +230,8 @@ export function normalizeMonitorMessage(raw: RawMonitorMessage, index = 0): Moni
     payload: raw.payload_hex,
     latencyMs: typeof metadataLatency === 'number' ? metadataLatency : undefined,
     signalValues: raw.signal_values,
+    signalDecoder: typeof raw.metadata?.signal_decoder === 'string' ? raw.metadata.signal_decoder : undefined,
+    signalDecodeError: typeof raw.metadata?.signal_decode_error === 'string' ? raw.metadata.signal_decode_error : undefined,
   }
 }
 

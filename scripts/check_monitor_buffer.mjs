@@ -42,7 +42,7 @@ assert.deepEqual(buffer.snapshot().samples.map((sample) => sample.time), [1_700_
 buffer.replace([])
 assert.deepEqual(buffer.snapshot(), { messages: [], samples: [] })
 assert.equal(messageSample({ ...makeMessage(0), timestamp: 'invalid' }), null)
-assert.deepEqual(messageSample({ ...makeMessage(0), signalValues: { 布尔: true, 文本: '跳过', 无效: NaN } }).values,
+assert.deepEqual(messageSample({ ...makeMessage(0), signalValues: { 布尔: true, 文本: '跳过', 无效: NaN, 结构: { x: 10 }, 数组: [1, 2], 空: null } }).values,
   { '0x1234/0x8001/布尔': 1 })
 buffer.append(makeMessage(3))
 buffer.clear()

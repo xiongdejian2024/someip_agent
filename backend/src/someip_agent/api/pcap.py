@@ -28,7 +28,8 @@ async def import_pcap(
         result, messages = await asyncio.to_thread(
             PcapImporter(state.settings).parse, content, source_name
         )
-        await state.monitor.publish_many(state.enrich_message(message) for message in messages)
+        enriched = await asyncio.to_thread(state.enrich_messages, messages)
+        await state.monitor.publish_many(enriched)
         state.audit.add(
             action="pcap.import",
             target=source_name,

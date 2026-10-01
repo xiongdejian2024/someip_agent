@@ -39,7 +39,11 @@ if [ "$ready" != true ]; then
   printf '%s\n' '干净发行包启动失败，保留应用与探测日志' >&2
   exit 1
 fi
-docker exec "$linux_smoke_container" bash -c 'if command -v python || command -v python3; then exit 1; fi'
+docker exec "$linux_smoke_container" bash -c '
+  for linux_clean_tool in python python3 gcc g++ cmake; do
+    if command -v "$linux_clean_tool"; then exit 1; fi
+  done
+'
 docker exec "$linux_smoke_container" env LD_LIBRARY_PATH=/opt/someip-agent/_internal \
   /opt/someip-agent/_internal/native/soa_partner --version > "$linux_smoke_evidence/native-version.txt"
 docker exec "$linux_smoke_container" sha256sum /opt/someip-agent/_internal/native/soa_partner \
@@ -50,6 +54,10 @@ request GET / > "$linux_smoke_evidence/index.http"
 request POST /api/v1/simulation/start '{"service_id":4660,"method_id":32770,"transport":"internal"}' \
   > "$linux_smoke_evidence/start.http"
 request POST /api/v1/simulation/stop > "$linux_smoke_evidence/stop.http"
+python3 native/tests/check_linux_payload_package.py "$linux_smoke_container" "$linux_smoke_evidence" \
+  > "$linux_smoke_evidence/payload-run.log" 2>&1
+docker cp "$linux_smoke_container:/var/lib/someip-agent/native-payload" \
+  "$linux_smoke_evidence/native-payload"
 python3 - "$linux_smoke_evidence" <<'PY'
 import json
 import logging
@@ -74,11 +82,14 @@ try:
     assert json.loads(body("start.http"))["running"] is True
     assert json.loads(body("stop.http"))[0]["running"] is False
     assert "vsomeip 3.5.10" in (root / "native-version.txt").read_text()
+    payload_result = json.loads((root / "payload-result.json").read_text())
+    assert payload_result["status"] == "verified"
     (root / "result.json").write_text(json.dumps({
         "status": "verified", "python_installed": False, "network": "none",
         "version": health["version"], "native_started": True,
+        "native_payload_decoded": True, "nested_json_preserved": True,
     }, ensure_ascii=False), encoding="utf-8")
-    logger.info("无 Python/SDK 的发行包网页、随包原生运行库与发生器均验证通过")
+    logger.info("无 Python/SDK 的发行包网页、发生器和原生信号解码均验证通过")
 except Exception:
     logger.exception("干净 Linux 发行包验收失败")
     raise

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import math
 from collections import Counter
@@ -12,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from someip_agent.domain.models import (
+    GeneratorKind,
     MessageType,
     MonitorMessage,
     ReturnCode,
@@ -20,9 +23,10 @@ from someip_agent.domain.models import (
     SignalGeneratorConfig,
     SimulationConfig,
 )
-from someip_agent.protocol.codec import SignalCodec
+from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.protocol.sd_metadata import read_sd
 from someip_agent.runtime.monitor import MonitorStore
+from someip_agent.soa.operator import NativeRuntimeError
 
 logger = logging.getLogger(__name__)
 SCAN_LIMIT = 5000
@@ -145,10 +149,15 @@ class EvidenceTools:
     }
 
     def __init__(
-        self, monitor: MonitorStore, get_services: Callable[[], list[dict[str, Any]]]
+        self,
+        monitor: MonitorStore,
+        get_services: Callable[[], list[dict[str, Any]]],
+        *,
+        decoder: NativeSignalDecoder | None = None,
     ) -> None:
         self.monitor = monitor
         self.get_services = get_services
+        self.decoder = decoder
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         parsed = self.SPECS[name][1].model_validate(arguments)
@@ -355,9 +364,11 @@ class EvidenceTools:
             findings.append("信号数或 payload 超过诊断上限，未进行解码。")
             return result
         try:
-            payload = bytes.fromhex(message.payload_hex)
-            if len(payload) != message.payload_size:
+            if len(message.payload_hex) != message.payload_size * 2:
                 findings.append("记录的 payload_size 与实际 payload 字节数不一致。")
+            if self.decoder is None:
+                raise NativeRuntimeError("原生信号解码会话未配置，不使用Python回退")
+            decoded = await asyncio.to_thread(self.decoder.decode, message.payload_hex, signals)
             result["decoded_signals"] = {
                 key[:256]: (
                     str(value)
@@ -366,12 +377,20 @@ class EvidenceTools:
                     if not isinstance(value, str)
                     else value[:256]
                 )
-                for key, value in SignalCodec.decode(payload, signals).items()
+                for key, value in decoded.items()
             }
-            if not signals and payload:
+            result["signal_decoder"] = "someip-agent-native-codec"
+            if not signals and message.payload_hex:
                 findings.append("该方向未定义信号但 payload 非空，需检查 ARXML 完整性及序列化。")
             result["decode_status"] = "decoded" if signals else "no_signal_definition"
-        except ValueError as exc:
+            if len(json.dumps(result["decoded_signals"], ensure_ascii=False)) > 8192:
+                result.pop("decoded_signals")
+                result["decoded_signal_names"] = [s.name[:256] for s in signals]
+                result["decode_status"] = "decoded_summary"
+                findings.append(
+                    "原生解码成功，但结构化结果超过8KiB诊断预算；只返回信号名称，完整值保留在监控。"
+                )
+        except (ValueError, NativeRuntimeError) as exc:
             logger.exception(
                 "智能体报文证据解码失败",
                 extra={"operation": "agent.evidence.decode", "message_id": message.id},
@@ -379,7 +398,7 @@ class EvidenceTools:
             result["decode_status"] = "error"
             findings.append(f"{type(exc).__name__}: {exc}")
         result["limitations"] = [
-            "仅基础类型顺序解码，不证明复杂结构、E2E 或 SOME/IP-TP 完整性；"
+            "按明确ARXML wire_schema复用原生Codec；缺布局不猜测，不证明E2E或SOME/IP-TP完整性；"
             "缓存未保存协议头 protocol_version。"
         ]
         return result
@@ -490,6 +509,51 @@ class EvidenceTools:
         skipped = 0
         decode_bytes = 0
         decode_errors = 0
+        groups: dict[int, tuple[list[SignalDefinition], list[MonitorMessage]]] = {}
+        recovered: dict[str, Any] = {}
+        for message in messages:
+            if (
+                message.is_sd
+                or message.service_id != args.service_id
+                or message.method_id != args.method_id
+                or message.signal_values.get(args.signal_name) is not None
+            ):
+                continue
+            _, signals = self.definitions(service, message)
+            decode_bytes += len(message.payload_hex) // 2
+            if (
+                len(signals) <= 100
+                and decode_bytes <= 4 * 1024 * 1024
+                and len(message.payload_hex) <= PAYLOAD_LIMIT * 2
+            ):
+                groups.setdefault(id(signals), (signals, []))[1].append(message)
+        for signals, candidates in groups.values():
+            try:
+                if self.decoder is None:
+                    raise NativeRuntimeError("原生信号解码会话未配置，不使用Python回退")
+                records = await asyncio.to_thread(
+                    self.decoder.decode_many, [m.payload_hex for m in candidates], signals
+                )
+                for message, record in zip(candidates, records, strict=True):
+                    if "error" in record:
+                        try:
+                            raise NativePayloadError(record["error"])
+                        except NativePayloadError:
+                            decode_errors += 1
+                            logger.exception(
+                                "智能体信号统计原生解码失败",
+                                extra={
+                                    "operation": "agent.evidence.signal",
+                                    "message_id": message.id,
+                                },
+                            )
+                    else:
+                        recovered[message.id] = record["values"].get(args.signal_name)
+            except (ValueError, NativeRuntimeError):
+                decode_errors += len(candidates)
+                logger.exception(
+                    "智能体信号统计原生批量解码失败", extra={"operation": "agent.evidence.signal"}
+                )
         for message in messages:
             if (
                 message.is_sd
@@ -497,24 +561,9 @@ class EvidenceTools:
                 or message.method_id != args.method_id
             ):
                 continue
-            _, signals = self.definitions(service, message)
             value = message.signal_values.get(args.signal_name)
-            if value is None and len(signals) <= 100:
-                decode_bytes += len(message.payload_hex) // 2
-                if (
-                    decode_bytes <= 4 * 1024 * 1024
-                    and len(message.payload_hex) <= PAYLOAD_LIMIT * 2
-                ):
-                    try:
-                        value = SignalCodec.decode(bytes.fromhex(message.payload_hex), signals).get(
-                            args.signal_name
-                        )
-                    except ValueError:
-                        decode_errors += 1
-                        logger.exception(
-                            "智能体信号统计补充解码失败",
-                            extra={"operation": "agent.evidence.signal", "message_id": message.id},
-                        )
+            if value is None:
+                value = recovered.get(message.id)
             if isinstance(value, (int, float)) and math.isfinite(value):
                 values.append((message, float(value)))
             else:
@@ -647,7 +696,7 @@ class EvidenceTools:
             interval_ms=args.interval_ms,
             generator=SignalGeneratorConfig(
                 signal_name=signal.name,
-                kind=args.kind,
+                kind=GeneratorKind(args.kind),
                 data_type=signal.data_type,
                 minimum=minimum,
                 maximum=maximum,

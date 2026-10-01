@@ -127,6 +127,7 @@ jobs:
           native/tests/benchmark_virtual.py native/tests/performance_metrics.py
           native/tests/test_performance_metrics.py
           native/tests/audit_service_names.py native/tests/test_service_names.py
+          native/tests/check_linux_payload_package.py
 
       - name: 统计与源服务名称审计回归
         run: python -m pytest native/tests/test_performance_metrics.py native/tests/test_service_names.py

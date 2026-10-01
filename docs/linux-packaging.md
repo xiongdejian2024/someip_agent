@@ -17,6 +17,9 @@ make linux-clean-test LINUX_CLEAN_EVIDENCE=build/linux-clean-new-run
 干净运行测试使用 Debian slim，仅复制发行目录，不安装 Python 或原生 SDK；容器网络为 none。
 基础镜像可通过 `LINUX_RUNTIME_BASE` 显式指定。本地 Docker Hub TLS 超时后使用 ECR
 镜像 `public.ecr.aws/docker/library/debian:bookworm-slim`，最终来源摘要记录在容器证据中。
+干净验收还通过真实HTTP导入现有ARXML黄金夹具与PCAP：核对标量、嵌套结构/数组、截断错误、
+原始Payload及真实返回码，并保存原生解码进程的完整日志。宿主仅用标准库发HTTP，运行容器
+内不安装Python/编译器/SDK、不挂载产品源码。该夹具不证明用户车型ARXML的运行覆盖。
 `packaging/linux/Dockerfile` 复用原生镜像、现有后端和前端，补齐构建用 Python 共享库。
 ZIP 位于镜像 `/opt/linux-package/`，可通过临时 `docker create` + `docker cp` 导出；
 完整运行目录位于 `/opt/linux-package/release/`。构建目录已存在时拒绝覆盖。

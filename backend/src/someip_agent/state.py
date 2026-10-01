@@ -8,11 +8,12 @@ from someip_agent.agent.service import AgentService, LlmConfigurationService
 from someip_agent.arxml.parser import ArxmlParseError, ArxmlParser
 from someip_agent.config import Settings
 from someip_agent.domain.models import ArxmlModel, MessageType, MonitorMessage, SignalDefinition
-from someip_agent.protocol.codec import SignalCodec, SignalCodecError
+from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.network import NetworkCaptureManager
 from someip_agent.runtime.services import ServiceSessionManager
 from someip_agent.runtime.simulator import SimulationManager
+from someip_agent.soa.operator import NativeRuntimeError
 from someip_agent.storage.arxml_repository import ArxmlModelRepository
 from someip_agent.storage.repository import AuditRepository
 from someip_agent.update.service import UpdateService
@@ -25,6 +26,7 @@ class ApplicationState:
         settings.ensure_directories()
         self.settings = settings
         self.monitor = MonitorStore(settings.monitor_capacity)
+        self.signal_decoder = NativeSignalDecoder(settings)
         self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
         self.simulator = SimulationManager(self.monitor, settings)
         self.services = ServiceSessionManager(settings, self.monitor)
@@ -39,6 +41,7 @@ class ApplicationState:
             self.monitor,
             self.simulator,
             self.services_as_dicts,
+            decoder=self.signal_decoder,
         )
 
     async def set_arxml_model(self, model: ArxmlModel) -> None:
@@ -56,15 +59,17 @@ class ApplicationState:
             return []
         return [service.model_dump(mode="json") for service in model.services]
 
-    def enrich_message(self, message: MonitorMessage) -> MonitorMessage:
-        model = self._arxml_model
+    def _message_signals(
+        self, message: MonitorMessage, model: ArxmlModel | None
+    ) -> tuple[list[SignalDefinition], str]:
         if model is None or message.is_sd:
-            return message
-        service = next(
-            (item for item in model.services if item.service_id == message.service_id), None
-        )
-        if service is None:
-            return message
+            return [], ""
+        matches = [item for item in model.services if item.service_id == message.service_id]
+        if not matches:
+            return [], ""
+        if len(matches) != 1:
+            raise ValueError("ARXML服务ID存在多个部署，不能猜测观测payload布局")
+        service = matches[0]
         signals: list[SignalDefinition] = []
         schema_source = ""
         event = next((item for item in service.events if item.event_id == message.method_id), None)
@@ -87,22 +92,62 @@ class ApplicationState:
         if not signals:
             for field in service.fields:
                 if message.method_id in {field.getter_id, field.setter_id, field.notifier_id}:
+                    if message.method_id == field.getter_id and not message.message_type & 0x80:
+                        return [], f"field:{field.name}:getter-request"
                     signals = [field.signal] if field.signal else []
                     schema_source = f"field:{field.name}"
                     break
-        if not signals:
-            return message
-        try:
-            message.signal_values = SignalCodec.decode(bytes.fromhex(message.payload_hex), signals)
-            message.metadata["signal_schema"] = schema_source
-        except (SignalCodecError, ValueError) as exc:
-            message.metadata["signal_decode_error"] = f"{type(exc).__name__}: {exc}"
-        return message
+        return signals, schema_source
+
+    @staticmethod
+    def _decode_failure(message: MonitorMessage, exc: Exception) -> None:
+        logger.exception("观测信号原生解码失败", extra={"operation": "monitor.payload.decode"})
+        message.signal_values = {}
+        message.metadata.pop("signal_decoder", None)
+        message.metadata.pop("signal_schema", None)
+        message.metadata["signal_decode_error"] = f"{type(exc).__name__}: {exc}"
+
+    def enrich_messages(self, messages: list[MonitorMessage]) -> list[MonitorMessage]:
+        groups: dict[tuple[int, int, str], tuple[list[SignalDefinition], list[MonitorMessage]]] = {}
+        model = self._arxml_model
+        for message in messages:
+            try:
+                signals, source = self._message_signals(message, model)
+                if signals:
+                    groups.setdefault(
+                        (message.service_id, message.method_id, source), (signals, [])
+                    )[1].append(message)
+            except ValueError as exc:
+                self._decode_failure(message, exc)
+        for (_, _, source), (signals, candidates) in groups.items():
+            try:
+                records = self.signal_decoder.decode_many(
+                    [m.payload_hex for m in candidates], signals
+                )
+                for message, record in zip(candidates, records, strict=True):
+                    if "error" in record:
+                        try:
+                            raise NativePayloadError(record["error"])
+                        except NativePayloadError as exc:
+                            self._decode_failure(message, exc)
+                    else:
+                        message.signal_values = record["values"]
+                        message.metadata["signal_schema"] = source
+                        message.metadata["signal_decoder"] = "someip-agent-native-codec"
+                        message.metadata.pop("signal_decode_error", None)
+            except (NativeRuntimeError, ValueError) as exc:
+                for message in candidates:
+                    self._decode_failure(message, exc)
+        return messages
+
+    def enrich_message(self, message: MonitorMessage) -> MonitorMessage:
+        return self.enrich_messages([message])[0]
 
     async def shutdown(self) -> None:
         await self.services.shutdown()
         await self.network.shutdown()
         await self.simulator.shutdown()
+        await asyncio.to_thread(self.signal_decoder.close)
 
     def imported_file_path(self, digest: str, source_name: str) -> Path:
         safe_name = Path(source_name).name.replace("..", "_")

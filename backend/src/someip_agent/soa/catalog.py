@@ -106,7 +106,9 @@ def _schema(signal: SignalDefinition, byte_order: str | None) -> dict[str, Any]:
     return schema
 
 
-def _parameters(signals: list[SignalDefinition], byte_order: str | None) -> dict[str, Any]:
+def parameter_schema(
+    signals: list[SignalDefinition], byte_order: str | None = None
+) -> dict[str, Any]:
     if len({signal.name for signal in signals}) != len(signals):
         raise CatalogBuildError(["方法参数 SHORT-NAME 重复"])
     return {
@@ -144,8 +146,8 @@ def _definition(
             method.name,
             method.method_id,
             {
-                "input": _parameters(method.input_signals, byte_order),
-                "output": _parameters(method.output_signals, byte_order),
+                "input": parameter_schema(method.input_signals, byte_order),
+                "output": parameter_schema(method.output_signals, byte_order),
                 "fire_and_forget": method.fire_and_forget,
             },
             False,
@@ -157,7 +159,7 @@ def _definition(
         schema = (
             _schema(event.signals[0], byte_order)
             if len(event.signals) == 1
-            else _parameters(event.signals, byte_order)
+            else parameter_schema(event.signals, byte_order)
         )
         add(name, event.event_id, {"schema": schema, "eventgroups": event.event_group_ids}, True)
     for field in service.fields:
@@ -170,7 +172,7 @@ def _definition(
             add(
                 f"Get{field.name}",
                 field.getter_id,
-                {"input": _parameters([], byte_order), "output": schema},
+                {"input": parameter_schema([], byte_order), "output": schema},
                 False,
             )
         if field.setter_id is not None:
@@ -178,7 +180,7 @@ def _definition(
                 f"Set{field.name}",
                 field.setter_id,
                 {
-                    "input": _parameters([field.signal], byte_order),
+                    "input": parameter_schema([field.signal], byte_order),
                     "output": schema,
                 },
                 False,

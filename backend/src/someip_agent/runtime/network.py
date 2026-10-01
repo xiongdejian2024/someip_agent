@@ -234,9 +234,10 @@ class NetworkCaptureManager:
                         extra={"operation": "network.listener.error", "listener_id": status.id},
                     )
                     continue
-                await self._monitor.publish(
-                    self._message_enricher(self._to_monitor_message(packet))
+                message = await asyncio.to_thread(
+                    self._message_enricher, self._to_monitor_message(packet)
                 )
+                await self._monitor.publish(message)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

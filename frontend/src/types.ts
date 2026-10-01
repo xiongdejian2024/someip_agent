@@ -1,3 +1,5 @@
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
+
 export type PageId =
   | 'dashboard'
   | 'services'
@@ -162,7 +164,9 @@ export interface MonitorMessage {
   status?: string
   payload?: string
   latencyMs?: number
-  signalValues?: Record<string, number | string | boolean>
+  signalValues?: Record<string, JsonValue>
+  signalDecoder?: string
+  signalDecodeError?: string
   origin?: 'rx' | 'tx' | 'sim' | 'pcap'
 }
 

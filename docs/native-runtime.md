@@ -18,6 +18,15 @@ Classic Socket/SoAd 的完整引用绑定和明确未完成项见 [Classic ARXML
   校验和投影；错误保留 `payload_hex` 与 `metadata.sd_error`，离线错误也进入导入摘要。
   缺少元数据时明确失败，不用旧 Python 解码器重新解释原始字节。库符号/Counter 适配、
   完整性检查及未知 Option 的边界见 [原生依赖](native-dependencies.md)。
+- 监控/PCAP 与智能体的 payload 观测调用相同原生 Codec，不再用 Python SignalCodec 读字节。
+  NativeSignalDecoder 复用 SOAOperator 持久 socket，惰性启动独立 network 模式进程，只绑定
+  回环控制端口、不创建车辆服务。退出后的下一次调用可重建；close 后不能再启动。
+  缺 wire_schema、歧义服务ID、截断/尾随、非有限JSON值均显式失败，原报文保留且无Python回退。
+  每批至多32帧/256KiB、每帧64KiB，schema节点4096/深度32/文本64KiB，结果每帧256KiB/
+  每批1MiB；批内错误逐条保留。PCAP与智能体样本按布局批量解码，socket操作由工作线程执行。
+  结构体/数组保留嵌套JSON；波形只取有限数值和布尔值。默认比例不把uint64先转为float，
+  这不代表浏览器JSON number已支持无损64位整数。智能体的大结构结果超过8KiB时只返回明确摘要。
+  旧protocol/codec.py保留兼容与测试用途，生产模块无调用；Python仍负责物理换算、统计和业务回调。
 - 真实业务 ARXML 的 Classic 部署/文本布局仍有未覆盖项，不能把名称核对或测试夹具当作
   车型服务运行验收。逐项完成依据见 [本轮交付范围](current-delivery-scope.md)。
 - 用户已排除后续 IPv6 改动；已有 IPv6 UDP/TCP 保留，分片仍明确拒绝，不纳入本轮门槛。

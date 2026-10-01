@@ -26,6 +26,7 @@ from someip_agent.domain.models import (
     LlmSettingsView,
     SimulationConfig,
 )
+from someip_agent.protocol.native_payload import NativeSignalDecoder
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.simulator import SimulationManager
 
@@ -285,13 +286,15 @@ class AgentService:
         monitor: MonitorStore,
         simulator: SimulationManager,
         get_services: Callable[[], list[dict[str, Any]]],
+        *,
+        decoder: NativeSignalDecoder | None = None,
     ) -> None:
         self._configuration = configuration
         self._client = OpenAiCompatibleClient(configuration)
         self._monitor = monitor
         self._simulator = simulator
         self._get_services = get_services
-        self._evidence = EvidenceTools(monitor, get_services)
+        self._evidence = EvidenceTools(monitor, get_services, decoder=decoder)
         self._tools = self._build_tools()
 
     async def chat(self, request: AgentChatRequest) -> AgentChatResponse:

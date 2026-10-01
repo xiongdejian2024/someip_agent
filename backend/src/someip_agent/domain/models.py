@@ -5,7 +5,7 @@ from enum import Enum, IntEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 
 class MessageType(IntEnum):
@@ -182,7 +182,7 @@ class MonitorMessage(BaseModel):
     payload_size: int = 0
     is_sd: bool = False
     sd_summary: str | None = None
-    signal_values: dict[str, float | int | bool | str] = Field(default_factory=dict)
+    signal_values: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

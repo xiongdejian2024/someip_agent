@@ -1274,3 +1274,45 @@
   不称全项目格式/类型检查通过。本轮尚无新二进制独立性能矩阵；新提交CI须单独跟踪。
   Python监控/智能体信号解码、车型源冲突及正式更新信任源仍是未完成项；
   Bootes/后续IPv6/Windows按用户要求不扩展，目标保持active。
+
+## 2026-10-02 监控与智能体信号解码迁移及真实发行包复验
+
+- 监控、离线PCAP和智能体观测不再调用旧Python SignalCodec解码原始payload，复用在线
+  调用已有的原生Codec。vsomeip承担通信/SD；此业务Codec是本项目已有实现，不冒充
+  上游vsomeip的业务序列化功能。ARXML参数布局复用同一parameter_schema，不按类型名猜测。
+- NativeSignalDecoder通过SOAOperator持久回环控制socket调用payload_decode，复用进程，
+  有界分批、工作线程执行；进程退出可重建，close后不得再启动。仅network控制模式，
+  不创建车辆服务或线上端点。Python保留比例换算、统计和业务回调，新增IPC仍有开销。
+  缺布局、多服务ID歧义、截断/尾随、非法UTF-8和非有限值明确失败，不用Python回退。
+  结构体/数组保留嵌套JSON，页面显示解码错误，同时保留原始Payload及真实返回码。
+- 首版专项54项中53通过/1失败，证据保留于build/native-payload-targeted-evidence；
+  close后的“已关闭”被通道异常包装覆盖，已修正关闭门禁，而非放宽断言。
+  最终新增42项原生/契约回归覆盖人工黄金字节、大小端/比例、嵌套、批次、并发、恢复、
+  PCAP、UDP/TCP与智能体；单元替身仅用于工具编排/异常契约，和真实原生验收分开。
+- 最终原生镜像someip-agent-vsomeip:payload-verified-test，ID
+  080c90e78101023b26f2a652f06b6562ed4d91ccb0f5d957de714caa8d700df5；原生SHA
+  9ffb3677e286702d2dbd2f9bd6ef8fd11ea84bbbc5f7c94c26ff27746491d5da；wheel构建SHA
+  6115259c4db195eb69b3a59c6003591764fb545ee8d51c25f36d5c86e3e47520。
+  5项CTest通过；独立安装包后端build/native-payload-verified-backend-evidence为575通过。
+  build/native-payload-installed-evidence整轮退出0，7份JUnit证明266项虚拟网功能、
+  575后端、59审计/名称与12权限/清理全部通过，零失败/错误/跳过；3项既有后端warning保留。
+  26601帧、31362812字节采集内核丢包0；原生离线5018消息、1316黄金向量、16分片、
+  40组选项与114双身份RPC对/32恢复RPC对核对通过。不挂载产品源码或设置PYTHONPATH。
+- Linux镜像someip-agent-linux:payload-test，ID
+  691cf125de291d604a18851ff3a73e8a10393ce73d9ca32da9aa49fddfe101e9；发行ZIP SHA
+  762db80dd8be81740b6e8e46dd68facb0115cb66d7306488aafa551d01147c8f，包内原生SHA与上文一致。
+  build/native-payload-linux-update-evidence的34项真实HTTPS签名升级/回滚通过、命令退出0，
+  零失败/错误/跳过，1项既有warning保留；测试0.1.1和测试签名密钥不作为正式发布信任源。
+- 干净运行镜像ID为402904d4dc719b2ff6611f23daa7051234d2a0bb2fa4258a730413a00fa37b2c；
+  build/native-payload-linux-clean-final-evidence命令退出0，result/payload-result均verified。
+  明确检查没有系统Python/gcc/g++/cmake，network=none，无产品源码挂载。真实发行包HTTP导入
+  现有ARXML及独立PCAP黄金夹具，3个有效帧/1个截断payload核对，嵌套结构/多维数组完整保留，
+  原始payload和真实返回码未改写；native-payload日志保留原生截断错误及exception_stack。
+  宿主仅标准库发送HTTP，容器不安装Python或SDK；缓存基础镜像不冒充新的联网拉取。
+- Ruff全后端/新验收脚本、11个改动Python文件format-check、解码/state/evidence三模块mypy、
+  前端构建/类型及五类适配器/渲染/流回归通过；既有大于500KiB前端chunk警告保留。
+  没有本轮独立性能矩阵或新浏览器点击验收，不借旧性能/按钮证据宣称新包零开销或硬实时。
+- 上一提交11c6318的CI36902227486已completed/success，实际日志位于
+  build/sd-migration-ci-evidence/ci.log：源码/安装包各266虚拟网及533后端、16短负载阶段、
+  34Linux升级/回滚和干净运行通过。该绿色结果不代表本轮payload提交CI，新提交必须另查。
+  车型源的103布局错误/177部署错误、53组冲突/8缺失及正式更新源/公钥仍未解决，目标保持active。

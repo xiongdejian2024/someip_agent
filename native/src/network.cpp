@@ -2,6 +2,7 @@
 #include "capture.hpp"
 #include "wire.hpp"
 #include "offline.hpp"
+#include "payload_decode.hpp"
 
 namespace agent {
 namespace {
@@ -237,6 +238,7 @@ void NetworkRuntime::control(const Json &request, std::shared_ptr<Connection> co
             };
             import->start();
         }
+        else if (function == "payload_decode") { result = decode_payload_batch(args); }
         else if (function == "network_interfaces") { result = capture_interfaces(); }
         else if (function == "network_start") {
             auto id = args.at("id").get<std::string>();

@@ -8,9 +8,17 @@ const result = await build({
   entryPoints: [fileURLToPath(new URL('../frontend/src/api/adapters.ts', import.meta.url))],
   bundle: true, write: false, platform: 'node', format: 'esm',
 })
-const { normalizeServices, normalizeNetworkListener, normalizePcapResult } = await import(
+const { normalizeServices, normalizeNetworkListener, normalizePcapResult, normalizeMonitorMessage } = await import(
   `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`,
 )
+const nestedSignals = { 结构: { 状态: true, 数组: [1, 2, { 文本: '中文' }] }, 标量: 50 }
+assert.deepEqual(normalizeMonitorMessage({ id: '结构报文', service_id: 0x1234, method_id: 0x8001, signal_values: nestedSignals }).signalValues,
+  nestedSignals, '原生结构体和数组不得在页面适配时转为字符串或丢失')
+const failedDecode = normalizeMonitorMessage({ return_code: 0, payload_hex: 'ff', metadata: { signal_decode_error: 'payload 截断' } })
+assert.equal(failedDecode.signalDecodeError, 'payload 截断')
+assert.equal(failedDecode.status, 'E_OK', '信号解码错误不得篡改线上返回码')
+assert.equal(failedDecode.payload, 'ff')
+assert.equal(normalizeMonitorMessage({ metadata: { signal_decoder: 'someip-agent-native-codec' } }).signalDecoder, 'someip-agent-native-codec')
 const services = normalizeServices([
   { name: '同名服务', path: '/Interfaces/Same', deployment_path: '/Deployments/One', service_id: 0x1234, instance_ids: [1] },
   { name: '同名服务', path: '/Interfaces/Same', deployment_path: '/Deployments/Two', service_id: 0x1235, instance_ids: [2] },
