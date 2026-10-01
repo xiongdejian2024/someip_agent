@@ -208,7 +208,7 @@ export function SettingsPage({ currentVersion }: { currentVersion?: string } = {
 
         <aside className="settings-aside">
           <section className="panel security-card"><span className="security-illustration"><Icon name="shield" size={28} /></span><h3>凭证安全</h3><p>API Key 不写入前端源码、不保存到浏览器，也不会从配置接口回显。</p><ul><li><Icon name="check" />优先写入操作系统凭据库</li><li><Icon name="check" />日志不记录密钥</li><li><Icon name="check" />仅服务进程可读取</li></ul></section>
-          <section className="panel runtime-card"><div className="panel-header"><div><span className="panel-kicker">RUNTIME</span><h3>运行环境</h3></div></div><dl><dt>前端</dt><dd>React + Vite</dd><dt>发行目标</dt><dd>Windows x64</dd><dt>更新源</dt><dd>后端配置 HTTPS 清单</dd><dt>配置协议</dt><dd>OpenAI Compatible</dd></dl></section>
+          <section className="panel runtime-card"><div className="panel-header"><div><span className="panel-kicker">RUNTIME</span><h3>运行环境</h3></div></div><dl><dt>前端</dt><dd>React + Vite</dd><dt>发行目标</dt><dd>Linux（当前验收目标）</dd><dt>更新源</dt><dd>后端配置 HTTPS 清单</dd><dt>配置协议</dt><dd>OpenAI Compatible</dd></dl></section>
         </aside>
       </section>
     </div>

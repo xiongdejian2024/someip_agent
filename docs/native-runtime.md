@@ -14,8 +14,9 @@ Classic Socket/SoAd 的完整引用绑定和明确未完成项见 [Classic ARXML
   Python 不读取网卡或重组 TCP/IP。
 - 离线 PCAP/PCAPNG 由 libpcap 读取，复用相同原生 TCP/IPv4 重组与 vsomeip 解码；
   Python 只负责上传文件、控制 socket、展示聚合及 SD/信号分析，不保留 Python 底层解析回退。
-- 完整 ARXML 映射、SAT 辅助接口、IPv6 分片及 IPv4 选项专用语义仍有未完成项，
-  不能宣称整个底层已替换。
+- 真实业务 ARXML 的 Classic 部署/文本布局仍有未覆盖项，不能把名称核对或测试夹具当作
+  车型服务运行验收。逐项完成依据见 [本轮交付范围](current-delivery-scope.md)。
+- 用户已排除后续 IPv6 改动；已有 IPv6 UDP/TCP 保留，分片仍明确拒绝，不纳入本轮门槛。
 
 vsomeip 上游固定提交：`c4e0db329da9b63f511f3c2456c040582daf9305`。
 Dockerfile 检查源码提交，避免相同标签移动后悄悄更换核心。

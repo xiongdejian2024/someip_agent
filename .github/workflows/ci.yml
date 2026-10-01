@@ -149,6 +149,9 @@ jobs:
       - name: 服务与抓包来源适配器验收
         run: node scripts/check_service_adapters.mjs
 
+      - name: 设置页发行目标与缺省升级门禁渲染验收
+        run: node scripts/check_settings_render.mjs
+
       - name: 构建前端
         run: npm --prefix frontend run build
 

@@ -73,8 +73,9 @@ uint16 payload 长度是 4 字节，不是 2，也不另写一个 count 字段�
 
 原生编码要求计数是非负整数且等于列表实际长度；解码从字节长度重建有效个数与源字典形状。
 未知 profile、错误顺序/元数据、有符号 indicator、Application/Implementation profile 冲突、
-多维 profile、计数不一致或超上界均拒绝。当前 ARRAY-SIZE 资源门禁仍为 1–65536；
-真实文件中更大的数组未称为支持。AP 显式属性继续使用其明确长度宽度，不套 CP 默认规则。
+多维 profile、计数不一致或超上界均拒绝。当前 ARRAY-SIZE 声明接受 uint32 正整数，
+不按声明上界展开或分配元素；实际元素、payload 和 IPC 预算仍单独检查。
+AP 显式属性继续使用其明确长度宽度，不套 CP 默认规则。
 
 原生 CTest 包含绝对偏移、空数组、末尾变长、固定成员不补齐及变长元素数组黄金字节。
 `backend/tests/test_classic_layout.py` 验证真实类型/映射链上的嵌套布局、call/return 独立字节序
@@ -90,7 +91,9 @@ uint16 payload 长度是 4 字节，不是 2，也不另写一个 count 字段�
 仍返回 `runtime_verified=false`。它只读，不激活车型/版本，不迁移车辆 IP/VLAN。
 当前真实 V6.12.0 与 H47A/V_6_12_0 的 131 个服务名/ID 一致，1067 个成员保留 2228 条引用
 绑定。早期 alignment-source-evidence 的934条布局错误保留；本轮
-`build/vsa-source-evidence/names.json` 的重复引用计数为112。真实73个 VSA 类型中63个的
-uint32 indicator/类型图已解析，10个因上界超过65536拒绝；其他缺失数组宽度、无绑定布局、
-空结构与重复引用仍有门禁，完整堆栈保存在各自 parse.log，不覆盖旧失败记录。
+`build/vsa-source-evidence/names.json` 的重复引用计数为112。早期73个 VSA 类型中63个的
+uint32 indicator/类型图解析成功，10个因旧声明上界拒绝。最新
+`build/large-array-dispatch-source-evidence/names.json` 中73个类型图全部解析，布局错误
+103条、部署错误177条；其他缺失数组宽度、无绑定布局、空结构与重复引用仍有门禁，
+完整堆栈保存在各自 parse.log，不覆盖旧失败记录。
 源引用/显式布局解析成功不是车型全部服务可用。
