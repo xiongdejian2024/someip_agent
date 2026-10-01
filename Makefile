@@ -78,10 +78,11 @@ native-image:
 	docker build --build-arg NATIVE_BASE=$(NATIVE_BASE) --build-arg NATIVE_SDK=$(NATIVE_SDK) -f native/Dockerfile -t $(NATIVE_IMAGE) .
 
 native-compile:
+	mkdir -p build/native build/virtual-evidence
 	docker run --rm --init --network none -v "$(CURDIR):/workspace" $(NATIVE_IMAGE) bash -c 'cmake -S native -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build/native -j2 && ctest --test-dir build/native --output-on-failure'
 
 native-test: native-compile
-	docker run --rm --init --privileged --network none $(NATIVE_IPV6) -v "$(CURDIR):/workspace" -e PYTHONPATH=/workspace/backend/src $(NATIVE_IMAGE) bash native/tests/run_virtual.sh
+	docker run --rm --init --privileged --network none $(NATIVE_IPV6) -v "$(CURDIR):/workspace" -e PYTHONPATH=/workspace/backend/src -e SOMEIP_AGENT_EVIDENCE_OWNER="$$(id -u):$$(id -g)" $(NATIVE_IMAGE) bash native/tests/run_virtual.sh
 
 native-regression: native-compile
 	docker run --rm --init --network none $(NATIVE_IPV6) -v "$(CURDIR):/workspace" -e PYTHONPATH=/workspace/backend/src -e SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner -e SOMEIP_AGENT_REQUIRE_NATIVE_TESTS=1 $(NATIVE_IMAGE) python -m pytest backend/tests --junitxml=build/virtual-evidence/backend-regression.xml
@@ -92,4 +93,5 @@ native-installed-test:
 	  -v "$(CURDIR)/native/tests:/workspace/native/tests:ro" \
 	  -v "$(CURDIR)/backend/tests:/workspace/backend/tests:ro" \
 	  -v "$(CURDIR)/$(NATIVE_INSTALLED_EVIDENCE):/workspace/build/virtual-evidence" \
+	  -e SOMEIP_AGENT_EVIDENCE_OWNER="$$(id -u):$$(id -g)" \
 	  $(NATIVE_IMAGE) bash native/tests/run_installed.sh

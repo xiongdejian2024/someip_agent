@@ -44,6 +44,7 @@ def audit(path: Path) -> dict:
             )
             if (
                 not ipv6
+                and (network.mf or network.offset)
                 and src == "10.77.0.2"
                 and dst == "10.77.0.1"
                 and (

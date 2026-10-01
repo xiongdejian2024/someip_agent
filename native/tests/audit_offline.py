@@ -168,6 +168,9 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
             network = dpkt.ethernet.Ethernet(data).data
             if (
                 isinstance(network, dpkt.ip.IP)
+                and (network.mf or network.offset)
+                and network.src == bytes((10, 77, 0, 2))
+                and network.dst == bytes((10, 77, 0, 1))
                 and network.id == expected["ip_id"]
                 and network.p == protocol
             ):
