@@ -152,6 +152,9 @@ def test_failed_health_rolls_back_and_restarts_old_version(tmp_path, monkeypatch
     assert (tmp_path / "installed.failed-update" / "VERSION").read_text() == "0.2.0"
     assert len(launches) == 2
     assert health_versions == ["0.2.0", "0.1.0"]
+    assert update["rollback_completed"] is True
+    assert update["restored_version"] == "0.1.0"
+    assert not update.get("rollback_failed")
 
 
 def test_failed_rollback_health_is_not_reported_as_recovered(tmp_path, monkeypatch, caplog):
@@ -173,7 +176,30 @@ def test_failed_rollback_health_is_not_reported_as_recovered(tmp_path, monkeypat
     assert isinstance(error.value.__cause__, TimeoutError)
     assert (tmp_path / "installed" / "VERSION").read_text() == "0.1.0"
     assert "未恢复健康" in caplog.text
+    assert update["rollback_failed"] is True
+    assert "rollback_completed" not in update
+    assert "restored_version" not in update
     assert all(record.exc_info for record in caplog.records if record.levelname == "ERROR")
+
+
+def test_status_write_replaces_complete_record_atomically(tmp_path, monkeypatch):
+    from someip_agent.update.worker import _write_status
+
+    path = tmp_path / "status.json"
+    path.write_text('{"status":"prepared"}')
+    replace = Path.replace
+    seen = []
+
+    def checked_replace(source, destination):
+        seen.append(json.loads(path.read_text()))
+        assert json.loads(source.read_text()) == {"status": "failed"}
+        return replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", checked_replace)
+    _write_status(path, {"status": "failed"})
+    assert seen == [{"status": "prepared"}]
+    assert json.loads(path.read_text()) == {"status": "failed"}
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_install_requires_packaged_launcher(tmp_path) -> None:

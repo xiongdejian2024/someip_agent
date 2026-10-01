@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 
 import pytest
@@ -68,3 +69,81 @@ def test_install_rejects_staging_inside_installation(tmp_path):
     )
     with pytest.raises(UpdateError, match="安装目录之外"):
         service._install_paths()
+
+
+@pytest.mark.parametrize("status", ["prepared", "complete", "failed"])
+def test_installation_status_survives_service_restart_and_excludes_private_paths(tmp_path, status):
+    from fastapi.testclient import TestClient
+
+    from someip_agent.main import create_app
+
+    installation_id = "a" * 32
+    directory = tmp_path / "updates"
+    directory.mkdir()
+    (directory / f"install-plan-{installation_id}.status.json").write_text(
+        json.dumps(
+            {
+                "installation_id": installation_id,
+                "version": "0.2.0",
+                "status": status,
+                "backup": "/private/installed.previous",
+                "pid": 12345,
+                "rollback_pid": 12346,
+            }
+        )
+    )
+    with TestClient(create_app(Settings(_env_file=None, data_dir=tmp_path))) as client:
+        response = client.get(f"/api/v1/updates/install/{installation_id}")
+    assert response.status_code == 200
+    assert response.json() == {
+        "installation_id": installation_id,
+        "version": "0.2.0",
+        "status": status,
+        "rollback_completed": False,
+        "rollback_failed": False,
+        "restored_version": None,
+        "error": None,
+    }
+
+
+@pytest.mark.parametrize("bad", ["../other", "A" * 32, "a" * 31, "a" * 33])
+def test_installation_status_rejects_nonidentifiers(tmp_path, bad):
+    service = UpdateService(Settings(_env_file=None, data_dir=tmp_path))
+    with pytest.raises(UpdateError, match="安装 ID"):
+        service.installation_status(bad)
+
+
+def test_installation_status_missing_is_not_reported_as_success(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from someip_agent.main import create_app
+
+    with TestClient(create_app(Settings(_env_file=None, data_dir=tmp_path))) as client:
+        response = client.get("/api/v1/updates/install/" + "a" * 32)
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("kind", ["symlink", "oversize", "partial", "foreign", "contradictory"])
+def test_installation_status_invalid_records_fail_closed(tmp_path, kind):
+    installation_id = "a" * 32
+    directory = tmp_path / "updates"
+    directory.mkdir()
+    path = directory / f"install-plan-{installation_id}.status.json"
+    record = {"installation_id": installation_id, "version": "0.2.0", "status": "failed"}
+    if kind == "symlink":
+        target = tmp_path / "other.json"
+        target.write_text(json.dumps(record))
+        path.symlink_to(target)
+    elif kind == "oversize":
+        path.write_text(" " * 65537)
+    elif kind == "partial":
+        path.write_text('{"status":')
+    else:
+        if kind == "foreign":
+            record["installation_id"] = "b" * 32
+        else:
+            record.update(rollback_completed=True, rollback_failed=True, restored_version="0.1.0")
+        path.write_text(json.dumps(record))
+    service = UpdateService(Settings(_env_file=None, data_dir=tmp_path))
+    with pytest.raises(UpdateError):
+        service.installation_status(installation_id)

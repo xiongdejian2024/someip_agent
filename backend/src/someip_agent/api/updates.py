@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from someip_agent.api.dependencies import get_state
-from someip_agent.domain.models import UpdateInfo
+from someip_agent.domain.models import UpdateInfo, UpdateInstallationStatus
 from someip_agent.state import ApplicationState
 from someip_agent.update.service import UpdateError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["updates"])
+
+
+@router.get("/updates/install/{installation_id}", response_model=UpdateInstallationStatus)
+async def installation_status(
+    installation_id: str, state: ApplicationState = Depends(get_state)
+) -> UpdateInstallationStatus:
+    try:
+        return await asyncio.to_thread(state.update_service.installation_status, installation_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "本次安装状态尚不存在") from exc
+    except UpdateError as exc:
+        logger.exception("在线升级状态查询失败", extra={"operation": "update.status"})
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
 
 @router.post("/updates/install")

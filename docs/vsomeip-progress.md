@@ -1158,3 +1158,33 @@
   全部UDP/TCP过滤范围、ready等待、SIGINT完成与零采集内核丢包门禁，不隐藏IPC/失败流量。
   不改变产品IPC预算、生产捕获配置、性能脚本采集口径、协议数据或测试周期。
   真实shell替身回归核对实际参数及采集提前退出仍失败；不把替身当成完整抓包证明。
+
+### 2026-10-01 后续复验与升级结果关联
+
+- 64MiB新目录`build/ipc-large-write-capture64-installed-evidence`完整安装包命令退出0：
+  266功能、435后端、48审计/名称及12权限通过，7份JUnit零失败/错误/跳过。
+  tcpdump捕获/过滤接收均26804帧，内核丢包零；原生离线5053消息，1316黄金、16分片、
+  40组选项及114对双身份RPC、32对恢复RPC独立核对。原61帧采集丢包失败证据保留。
+- 同二进制`build/ipc-large-write-performance-evidence`16阶段全部verified，1600RPC与
+  13198事件完整核对，采集内核丢包均零，12权限和10统计回归通过；详细口径见performance.md。
+  aed13eb的CI36881157501已completed/success并读取日志：源码/安装包各266功能与435后端，
+  4CTest、48审计/名称、16负载、19发行升级及干净运行通过；普通后端355通过/80跳过另计。
+- 升级器现有外置计划增加随机安装ID，prepared/complete/failed状态原子替换写入；
+  GET安装状态只读本次ID，限制64KiB、拒绝链接/坏记录/ID不一致，不返回PID/备份路径。
+  rollback_completed只在旧版健康检查成功后写入，失败另记rollback_failed，保留完整堆栈。
+  页面将本次ID、目标版本、升级器状态与实际健康版本共同核对；完成才重载，确认恢复才显示
+  “已回滚”，未恢复健康明确需人工处理；轮询期间保持安装忙态，离开页面清理定时器。
+- 新32项源升级回归（含真实脚本成功/失败恢复）、Ruff、格式、类型检查、前端构建、
+  实际页面决策函数与设置页SSR通过。复用既有Pydantic、esbuild与打包器，无新依赖。
+  新Linux发行镜像0a761e8e709e165c31834eaf38566095f06fae2d43c78136a9ba55bf0132c265，
+  基线完整ZIP SHA cdb15df82a21240eae69f909d12738f85fea2184477fe3cdeb8443881eef7b96。
+- `build/rollback-status-linux-evidence`首轮33通过/1失败：API测试40秒先于约41.7秒准备完成
+  而超时，未算整轮通过。首轮浏览器`build/rollback-status-browser-evidence`180秒总窗口耗尽，
+  清理又超时，整次失败；全部日志/状态/JUnit保留。测试API预算对齐页面既有180秒，浏览器
+  总窗口包含页面操作加下载准备；未放宽任何产品下载/准备/退出/健康或原生数据面预算。
+- `build/rollback-status-browser-retry-evidence`真实点击已显示“已回滚至v0.1.0”、退出255原因
+  和恢复后服务正常；本次状态rollback_completed=true、旧版健康/目录及失败新包分别断言，
+  JUnit1通过、命令退出0。`build/rollback-status-browser-success-evidence`另以真实点击自动
+  重载为0.1.1，状态complete、健康版本/备份断言通过，JUnit1通过、命令退出0。
+  `build/rollback-status-linux-retry-evidence`串行完整34项通过、零失败/错误/跳过，1 warning。
+  后续新提交CI单独查询，不沿用aed13eb绿色；正式信任源、业务源部署解释仍未完成，目标active。

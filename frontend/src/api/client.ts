@@ -12,6 +12,7 @@ import type {
   SimulationStartRequest,
   SimulationStatus,
   UpdateInfo,
+  UpdateInstallationStatus,
 } from '../types'
 import {
   normalizeMonitorMessage,
@@ -130,9 +131,12 @@ export const api = {
   }, 60_000),
   getLlmSettings: () => request<LlmSettings>('/settings/llm'),
   checkUpdate: () => request<UpdateInfo>('/updates/check', {}, 15_000),
-  installUpdate: () => request<{ status: string; version: string }>('/updates/install', {
+  installUpdate: () => request<{ status: string; version: string; installation_id: string }>('/updates/install', {
     method: 'POST',
   }, 180_000),
+  updateInstallationStatus: (installationId: string) => request<UpdateInstallationStatus>(
+    `/updates/install/${encodeURIComponent(installationId)}`, {}, 5000,
+  ),
   stageUpdate: () => request<{ status: string; path: string }>('/updates/stage', {
     method: 'POST',
     body: '{}',

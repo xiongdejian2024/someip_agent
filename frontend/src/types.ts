@@ -345,6 +345,16 @@ export interface UpdateInfo {
   signature_verified: boolean
 }
 
+export interface UpdateInstallationStatus {
+  installation_id: string
+  version: string
+  status: 'prepared' | 'complete' | 'failed'
+  rollback_completed: boolean
+  rollback_failed: boolean
+  restored_version: string | null
+  error: string | null
+}
+
 export const LLM_MODELS = [
   'qwen3.5-plus',
   'deepseek-v4-pro',

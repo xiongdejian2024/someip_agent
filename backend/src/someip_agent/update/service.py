@@ -18,9 +18,10 @@ import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from pydantic import ValidationError
 
 from someip_agent.config import Settings
-from someip_agent.domain.models import UpdateInfo
+from someip_agent.domain.models import UpdateInfo, UpdateInstallationStatus
 from someip_agent.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -145,12 +146,42 @@ class UpdateService:
             formats = {".zip", ".exe"} if os.name == "nt" else {".zip"}
             if target.suffix.lower() not in formats:
                 raise UpdateError("不支持的安装包格式")
-            await asyncio.to_thread(
+            installation_id = await asyncio.to_thread(
                 self._schedule_install, target, manifest, root, helper, packaged
             )
             self._install_scheduled = True
             logger.info("独立升级器已启动", extra={"operation": "update.install"})
-            return {"status": "scheduled", "version": str(manifest["version"])}
+            return {
+                "status": "scheduled",
+                "version": str(manifest["version"]),
+                "installation_id": installation_id,
+            }
+
+    def installation_status(self, installation_id: str) -> UpdateInstallationStatus:
+        """只读取本次安装的外置状态；不以旧进程 PID 推断健康回滚。"""
+        if not re.fullmatch(r"[0-9a-f]{32}", installation_id):
+            raise UpdateError("安装 ID 必须为 32 位小写十六进制")
+        path = self._settings.data_dir / "updates" / f"install-plan-{installation_id}.status.json"
+        if path.is_symlink():
+            raise UpdateError("升级状态文件不得是符号链接")
+        try:
+            with path.open("rb") as stream:
+                payload = stream.read(65537)
+            if len(payload) > 65536:
+                raise UpdateError("升级状态文件大小超限")
+            result = UpdateInstallationStatus.model_validate_json(payload)
+            if result.installation_id != installation_id:
+                raise UpdateError("升级状态与本次安装 ID 不一致")
+            if result.rollback_completed and (
+                result.status != "failed" or result.rollback_failed or not result.restored_version
+            ):
+                raise UpdateError("升级回滚状态不一致")
+            return result
+        except FileNotFoundError:
+            raise
+        except (OSError, ValidationError) as exc:
+            logger.exception("读取升级状态失败", extra={"operation": "update.status"})
+            raise UpdateError(f"读取升级状态失败: {type(exc).__name__}: {exc}") from exc
 
     def _install_paths(self) -> tuple[Path, Path, bool]:
         packaged = bool(getattr(sys, "frozen", False))
@@ -173,7 +204,7 @@ class UpdateService:
 
     def _schedule_install(
         self, target: Path, manifest: dict[str, object], root: Path, helper: Path, packaged: bool
-    ) -> None:
+    ) -> str:
         executable = Path(sys.executable).name if packaged else "someip-agent"
         plan = {
             "package": str(target.resolve()),
@@ -189,7 +220,11 @@ class UpdateService:
             plan["required_executables"].append("_internal/native/soa_partner")
         from uuid import uuid4
 
-        plan_path = target.parent / ("install-plan-" + uuid4().hex + ".json")
+        installation_id = uuid4().hex
+        plan["installation_id"] = installation_id
+        plan_path = (
+            self._settings.data_dir / "updates" / ("install-plan-" + installation_id + ".json")
+        )
         plan_path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
         # 独立 onefile 升级器移到安装目录外，避免替换自己的运行文件。
         import shutil
@@ -214,7 +249,7 @@ class UpdateService:
                         time.sleep(0.05)
                         continue
                     if result.get("status") == "prepared":
-                        return
+                        return installation_id
                     raise UpdateError(f"升级器准备失败: {result.get('error', result)}")
                 if process.poll() is not None:
                     raise UpdateError(f"升级器在准备阶段退出: {process.returncode}")

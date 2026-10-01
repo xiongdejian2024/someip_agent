@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, describeApiError } from '../api/client'
 import { logError, logInfo } from '../api/logger'
+import { updateOutcome } from '../api/updateOutcome'
 import { Icon } from '../components/Icon'
 import { DEFAULT_LLM_BASE_URL, LLM_MODELS, type LlmSettings, type UpdateInfo } from '../types'
 
@@ -31,8 +32,11 @@ export function SettingsPage({ currentVersion }: { currentVersion?: string } = {
   const [stagingUpdate, setStagingUpdate] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'warning'; text: string } | null>(null)
+  const updateTimer = useRef<number>()
+  const activePage = useRef(true)
 
   useEffect(() => {
+    activePage.current = true
     let active = true
     const load = async () => {
       try {
@@ -53,7 +57,11 @@ export function SettingsPage({ currentVersion }: { currentVersion?: string } = {
       }
     }
     void load()
-    return () => { active = false }
+    return () => {
+      active = false
+      activePage.current = false
+      window.clearTimeout(updateTimer.current)
+    }
   }, [])
 
   const save = async () => {
@@ -134,27 +142,38 @@ export function SettingsPage({ currentVersion }: { currentVersion?: string } = {
       const expected = result.version
       const deadline = Date.now() + 90_000
       const waitForRestart = async () => {
+        if (!activePage.current) return
         if (Date.now() > deadline) {
           setNotice({ tone: 'warning', text: '重启尚未完成，请查看升级日志；安装失败时会恢复旧版本。' })
+          setStagingUpdate(false)
           return
         }
         try {
           const info = await api.health()
-          if (info.status === 'ok' && info.version === expected) {
+          const record = await api.updateInstallationStatus(result.installation_id)
+          if (!activePage.current) return
+          const outcome = updateOutcome(record, result.installation_id, expected, info)
+          if (outcome.status === 'complete') {
             window.location.reload()
             return
           }
+          if (outcome.status === 'rolled_back' || outcome.status === 'failed') {
+            setNotice({ tone: outcome.status === 'rolled_back' ? 'warning' : 'error', text: outcome.text })
+            setUpdateInfo(null)
+            setStagingUpdate(false)
+            logInfo('在线升级结果已确认', { installationId: result.installation_id, outcome: outcome.status, version: info.version })
+            return
+          }
         } catch (error) {
-          logInfo('升级重启期间等待服务恢复', { detail: describeApiError(error) })
+          logInfo('升级重启期间等待服务恢复', { detail: describeApiError(error), stack: error instanceof Error ? error.stack : undefined })
           // 重启期间连接中断属于预期状态，继续等待版本确认。
         }
-        window.setTimeout(() => void waitForRestart(), 2000)
+        if (activePage.current) updateTimer.current = window.setTimeout(() => void waitForRestart(), 2000)
       }
-      window.setTimeout(() => void waitForRestart(), 2000)
+      updateTimer.current = window.setTimeout(() => void waitForRestart(), 2000)
     } catch (error) {
       logError('在线升级失败', error)
       setNotice({ tone: 'error', text: `在线升级失败：${describeApiError(error)}` })
-    } finally {
       setStagingUpdate(false)
     }
   }

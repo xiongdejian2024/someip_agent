@@ -20,6 +20,16 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
+def _write_status(path: Path, result: dict[str, Any]) -> None:
+    """同目录原子替换，避免页面或主进程读取半份 JSON。"""
+    temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
+    try:
+        temporary.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def extract_release(archive: Path, destination: Path, max_bytes: int = 2 * 1024**3) -> None:
     """只接受完整发行目录，拒绝路径穿越、符号链接和膨胀包。"""
     with zipfile.ZipFile(archive) as bundle:
@@ -99,6 +109,8 @@ def _launch(root: Path, plan: dict[str, Any]) -> subprocess.Popen[bytes]:
 
 
 def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
+    for key in ("rollback_pid", "rollback_completed", "rollback_failed", "restored_version"):
+        plan.pop(key, None)
     package = Path(plan["package"]).resolve()
     root = Path(plan["install_root"]).resolve()
     if not root.is_dir() or root.parent == root or root == Path.home():
@@ -148,8 +160,13 @@ def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
         else:
             raise ValueError("升级包必须为完整 ZIP 发行包或 Windows EXE 安装器")
         if plan.get("status_file"):
-            Path(plan["status_file"]).write_text(
-                json.dumps({"status": "prepared", "version": plan["version"]}), encoding="utf-8"
+            _write_status(
+                Path(plan["status_file"]),
+                {
+                    "status": "prepared",
+                    "version": plan["version"],
+                    "installation_id": plan.get("installation_id"),
+                },
             )
         _wait_parent(int(plan["parent_pid"]))
         if backup.exists():
@@ -217,11 +234,14 @@ def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
                     restored,
                     float(plan.get("rollback_health_timeout", plan.get("health_timeout", 30))),
                 )
+                plan["rollback_completed"] = True
+                plan["restored_version"] = previous_version
                 logger.info(
                     "升级失败后旧版本已恢复健康",
                     extra={"operation": "update.rollback.complete", "version": previous_version},
                 )
             except Exception as rollback_error:
+                plan["rollback_failed"] = True
                 logger.exception(
                     "旧版本已还原但未恢复健康，需要人工处理",
                     extra={"operation": "update.rollback.failed", "version": previous_version},
@@ -257,7 +277,12 @@ def main() -> None:
         result = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
         if plan.get("rollback_pid"):
             result["rollback_pid"] = plan["rollback_pid"]
-    status_file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        for key in ("rollback_completed", "rollback_failed", "restored_version"):
+            if key in plan:
+                result[key] = plan[key]
+    result["version"] = plan["version"]
+    result["installation_id"] = plan.get("installation_id")
+    _write_status(status_file, result)
 
 
 if __name__ == "__main__":

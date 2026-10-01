@@ -397,3 +397,13 @@ class UpdateInfo(BaseModel):
     download_url: str | None = None
     sha256: str | None = None
     signature_verified: bool = False
+
+
+class UpdateInstallationStatus(BaseModel):
+    installation_id: str
+    version: str
+    status: Literal["prepared", "complete", "failed"]
+    rollback_completed: bool = False
+    rollback_failed: bool = False
+    restored_version: str | None = None
+    error: str | None = None

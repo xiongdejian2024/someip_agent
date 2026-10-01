@@ -56,6 +56,12 @@ python scripts/create_update_manifest.py \
 新程序失败时恢复旧目录并验证旧版健康；失败现场保留，回滚健康失败不会报告升级成功。
 连续升级会归档上一轮备份，不覆盖既有恢复点。
 
+安装请求返回`installation_id`，页面按`GET /api/v1/updates/install/{installation_id}`
+查询外置状态，并与实际健康版本核对。状态文件以同目录原子替换写入；只接受本次ID，
+不返回进程PID或备份路径。`rollback_completed`只在旧程序健康检查通过后写入，
+回滚健康失败另记`rollback_failed`，不能凭进程已启动、旧版可达或残留记录宣称成功。
+准备完成仍保持页面安装按钮忙态；完成才重载，恢复失败则明确显示需人工处理。
+
 独立升级器与重启程序设置 `PYINSTALLER_RESET_ENVIRONMENT=1`，避免继承 onefile 临时目录
 生命周期。依据 [PyInstaller 官方重启说明](https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html#using-sys-executable-to-spawn-subprocesses-that-outlive-the-application-process-implementing-application-restart)。
 
@@ -113,6 +119,18 @@ JUnit 一项通过；当时旧清理脚本因试图 chown 只读夹具而退出 
 
 `build/browser-update-rollback-917bbff-evidence` 单独验收删除新包运行库后的真实启动失败：
 升级状态 failed、失败新目录 VERSION 为 0.1.1，恢复运行目录与健康版本均为 0.1.0。
-页面仍在线并保留旧版本，90 秒后显示通用重启超时提示；尚未实现明确的回滚状态展示。
+当时页面仍在线并保留旧版本，90 秒后只有通用重启超时提示。
 JUnit 一项通过，修正清理脚本后命令退出 0。发行包非交互升级回归 19 项通过（1 warning），
 8 项门禁/清理替身回归在 macOS 与 Linux 分别通过；后者不承担防火墙或真实升级证明。
+
+新增安装状态后的真实回滚证据为`build/rollback-status-browser-retry-evidence`：
+页面实际点击受信测试更新，缺少运行库的新程序退出255，旧版恢复健康后页面明确显示
+“升级失败，已回滚至v0.1.0”及失败原因，随后页面服务正常；JUnit一项通过、命令退出0。
+首轮API客户端40秒先于实测约41.7秒的准备完成而超时，以及首轮浏览器总等待180秒耗尽，
+分别保留在`build/rollback-status-linux-evidence`与`build/rollback-status-browser-evidence`，
+不能计作整轮成功。API测试请求预算对齐页面既有180秒，浏览器总测试窗口另包含页面操作时间；
+未修改产品下载、升级准备、退出或重启健康预算。
+成功重载独立证据`build/rollback-status-browser-success-evidence`实际页面从0.1.0重载为0.1.1，
+状态complete、健康新版本及旧版备份断言通过，JUnit一项通过、命令退出0。
+串行完整复验`build/rollback-status-linux-retry-evidence`34项通过、零失败/错误/跳过，1 warning；
+新旧发行包及本次完整堆栈各自保留，不覆盖首次失败，也不发布测试信任根。

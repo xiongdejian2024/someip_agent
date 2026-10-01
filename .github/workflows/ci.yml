@@ -158,6 +158,9 @@ jobs:
       - name: 设置页发行目标与缺省升级门禁渲染验收
         run: node scripts/check_settings_render.mjs
 
+      - name: 升级结果关联与回滚健康门禁回归
+        run: node scripts/check_update_outcomes.mjs
+
       - name: 构建前端
         run: npm --prefix frontend run build
 

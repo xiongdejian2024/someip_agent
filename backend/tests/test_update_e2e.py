@@ -57,14 +57,14 @@ def wait_until(predicate, timeout=20):
 @pytest.mark.skipif(os.name == "nt", reason="真实 POSIX 进程链路；Windows 安装包另行验收")
 @pytest.mark.parametrize(
     "release_kind",
-    ["script", "linux", "linux-rollback"]
+    ["script", "script-rollback", "linux", "linux-rollback"]
     if os.environ.get("SOMEIP_AGENT_LINUX_RELEASE_DIR")
-    else ["script"],
+    else ["script", "script-rollback"],
 )
 def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, release_kind: str):
     ui_mode = os.environ.get("SOMEIP_AGENT_UPDATE_UI_TEST") == "1"
-    packaged = release_kind != "script"
-    failure = release_kind == "linux-rollback"
+    packaged = release_kind.startswith("linux")
+    failure = release_kind.endswith("rollback")
     new_version = "0.1.1" if packaged else "0.2.0"
     old_version = "0.1.0"
     root = tmp_path / "installed"
@@ -95,7 +95,12 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
         with zipfile.ZipFile(archive, "w") as bundle:
             bundle.writestr("VERSION", new_version)
             for name, source_text in (
-                ("someip-agent", app_script(new_version)),
+                (
+                    "someip-agent",
+                    f"#!{sys.executable}\nraise SystemExit(55)\n"
+                    if failure
+                    else app_script(new_version),
+                ),
                 ("someip-agent-updater", helper.read_text()),
             ):
                 entry = zipfile.ZipInfo(name)
@@ -232,10 +237,16 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
             )
         else:
             request = urllib.request.Request(url + "/updates/install", method="POST", data=b"")
-            with urllib.request.urlopen(request, timeout=40) as response:
+            # 与实际页面 installUpdate 的 180 秒请求预算一致，覆盖下载及独立准备。
+            # 此前 40 秒在 M1 完整发行包实测 41.7 秒时先于产品预算失效。
+            with urllib.request.urlopen(request, timeout=180) as response:
                 result = json.load(response)
-            assert result == {"status": "scheduled", "version": new_version}
-        process.wait(timeout=180 if ui_mode else 15)  # 回收旧父进程，使升级器准确观察到退出。
+            assert result["status"] == "scheduled"
+            assert result["version"] == new_version
+            assert len(result["installation_id"]) == 32
+        # 浏览器用例还包括操作页面的时间及现有 180 秒下载/准备请求预算。
+        # 回收旧父进程，使升级器准确观察到退出；这是测试预算，不改产品超时。
+        process.wait(timeout=300 if ui_mode else 15)
         assert process.returncode == 0
         expected_version = old_version if failure else new_version
         assert wait_until(lambda: health()["version"] == expected_version, timeout=60)
@@ -243,6 +254,17 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
         assert len(statuses) == 1
         expected_status = "failed" if failure else "complete"
         assert wait_until(lambda: json.loads(statuses[0].read_text())["status"] == expected_status)
+        record = json.loads(statuses[0].read_text())
+        with urllib.request.urlopen(
+            url + "/updates/install/" + record["installation_id"], timeout=2
+        ) as response:
+            exposed = json.load(response)
+        assert exposed["status"] == expected_status
+        assert exposed["version"] == new_version
+        assert exposed["rollback_completed"] == failure
+        assert exposed["restored_version"] == (old_version if failure else None)
+        assert not exposed["rollback_failed"]
+        assert "pid" not in exposed and "backup" not in exposed
         assert (root / "VERSION").read_text().strip() == expected_version
         previous = "installed.failed-update" if failure else "installed.previous"
         assert (tmp_path / previous / "VERSION").read_text().strip() == (
