@@ -43,7 +43,7 @@ class NativeMemberConfig(BaseModel):
     transport: Literal["internal", "udp", "tcp"] = "internal"
     port: int | None = Field(default=None, ge=1, le=65535)
     peer_host: str | None = None
-    byte_order: Literal["big", "little"] = "big"
+    byte_order: Literal["big", "little"] | None = None
     status: bool = True
     heartbeat: int = Field(default=600, ge=1)
 
@@ -79,15 +79,26 @@ class NativeServiceBundle(BaseModel):
         return catalog, config
 
 
-def _schema(signal: SignalDefinition, byte_order: str) -> dict[str, Any]:
+def _schema(signal: SignalDefinition, byte_order: str | None) -> dict[str, Any]:
     if signal.wire_schema is None:
         raise CatalogBuildError(
             [f"{signal.path or signal.name}: {signal.wire_error or '缺少已解析类型'}"]
         )
-    return {**deepcopy(signal.wire_schema), "byte_order": byte_order}
+    schema = deepcopy(signal.wire_schema)
+    pending = [schema]
+    while pending:
+        node = pending.pop()
+        declared = node.get("byte_order")
+        if byte_order is not None and declared is not None and byte_order != declared:
+            raise CatalogBuildError([f"{signal.path}: 请求字节序与 ARXML 明确序列化部署冲突"])
+        node["byte_order"] = declared or byte_order or "big"
+        pending.extend(node.get("fields", []))
+        if "element" in node:
+            pending.append(node["element"])
+    return schema
 
 
-def _parameters(signals: list[SignalDefinition], byte_order: str) -> dict[str, Any]:
+def _parameters(signals: list[SignalDefinition], byte_order: str | None) -> dict[str, Any]:
     if len({signal.name for signal in signals}) != len(signals):
         raise CatalogBuildError(["方法参数 SHORT-NAME 重复"])
     return {
@@ -96,7 +107,9 @@ def _parameters(signals: list[SignalDefinition], byte_order: str) -> dict[str, A
     }
 
 
-def _definition(service: ServiceDefinition, instance: int, byte_order: str) -> dict[str, Any]:
+def _definition(
+    service: ServiceDefinition, instance: int, byte_order: str | None
+) -> dict[str, Any]:
     methods: dict[str, Any] = {}
     events: dict[str, Any] = {}
     ids: set[int] = set()
@@ -183,7 +196,7 @@ def _definition(service: ServiceDefinition, instance: int, byte_order: str) -> d
         "methods": methods,
         "events": events,
         "source": {"service_path": service.path, "deployment_path": service.deployment_path},
-        "serialization_profile": f"scalar-{byte_order}-endian",
+        "serialization_profile": "arxml-resolved-explicit-or-scalar",
     }
 
 

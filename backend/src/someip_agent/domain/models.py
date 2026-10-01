@@ -49,6 +49,8 @@ class SignalDataType(str, Enum):
     FLOAT64 = "float64"
     STRING = "string"
     BYTES = "bytes"
+    STRUCT = "struct"
+    ARRAY = "array"
 
 
 class SignalDefinition(BaseModel):
@@ -168,6 +170,13 @@ class SignalGeneratorConfig(BaseModel):
     initial: float = 0.0
     period_seconds: float = Field(default=5.0, gt=0)
     sequence: list[float] = Field(default_factory=list)
+
+    @field_validator("data_type")
+    @classmethod
+    def generator_requires_scalar(cls, value: SignalDataType) -> SignalDataType:
+        if value in {SignalDataType.STRUCT, SignalDataType.ARRAY}:
+            raise ValueError("标量信号发生器不接受复合类型，请使用服务方法或事件 API")
+        return value
 
     @field_validator("maximum")
     @classmethod

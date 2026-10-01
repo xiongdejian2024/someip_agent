@@ -423,3 +423,46 @@
   等同于所有成员通道或车辆服务健康；不承诺硬实时、吞吐、丢包率和调度抖动性能。
   完整 ARXML/OEM 布局与拓扑、IPv6 分片/完整 IPv4 选项、独立应用身份、完整故障/长稳/
   性能矩阵、Windows 安装升级及正式签名发布源仍未完成，完整目标继续 active。
+
+## 2026-10-01 ARXML 复合类型与显式序列化部署
+
+- 先检查已有 lxml、类型解析器和原生 codec，未增加依赖、未重写 SOME/IP 数据面。
+  Implementation STRUCTURE/ARRAY 按完整引用和声明顺序解析；固定数组必须明确长度，
+  变长数组必须明确上界。应用类型通过唯一 DATA-TYPE-MAP 绑定 Implementation，不选
+  歧义的第一个目标。类型图缓存深拷贝并限制深度/节点/字段数，避免不同信号相互污染。
+- AP transformation 属性按完整服务元素引用绑定，明确大小端和数组/结构长度前缀。
+  按官方 Manifest/Transformer/Communication Management 文档核对字段声明顺序和
+  前缀表示正文字节数的语义；原生 codec 支持结构前缀、定长数组前缀和变长数组上界，
+  仍由 vsomeip 处理真实 SOME/IP/SD。缺失、歧义、未知属性和未支持细粒度覆盖全部拒绝，
+  不自动用 UI 默认大端覆盖源布局。复合类型不能进入现有标量信号发生器。
+- 新增 17 项后端测试；相关 ARXML 单测本机为 38 通过/1 跳过，该跳过项需要 Linux 二进制，
+  已在最终完整容器回归中执行。最终源码及安装包后端各 266 项通过，零失败/错误/跳过。
+  既有 3 项弃用/预期序列化警告未掩盖为无警告通过。五个产品模块严格 mypy、Ruff、
+  shell 语法、版本一致性和 diff 空白检查均通过；前端类型检查、适配器及构建通过，
+  仍有既有的大体积 chunk 警告，未做浏览器交互或性能验收。
+- 新的项目 ARXML 夹具包含嵌套结构、带前缀固定数组、有界变长数组、Application primitive
+  映射、INOUT 方法和周期事件。8 项真实 veth 覆盖 UDP/TCP × 大端/小端 × 结构前缀 0/2
+  字节，直接从 ARXML 生成两端目录；非法定长数组请求失败且不执行服务回调。
+  另用 C++ 手工黄金字节核对编码/解码及变长数组超限、非法/不一致长度；CTest 2 项通过。
+- 最终源码与不挂载产品源码的安装包各通过 60+50=110 项虚拟网、7 项抓包审计和 5 项权限
+  回归。安装包无 PYTHONPATH，15 个产品模块确认来自 site-packages。所有 JUnit 核对
+  零失败/错误/跳过；两套独立 PCAP/原生导入各验证 204 组黄金向量（新增复合类型 40 组）、
+  16 组分片。源码为 8349 帧/1904 条消息，安装包为 8013 帧/1977 条消息；包含预期非法
+  输入/故障帧，不把原始全部流量说成有效消息。证据分别保存在 build/composite-source-evidence、
+  build/composite-installed-evidence；最终源码后端报告 build/composite-backend-final-regression.xml。
+- 产品镜像 someip-agent-vsomeip:composite-test 复用已核验的固定 3.5.10 SDK，重新真实编译。
+  最终镜像 sha256:334fa78f871eef21a5f83f823ba908f54c20d61618b415e954a9ba6dfb0de3c0，
+  wheel SHA-256 为 37eb5cdc0fef5281ecf6877327f3facbcf6d866013d27a1b408fb16ef454f0f3。
+  首次镜像构建后同步了信号字节序显示，再构建最终镜像并重新验收；不将首次 SHA 冒充最终制品。
+- 上一提交 03ce324 的远程 CI run 36809647605：前后端及完整 Linux 原生/安装包任务通过，
+  Windows 任务失败。原日志为 build-native.ps1 的乱码 UnexpectedToken/ParserError，
+  不是已确认的 Npcap SDK 缺失。Microsoft 文档确认 Windows PowerShell 5.1 对无 BOM 的
+  非 ASCII UTF-8 脚本按 ANSI 误读；CI 改用 pwsh 并在构建前解析 Windows 脚本。
+  本机没有 pwsh，仅完成 YAML/shell 配置静态验证，远程语法和完整 Windows 构建仍待实际 CI。
+  不为通过构建绕开获授权 SDK/triplet 门禁，亦未生成正式 Windows 发布包。
+- 本轮支持的是明确受限的投影/profile，不是完整 XSD/OEM 认证；复杂应用 record/array 语义、
+  字符串/BOM、union、TLV/E2E、细粒度上下文、非 8-bit 对齐、变体和端点拓扑仍未完成。
+  较长数组/结构的向后兼容扩展跳过未实现；真实复合字段及全部前缀宽度组合未全部互通验收。
+  IPv6 分片/完整 IPv4 选项、独立应用身份、完整故障/长稳/吞吐/抖动矩阵、Windows 实机
+  安装升级及正式签名最新版发布源仍有门禁，完整目标保持 active。改动和记录一起提交推送，
+  下一次远程 CI 状态独立核验，不将本机通过说成整体完成。

@@ -42,6 +42,24 @@ int main() {
         rejects([]{Codec::encode(Json{{"type","string"},{"length_bytes",0}},"x");});
         rejects([]{Codec::encode(Json{{"type","string"},{"length_bytes",9}},"x");});
         rejects([]{Codec::encode(Json{{"type","string"},{"length_bytes",1}},std::string(256,'x'));});
+        Json prefixed={{"type","struct"},{"length_bytes",2},{"fields",Json::array({
+            Json{{"name","tag"},{"type","uint8"}},
+            Json{{"name","values"},{"type","array"},{"length",2},{"length_bytes",2},
+                {"element",Json{{"type","uint16"}}}}
+        })}};
+        Json structured={{"tag",7},{"values",Json::array({0x1234,0xabcd})}};
+        require(hex(Codec::encode(prefixed,structured))=="00070700041234abcd","结构/定长数组长度前缀黄金字节错误");
+        require(Codec::decode(prefixed,unhex("00070700041234abcd"))==structured,"结构/数组长度前缀解码失败");
+        rejects([&]{Codec::decode(prefixed,unhex("00060700041234abcd"));});
+        rejects([&]{Codec::decode(prefixed,unhex("00070700031234abcd"));});
+        rejects([&]{Codec::decode(prefixed,unhex("ffff0700041234abcd"));});
+        prefixed["length_bytes"]=3;
+        rejects([&]{Codec::encode(prefixed,structured);});
+        rejects([&]{Codec::decode(prefixed,unhex("0000070700041234abcd"));});
+        Json bounded={{"type","array"},{"max_length",2},{"length_bytes",1},{"element",Json{{"type","uint8"}}}};
+        require(hex(Codec::encode(bounded,Json::array({1,2})))=="020102","有界数组黄金字节错误");
+        rejects([&]{Codec::encode(bounded,Json::array({1,2,3}));});
+        rejects([&]{Codec::decode(bounded,unhex("03010203"));});
         rejects([]{number(Json(-1));});
         rejects([]{bounded_number(Json(65536),65535,"service_id");});
         std::cout<<Json{{"message","原生编解码基础类型、字节序、数组及异常边界测试通过"}}.dump()<<std::endl;

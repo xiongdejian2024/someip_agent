@@ -3,6 +3,7 @@
 ## 1. 工具链
 
 - Windows 10/11 x64；
+- PowerShell 7 (`pwsh`)；CI 不使用按 ANSI 读取无 BOM 中文脚本的 Windows PowerShell 5.1；
 - Python 3.10+（推荐 3.12 x64）；
 - Node.js 20+（推荐 22 LTS）；
 - [PyInstaller](https://pyinstaller.org/) 6.x；
@@ -16,7 +17,7 @@ PyInstaller 不是交叉编译器，Windows 制品必须在 Windows 或等价的
 
 ## 2. 一键构建
 
-在仓库根目录执行：
+在 PowerShell 7 的仓库根目录执行：
 
 ```powershell
 .\packaging\windows\build-native.ps1 -VcpkgRoot C:\vcpkg -CaptureTriplet x64-windows-npcap -OverlayTriplets C:\approved-triplets
@@ -32,6 +33,10 @@ vcpkg libpcap 的标准 Windows 路径可能设置 `PCAP_TYPE=null`；仅编译�
 的 Windows `Packet_ROOT` 分支，构建前仍应核对实际锁定的 port 版本。
 脚本因此拒绝缺少独立抓包 triplet 的完整发行构建。CI 发布环境也必须明确配置这两个值，
 当前仓库尚未验证此 Windows 路径。目标机 `Packet.dll` 的解析、网卡枚举与实际双向捕获仍需实机验收。
+
+CI 使用 `pwsh` 并在构建前解析所有 Windows `.ps1` 脚本，避免将 UTF-8 中文误读成旧 ANSI
+代码页。该风险见 [Microsoft PowerShell 字符编码说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding)。
+脚本语法通过不代表 SDK、原生编译、驱动或安装升级已经成功。
 
 脚本按顺序执行：
 

@@ -77,6 +77,7 @@ jobs:
           native/tests/audit_pcap.py native/tests/audit_offline.py native/tests/test_audit_pcap.py
           native/tests/test_evidence_permissions.py native/tests/test_recovery_virtual.py
           native/tests/test_sat_wti_virtual.py
+          native/tests/test_arxml_composite_virtual.py
 
       - name: 执行后端测试
         run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing
@@ -124,15 +125,29 @@ jobs:
           node-version: "22"
 
       - name: 安装 Inno Setup
-        shell: powershell
+        shell: pwsh
         run: choco install innosetup --no-progress -y
 
+      - name: 校验中文 PowerShell 脚本语法
+        shell: pwsh
+        run: |
+          Get-ChildItem packaging/windows -Filter *.ps1 | ForEach-Object {
+            $Tokens = $null
+            $ParseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$Tokens, [ref]$ParseErrors) | Out-Null
+            if ($ParseErrors.Count -gt 0) {
+              $ParseErrors | ForEach-Object { [Console]::Error.WriteLine($_.ToString()) }
+              throw "Windows 构建脚本语法校验失败"
+            }
+            Write-Host "脚本语法校验通过：$($_.Name)"
+          }
+
       - name: 构建原生协议栈与桥接进程
-        shell: powershell
+        shell: pwsh
         run: .\packaging\windows\build-native.ps1
 
       - name: 构建 Windows 安装包
-        shell: powershell
+        shell: pwsh
         run: .\packaging\windows\build.ps1 -Clean
 
       - name: 上传安装包

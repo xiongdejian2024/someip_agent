@@ -53,9 +53,13 @@ class Codec {
             value |= uint64_t(data[offset++]) << ((little ? i : size - i - 1) * 8);
         return value;
     }
-    static void length_prefix(Bytes &data,size_t length,const Json &schema,bool little) {
+    static size_t length_width(const Json &schema) {
         auto width=schema.value("length_bytes",4);
         if(width!=1 && width!=2 && width!=4 && width!=8)throw std::runtime_error("长度字段宽度非法");
+        return width;
+    }
+    static void length_prefix(Bytes &data,size_t length,const Json &schema,bool little) {
+        auto width=length_width(schema);
         if(width<8 && length>=(uint64_t(1)<<(width*8)))throw std::runtime_error("长度字段容量不足");
         integer(data,length,width,little);
     }
@@ -65,14 +69,20 @@ public:
         bool little = schema.value("byte_order", "big") == "little";
         if (type == "struct") {
             if (!value.is_object()) throw std::runtime_error("结构体参数必须为字典");
+            Bytes body;
             for (const auto &field : schema.at("fields"))
-                encode_one(data, field, value.at(field.at("name").get<std::string>()));
+                encode_one(body, field, value.at(field.at("name").get<std::string>()));
+            if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
+            data.insert(data.end(),body.begin(),body.end());
         } else if (type == "array") {
             if (!value.is_array()) throw std::runtime_error("数组参数必须为列表");
+            if(schema.contains("max_length") && value.size()>number(schema["max_length"]))
+                throw std::runtime_error("变长数组元素数量超限");
             Bytes body;
             for (const auto &item : value) encode_one(body, schema.at("element"), item);
             if (schema.contains("length")) {
                 if (value.size() != number(schema["length"])) throw std::runtime_error("定长数组长度错误");
+                if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
             } else length_prefix(data,body.size(),schema,little);
             data.insert(data.end(), body.begin(), body.end());
         } else if (type == "string" || type == "bytes") {
@@ -116,22 +126,40 @@ public:
         const std::string type = schema.value("type", "struct");
         bool little = schema.value("byte_order", "big") == "little";
         if (type == "struct") {
+            size_t end=data.size();
+            bool prefixed=schema.value("length_bytes",0)!=0;
+            if(prefixed) {
+                auto length=integer(data,offset,length_width(schema),little);
+                if(length>data.size()-offset)throw std::runtime_error("结构体长度字段超出 payload");
+                end=offset+length;
+            }
             Json out = Json::object();
             for (const auto &field : schema.at("fields"))
                 out[field.at("name").get<std::string>()] = decode_one(data, offset, field);
+            if(prefixed && offset!=end)throw std::runtime_error("结构体长度字段与字段布局不一致");
             return out;
         }
         if (type == "array") {
             Json out = Json::array();
             if (schema.contains("length")) {
+                bool prefixed=schema.value("length_bytes",0)!=0;
+                size_t end=data.size();
+                if(prefixed) {
+                    auto length=integer(data,offset,length_width(schema),little);
+                    if(length>data.size()-offset)throw std::runtime_error("定长数组长度字段超出 payload");
+                    end=offset+length;
+                }
                 auto count = number(schema["length"]);
                 if (count > max_frame) throw std::runtime_error("数组长度超限");
                 for (uint32_t i=0; i<count; ++i) out.push_back(decode_one(data,offset,schema.at("element")));
+                if(prefixed && offset!=end)throw std::runtime_error("定长数组长度字段与元素布局不一致");
             } else {
-                size_t length = integer(data,offset,schema.value("length_bytes",4),little);
+                size_t length = integer(data,offset,length_width(schema),little);
+                if(length>data.size()-offset)throw std::runtime_error("数组截断");
                 size_t end = offset + length;
-                if (end > data.size()) throw std::runtime_error("数组截断");
                 while (offset < end) {
+                    if(schema.contains("max_length") && out.size()>=number(schema["max_length"]))
+                        throw std::runtime_error("变长数组元素数量超限");
                     size_t before = offset;
                     out.push_back(decode_one(data,offset,schema.at("element")));
                     if (offset == before || offset > end) throw std::runtime_error("数组元素长度非法");
@@ -140,7 +168,7 @@ public:
             return out;
         }
         if (type == "string" || type == "bytes") {
-            size_t len = integer(data,offset,schema.value("length_bytes",4),little);
+            size_t len = integer(data,offset,length_width(schema),little);
             if (offset + len > data.size()) throw std::runtime_error("字符串/字节串截断");
             Bytes body(data.begin()+offset,data.begin()+offset+len); offset += len;
             if (type == "bytes") return hex(body);

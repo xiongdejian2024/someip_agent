@@ -88,7 +88,7 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(
     assert checked["ipv4_fragment_packets"] == reference["ipv4_fragment_packets"]
     # 原生导入审计必须采用相同的实际分片/方向边界，而非从其他流借帧数。
     result = audit_native(path, checked, tmp_path)
-    assert len(result["golden_messages"]) == 164
+    assert len(result["golden_messages"]) == 204
     assert len(result["fragment_imports"]) == 16
     assert result["statistics"]["packet_count"] == len(frames) + 1
 

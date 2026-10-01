@@ -9,7 +9,7 @@ ARXML 建模、SOME/IP / SOME/IP-SD 编解码、PCAP 导入、信号仿真与智
 
 ## 核心能力
 
-- ARXML 安全导入，抽取服务、方法、事件、字段、部署 ID；基础类型可解析到原生目录，缺失类型禁止猜测发包；
+- ARXML 安全导入，抽取服务、方法、事件、字段、部署 ID；基础类型、明确部署的嵌套结构/数组可解析到原生目录，缺失或歧义布局禁止猜测发包；
 - SOME/IP 报文与 SOME/IP-SD 基础条目/选项编解码；
 - PCAP / PCAPNG 离线导入，解析 IPv4/IPv6、UDP/TCP 和 SOME/IP；
 - 原生 UDP/TCP/IPv4 组播端口监听，vsomeip 解码 SOME/IP 并汇入统一监控流（不是网卡被动抓包）；
@@ -36,7 +36,7 @@ FastAPI 应用层 ── 智能体编排 ── OpenAI 兼容网关
 详细设计、安全边界和数据流见[架构文档](docs/architecture.md)。
 
 原生迁移正在进行，不代表整个底层已经验收完成：默认仿真、端口监听和 Ethernet 被动抓包已切换。
-ARXML 基础类型已接通原生目录、Python 字典初始化及服务页面启停/调用/人工响应；
+ARXML 基础类型及明确 AP 序列化部署的嵌套结构、定长/有界变长数组已接通原生目录和 Python 字典初始化；服务页面已接通启停/调用/人工响应；
 SAT 适配器可监督本实例拥有的原生进程，检测控制循环持续无响应并恢复活动配置，不重放业务请求；
 完整序列化映射、SAT 辅助 API、IPv6 分片、完整 IPv4 选项及 Windows 实机验收仍有门禁。
 离线 PCAP 已接入相同原生重组/解码路径，Python 仅聚合展示，不保留纯 Python 解析回退。
@@ -145,10 +145,10 @@ node scripts/check_monitor_buffer.mjs
 node scripts/check_agent_stream.mjs
 ```
 
-Windows 安装包需在 Windows 上构建：
+Windows 安装包需在 Windows 的 PowerShell 7 (`pwsh`) 上构建，先准备获授权抓包 SDK/triplet：
 
 ```powershell
-.\packaging\windows\build-native.ps1 -VcpkgRoot C:\vcpkg
+.\packaging\windows\build-native.ps1 -VcpkgRoot C:\vcpkg -CaptureTriplet x64-windows-npcap -OverlayTriplets C:\approved-triplets
 .\packaging\windows\build.ps1 -Clean -NativeRuntimeDir .\.build\native-windows\runtime
 ```
 

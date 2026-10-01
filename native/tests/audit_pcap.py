@@ -26,6 +26,7 @@ def audit(path: Path) -> dict:
     wti_packets: Counter[tuple[str, int, int, int, str]] = Counter()
     recovery_packets: Counter[tuple[str, str, int, int, str]] = Counter()
     service_packets: Counter[tuple[str, str, str, int, int, int, str]] = Counter()
+    composite_packets: Counter[tuple[str, int, int, int, str]] = Counter()
     fragment_packets: dict[tuple[int, int], list[tuple[int, bool, bytes]]] = {}
     fragment_times: dict[tuple[int, int], list[float]] = {}
     fragment_headers: dict[tuple[int, int], list[tuple[int, bytes]]] = {}
@@ -121,13 +122,49 @@ def audit(path: Path) -> dict:
             if (
                 len(body) < 16
                 or body[12] != 1
-                or body[:2] not in {b"\x12\x34", b"\xff\xff", b"\x23\x45", b"\x23\x46"}
+                or body[:2]
+                not in {b"\x12\x34", b"\xff\xff", b"\x23\x45", b"\x23\x46", b"\x34\x56"}
             ):
                 continue
             name = "udp" if isinstance(transport, dpkt.udp.UDP) else "tcp"
             try:
                 for message in decode_many(body):
                     header = message.header
+                    if (
+                        header.service_id == 0x3456
+                        and header.interface_version == 1
+                        and header.return_code == 0
+                    ):
+                        port = next(
+                            (
+                                port
+                                for port in range(30530, 30538)
+                                if port in (transport.sport, transport.dport)
+                            ),
+                            None,
+                        )
+                        if port is not None and (
+                            (
+                                header.message_type == 0
+                                and src == "10.77.0.2"
+                                and header.client_id == 0x7722
+                            )
+                            or (
+                                header.message_type == 0x80
+                                and dst == "10.77.0.2"
+                                and header.client_id == 0x7722
+                            )
+                            or (header.message_type == 2 and src == "10.77.0.1")
+                        ):
+                            composite_packets[
+                                (
+                                    name,
+                                    port,
+                                    header.method_id,
+                                    header.message_type,
+                                    message.payload.hex(),
+                                )
+                            ] += 1
                     service_port = next(
                         (
                             port
@@ -604,10 +641,60 @@ def audit(path: Path) -> dict:
         "sat_recovery_packets": recovery_checks,
         "paused_inflight_replay_absent": ["udp", "tcp"],
         "service_api_packets": service_checks,
+        "arxml_composite_packets": composite_golden(composite_packets),
         "ipv4_fragment_packets": fragment_checks,
         "incomplete_segments": incomplete_segments,
         "scope": "完整可解析段及确定 IPv4 分片向量验证；不替代通用 IP/TCP 重组，也不是吞吐/丢包基准",
     }
+
+
+def composite_golden(packets):
+    checks = []
+    # 独立手工推导：长度以字节计；定长数组也有前缀；嵌套有符号整数使用补码。
+    vectors = {
+        ("big", 0): "0700041234abcd00020102fffe",
+        ("little", 0): "0704003412cdab02000102feff",
+        ("big", 2): "000f0700041234abcd000201020002fffe",
+        ("little", 2): "0f000704003412cdab020001020200feff",
+    }
+    for (order, width), payload in vectors.items():
+        for transport in ("udp", "tcp"):
+            port = (
+                30530
+                + (transport == "tcp")
+                + 2 * (order == "little")
+                + 4 * (width == 2)
+            )
+            scalar = "1234" if order == "big" else "3412"
+            for method, kind, expected in (
+                (1, 0, payload),
+                (1, 0x80, payload),
+                (2, 0, scalar),
+                (2, 0x80, scalar),
+                (0x8001, 2, payload),
+            ):
+                count = packets[(transport, port, method, kind, expected)]
+                if not count:
+                    raise AssertionError(
+                        f"复合 ARXML 黄金报文缺失: {transport} {order} {width} {method:#x} {kind:#x} {expected}"
+                    )
+                checks.append(
+                    {
+                        "transport": transport,
+                        "service_port": port,
+                        "service_id": 0x3456,
+                        "method_id": method,
+                        "message_type": kind,
+                        "payload_hex": expected,
+                        "byte_order": order,
+                        "struct_length_bytes": width,
+                        "source_host": "10.77.0.2" if kind == 0 else "10.77.0.1",
+                        "destination_host": "10.77.0.1" if kind == 0 else "10.77.0.2",
+                        **({"client_id": 0x7722} if kind != 2 else {}),
+                        "observed_segments": count,
+                    }
+                )
+    return checks
 
 
 def main() -> None:

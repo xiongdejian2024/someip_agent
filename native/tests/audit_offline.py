@@ -86,6 +86,7 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
         ("sat_wti_packets", None),
         ("sat_recovery_packets", 0x1234),
         ("service_api_packets", 0x1234),
+        ("arxml_composite_packets", 0x3456),
     ):
         for expected in reference[name]:
             service = expected.get("service_id", default_service)
@@ -114,7 +115,7 @@ def audit(path: Path, reference: dict, directory: Path) -> dict:
                     )
                 )
                 and (
-                    name != "service_api_packets"
+                    name not in {"service_api_packets", "arxml_composite_packets"}
                     or (
                         key[8:] == (1, 0)
                         and key[6].rsplit(":", 1)[0] == expected["source_host"]

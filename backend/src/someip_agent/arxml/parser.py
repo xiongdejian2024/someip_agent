@@ -648,9 +648,17 @@ class ArxmlParser:
 
     @staticmethod
     def _resolve_wire_types(root: etree._Element, model: ArxmlModel) -> None:
+        from .transformation import TransformationResolver
         from .wire_types import WireTypeError, WireTypeResolver
 
-        type_tags = {"SW-BASE-TYPE", "IMPLEMENTATION-DATA-TYPE", "APPLICATION-PRIMITIVE-DATA-TYPE"}
+        type_tags = {
+            "SW-BASE-TYPE",
+            "IMPLEMENTATION-DATA-TYPE",
+            "APPLICATION-PRIMITIVE-DATA-TYPE",
+            "APPLICATION-RECORD-DATA-TYPE",
+            "APPLICATION-ARRAY-DATA-TYPE",
+            "AP-SOMEIP-TRANSFORMATION-PROPS",
+        }
         index: dict[str, etree._Element] = {}
         for element in root.iter():
             if _local_name(element) not in type_tags:
@@ -659,20 +667,46 @@ class ArxmlParser:
             if path in index:
                 raise ArxmlParseError(f"数据类型完整路径重复: {path}")
             index[path] = element
-        resolver = WireTypeResolver(index)
+        mappings: dict[str, set[str]] = {}
+        for mapping in _descendants(root, "DATA-TYPE-MAP"):
+            sources = {
+                value
+                for item in _descendants(mapping, "APPLICATION-DATA-TYPE-REF")
+                if (value := _text(item)) is not None
+            }
+            targets = {
+                value
+                for item in _descendants(mapping, "IMPLEMENTATION-DATA-TYPE-REF")
+                if (value := _text(item)) is not None
+            }
+            for source in sources:
+                assert source is not None
+                mappings.setdefault(source, set()).update(
+                    targets if len(sources) == 1 and targets else {""}
+                )
+        resolver = WireTypeResolver(index, mappings)
+        transformation = TransformationResolver(root, index)
         for service in model.services:
             signals = [
-                signal
+                (signal, method.path)
                 for method in service.methods
                 for signal in [*method.input_signals, *method.output_signals]
             ]
-            signals += [signal for event in service.events for signal in event.signals]
-            signals += [field.signal for field in service.fields if field.signal is not None]
-            for signal in signals:
+            signals += [
+                (signal, event.path) for event in service.events for signal in event.signals
+            ]
+            signals += [
+                (field.signal, field.path) for field in service.fields if field.signal is not None
+            ]
+            for signal, element_path in signals:
                 try:
-                    signal.wire_schema = resolver.resolve(signal.type_ref)
+                    schema = resolver.resolve(signal.type_ref)
+                    signal.wire_schema = transformation.apply(schema, element_path)
                     signal.data_type = SignalDataType(signal.wire_schema["type"])
+                    if "byte_order" in signal.wire_schema:
+                        signal.byte_order = signal.wire_schema["byte_order"]
                 except WireTypeError as exc:
+                    signal.wire_schema = None
                     # 浏览投影保留旧类型提示，原生配置必须检查 wire_schema，禁止猜测发包。
                     signal.wire_error = str(exc)
                     warning = f"信号 {signal.path} 不能自动初始化原生类型: {exc}"

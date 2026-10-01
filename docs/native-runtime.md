@@ -202,10 +202,22 @@ Make 在宿主提前创建编译/证据目录，并显式传入 `SOMEIP_AGENT_EV
 引用解析；不根据类型名推断发送布局。浏览投影仍可显示旧类型提示，但缺少 `wire_schema`
 的模型不能用于原生初始化。已保留模型 ID、源文件 SHA-256、接口和部署路径。
 
-目前生成的发送布局是明确的 `scalar-big-endian` / `scalar-little-endian` 配置，参数使用原始值，
-不自动执行物理量换算；它不是完整 AUTOSAR 序列化部署解释器。显式序列化属性尚未完整映射时
-会拒绝生成，不默默套用此布局。应用类型映射、复杂 struct/union、动态数组、字符串/BOM、
-TLV/E2E/对齐和端点拓扑的自动解析仍需实现。原生自定义 catalog 的复合类型能力不等于这里已支持。
+类型图支持 Implementation `STRUCTURE`、`ARRAY` 的完整引用/声明顺序；数组必须明确
+`FIXED-SIZE` 或有上界的 `VARIABLE-SIZE`。Application 类型必须有唯一完整 `DATA-TYPE-MAP`
+指向 Implementation 类型；实际验证的是 Application primitive 映射，不代表任意应用 record/array
+的语义契约、单位换算或 OEM 变体已经验收。展开深度/节点数、数组上界和字段数量均有限制。
+
+复合类型必须通过完整服务元素映射绑定 `AP-SOMEIP-TRANSFORMATION-PROPS`，明确大小端和
+数组/结构长度字段宽度（0/1/2/4 字节）；变长数组不能使用 0。原生长度字段记录后续正文的
+字节数，定长数组也可带前缀；结构按声明顺序编码，不自动插入 padding。
+`byte_order` 未指定时保留 ARXML 源配置，调用方显式设置与源配置冲突时拒绝。
+没有 transformation 的既有基础标量仍可显式配置大小端；复合类型不得沿用这个兜底。
+序列化 profile 为 `arxml-resolved-explicit-or-scalar`，参数仍使用原始值。
+
+这不是完整 AUTOSAR/XSD/OEM 序列化解释器：模型出现细粒度 data-prototype 覆盖时，目前保守
+阻止自动类型初始化，不能忽略覆盖套用全局属性。union、字符串/BOM、TLV/E2E、非 8-bit 对齐、
+上下文/变体映射和端点拓扑仍未完成。解码严格校验声明长度，不支持较长数组/结构的向后兼容
+扩展跳过；未知属性或歧义布局明确报错，模型可浏览但不允许原生发包。
 
 方法参数保持声明顺序，INOUT 同时加入请求和响应。事件转换为 `Update{Name}Event`，字段生成
 `Get{Name}`、`Set{Name}`、`Update{Name}Event`；字段的事件组由实际引用绑定。一个变量的事件及
@@ -241,6 +253,13 @@ with S2sBaseClass.from_arxml(
 UDP/TCP、显式大端/小端均实际验证基础方法、事件和字段三种访问，并校验编号客户端的键名及
 响应路由。PCAP 单独核对 32 个请求/响应/通知黄金向量。
 此证明仅覆盖所列基础类型和测试模型，不证明任意 OEM ARXML 或性能目标。
+
+`native/tests/test_arxml_composite_virtual.py` 直接从 ARXML 生成目录，不用手写 catalog，
+在 UDP/TCP × 大端/小端 × 结构长度字段 0/2 字节的 8 组真实 veth 场景验证：嵌套结构、
+带 2 字节前缀的定长数组、有界变长数组、应用标量映射的方法及周期事件。PCAP 独立核对
+40 组手工推导的请求/响应/通知字节。超出定长数组的请求必须失败且不执行服务回调；
+变长数组上界另有原生编解码测试。该夹具是明确的项目投影模型，不是完整 XSD 验证的 OEM
+文件；不把这些场景扩展为全部长度宽度、复杂字段或所有部署组合均已互通。
 
 ## 服务页面与会话 API
 
