@@ -68,6 +68,21 @@ class SignalDefinition(BaseModel):
     wire_error: str | None = None
 
 
+class ClassicSignalBinding(BaseModel):
+    """Classic 部署的完整源引用；不是已验证的 payload 布局。"""
+
+    triggering_path: str
+    pdu_path: str
+    mapping_path: str
+    signal_path: str
+    system_signal_path: str
+    target_path: str
+    direction: Literal["input", "output", "data"]
+    start_position: int
+    transformation_paths: list[str]
+    transformer_paths: list[str]
+
+
 class MethodDefinition(BaseModel):
     name: str
     path: str = ""
@@ -75,6 +90,7 @@ class MethodDefinition(BaseModel):
     input_signals: list[SignalDefinition] = Field(default_factory=list)
     output_signals: list[SignalDefinition] = Field(default_factory=list)
     fire_and_forget: bool = False
+    classic_bindings: list[ClassicSignalBinding] = Field(default_factory=list)
 
 
 class EventDefinition(BaseModel):
@@ -83,6 +99,7 @@ class EventDefinition(BaseModel):
     event_id: int | None = None
     event_group_ids: list[int] = Field(default_factory=list)
     signals: list[SignalDefinition] = Field(default_factory=list)
+    classic_bindings: list[ClassicSignalBinding] = Field(default_factory=list)
 
 
 class FieldDefinition(BaseModel):

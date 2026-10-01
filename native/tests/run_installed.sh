@@ -23,7 +23,7 @@ try:
         "someip_agent.pcap.importer", "soa_partner.src.base_partner",
         "someip_agent.runtime.services", "someip_agent.runtime.service_models",
         "someip_agent.api.services",
-        "someip_agent.arxml.parser", "someip_agent.arxml.wire_types",
+        "someip_agent.arxml.parser", "someip_agent.arxml.wire_types", "someip_agent.arxml.classic",
         "someip_agent.arxml.transformation", "someip_agent.soa.catalog",
     ):
         module = importlib.import_module(name)

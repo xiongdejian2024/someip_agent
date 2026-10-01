@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 
 from lxml import etree
 
+from someip_agent.arxml.classic import ClassicReferenceResolver, ResolvedClassicBinding
 from someip_agent.domain.models import (
     ArxmlModel,
     EventDefinition,
@@ -278,6 +279,12 @@ class ArxmlParser:
         """
 
         client_interfaces, sender_interfaces = self._classic_interface_index(root)
+        from .wire_types import WireTypeError
+
+        try:
+            references = ClassicReferenceResolver(root, _element_path)
+        except WireTypeError as exc:
+            raise ArxmlParseError(str(exc)) from exc
         services: dict[str, ServiceDefinition] = {}
         services_by_id: defaultdict[int, list[ServiceDefinition]] = defaultdict(list)
 
@@ -361,6 +368,27 @@ class ArxmlParser:
                 "EventGroup" in (_reference_name(_text(reference)) or "")
                 for reference in _descendants(identifier, "ROUTING-GROUP-REF")
             )
+            try:
+                bindings = references.resolve(pdu_reference)
+                for service in target_services:
+                    self._merge_classic_bindings(service, method_id, is_event, bindings)
+                    error = "Classic SOME/IP transformer payload 布局尚未接入，禁止自动原生初始化"
+                    if error not in service.deployment_errors:
+                        service.deployment_errors.append(error)
+                continue
+            except WireTypeError as exc:
+                error = f"Classic 部署 {pdu_reference} 无法绑定: {exc}"
+                logger.warning(
+                    "Classic 完整引用解析失败，仅保留浏览投影",
+                    extra={"operation": "arxml.classic.resolve", "pdu_reference": pdu_reference},
+                    exc_info=True,
+                )
+                for service in target_services:
+                    if error not in service.deployment_errors:
+                        service.deployment_errors.append(error)
+                if error not in warnings:
+                    warnings.append(error)
+            # 缺失链仍允许浏览旧投影，但 deployment_errors 禁止它进入原生配置。
             for service in target_services:
                 if is_event:
                     self._merge_classic_event(
@@ -394,6 +422,82 @@ class ArxmlParser:
             "服务实例和 SOME/IP Header ID 重建服务投影"
         )
         return services
+
+    @staticmethod
+    def _merge_classic_bindings(
+        service: ServiceDefinition,
+        identifier: int,
+        is_event: bool,
+        bindings: list[ResolvedClassicBinding],
+    ) -> None:
+        from .wire_types import WireTypeError
+
+        targets = {binding.source.target_path for binding in bindings}
+        directions = {binding.source.direction for binding in bindings}
+        if directions == {"data"}:
+            interface_paths = set()
+            for binding in bindings:
+                parent = binding.target.getparent()
+                while parent is not None and _local_name(parent) != "SENDER-RECEIVER-INTERFACE":
+                    parent = parent.getparent()
+                if parent is None:
+                    raise WireTypeError("Classic 数据目标不属于 SENDER-RECEIVER-INTERFACE")
+                interface_paths.add(_element_path(parent))
+            if len(interface_paths) != 1 or len(targets) != len(bindings):
+                raise WireTypeError("Classic 单一 I-PDU 的数据目标重复或跨接口")
+            path = next(iter(interface_paths))
+            name = path.rsplit("/", 1)[-1]
+            signals = [_signal_from_prototype(binding.target) for binding in bindings]
+            if is_event:
+                definition = EventDefinition(
+                    name=name, path=path, event_id=identifier, signals=signals
+                )
+            else:
+                definition = MethodDefinition(
+                    name=name,
+                    path=path,
+                    method_id=identifier,
+                    input_signals=signals,
+                    fire_and_forget=True,
+                )
+        else:
+            if is_event or len(targets) != 1 or not directions <= {"input", "output"}:
+                raise WireTypeError("Classic RPC 部署方向或操作目标冲突")
+            operation = bindings[0].target
+            inputs, outputs = [], []
+            for argument in _descendants(operation, "ARGUMENT-DATA-PROTOTYPE"):
+                direction = (_first_text(argument, "DIRECTION") or "").upper()
+                if direction not in {"IN", "OUT", "INOUT"}:
+                    raise WireTypeError("Classic 操作参数缺少明确方向")
+                signal = _signal_from_prototype(argument)
+                if direction in {"IN", "INOUT"}:
+                    inputs.append(signal)
+                if direction in {"OUT", "INOUT"}:
+                    outputs.append(signal.model_copy(deep=True))
+            definition = MethodDefinition(
+                name=_short_name(operation),
+                path=next(iter(targets)),
+                method_id=identifier,
+                input_signals=inputs,
+                output_signals=outputs,
+            )
+        collection = service.events if is_event else service.methods
+        existing = next(
+            (
+                item
+                for item in collection
+                if (item.event_id if is_event else item.method_id) == identifier
+            ),
+            None,
+        )
+        if existing is not None and existing.path != definition.path:
+            raise WireTypeError("Classic 同一 Header ID 引用不同业务目标，不能保留第一个")
+        if existing is None:
+            existing = definition
+            collection.append(existing)
+        for binding in bindings:
+            if binding.source not in existing.classic_bindings:
+                existing.classic_bindings.append(binding.source)
 
     @staticmethod
     def _classic_interface_index(

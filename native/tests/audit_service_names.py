@@ -80,6 +80,37 @@ def audit_names(model, definitions, communications):
         "wire_schema_error_count": sum(
             signal.wire_error is not None for signal in signals
         ),
+        "classic_bound_member_count": sum(
+            bool(member.classic_bindings)
+            for service in model.services
+            for member in [*service.methods, *service.events]
+        ),
+        "classic_reference_binding_count": sum(
+            len(member.classic_bindings)
+            for service in model.services
+            for member in [*service.methods, *service.events]
+        ),
+        "deployment_error_count": sum(
+            len(service.deployment_errors) for service in model.services
+        ),
+        "classic_bindings": [
+            {
+                "service": service.name,
+                "member": member.name,
+                "member_path": member.path,
+                "bindings": [
+                    binding.model_dump() for binding in member.classic_bindings
+                ],
+            }
+            for service in model.services
+            for member in [*service.methods, *service.events]
+            if member.classic_bindings
+        ],
+        "deployment_errors": [
+            {"service": service.name, "errors": list(service.deployment_errors)}
+            for service in model.services
+            if service.deployment_errors
+        ],
         "verified": True,
         "runtime_verified": False,
     }

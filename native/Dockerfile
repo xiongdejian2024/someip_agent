@@ -35,5 +35,8 @@ RUN cmake -S native -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     && ctest --test-dir build/native --output-on-failure
 COPY backend /workspace/backend
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install '/workspace/backend[dev]'
+# 完整后端回归中的升级夹具仅需这两份测试辅助文件；产品仍从 wheel 加载。
+COPY scripts/check_version.py /workspace/scripts/check_version.py
+COPY packaging/linux/prepare_update_fixture.py /workspace/packaging/linux/prepare_update_fixture.py
 ENV PATH=/opt/venv/bin:$PATH SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner
 CMD ["/workspace/build/native/soa_partner"]

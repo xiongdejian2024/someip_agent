@@ -828,3 +828,53 @@
   公开发行临时测试包、不使用测试信任根。真实 OEM/Classic I-SIGNAL 序列化链仍需接通，
   AP-only resolver 的代码证据已重新核对。完整 ARXML/OEM、IPv6 分片、规模长稳和 Linux
   实际浏览器点击/生产发布验收继续推进；整体目标保持 active，Windows/Bootes 不再列为门禁。
+
+## 2026-10-01：Classic 完整引用绑定与原生验收镜像补齐（本轮）
+
+- 分类：实质进展。按继续完整目标的授权，将已验收的 Linux 发行包提交 e9c956c 推送到
+  origin/main，核对远端完整 SHA 为 e9c956ca4bf789019710009bc198596cdd558695。随后补上
+  真实 Classic ARXML 的引用图，不把前一轮只读分析当作代码修改授权。
+- 复用已安装 lxml，新增 ClassicReferenceResolver，经 PDU trigger、I-PDU mapping、I-SIGNAL、
+  SYSTEM-SIGNAL、sender/receiver 或 client/server 系统映射精确选择数据原型/操作，并保留
+  transformation/transformer 完整链。操作不任取接口第一项，完整引用存在时不按 PDU 名称
+  前缀匹配；多 ECU 对同一业务目标的引用去重，歧义目标和同 Header ID 不同操作明确拒绝。
+- 方法/事件保存 typed classic_bindings 和完整路径，模型 JSON 往返不丢来源。缺失引用的旧
+  名称投影仅可浏览，部署错误阻止原生初始化；完整链也不解除尚未实现的 Classic payload
+  门禁。20 项 Classic 与 9 项源审计专项通过，覆盖错误引用/类型、方向、歧义隔离、缓存
+  独立性、RPC 双向绑定、多个操作和完整链不能冒充 wire-ready；未新增生产依赖/自写协议栈。
+- 首次真实文件复核发现重复完整路径 /Communication/PDUs/Notify_f_Feature_FL_SignalIPDU，
+  解析器全局拒绝导入，终端保留 WireTypeError -> ArxmlParseError 堆栈。修正为按被引用成员
+  隔离，不选第一个、不改 OEM 原文件，重复路径不再阻断其他可浏览服务。
+- build/classic-source-final-evidence 使用真实安装包、只读输入与 network=none：131 个源服务
+  与 H47A/V_6_12_0 的 137 定义/3978 通信行全部同名/同 ID，1067 成员保存 2228 绑定，方向
+  为 input=491/output=491/data=1246。报告包含绑定、逐服务部署错误及三份源 SHA；34 个被
+  引用歧义路径形成 51 条部署错误，另有 126 条未实现布局错误，共 177 条。934 条重复引用
+  计数的信号布局错误仍存在；runtime_verified=false。没有激活车型或搬用车辆网络端点。
+- 首个完整安装包验收 build/classic-installed-evidence 的 228 虚拟网、22+7+9=38 审计与
+  12 权限/清理通过，但完整后端为 368 通过/2 失败：缺少 scripts/check_version.py 的升级
+  夹具辅助资产，FileNotFoundError 堆栈保存在 JUnit。修改 native/Dockerfile 增加现有版本
+  检查和升级夹具两文件，不修改测试断言或挂载产品源码；重新构建并启动完整独立复测。
+- 上一提交 e9c956c 的远端 run 36842738059 已终态：前后端成功，原生安装包阶段同样因
+  上述两项缺失失败（348 通过/2 失败），Windows 按配置跳过。后续负载/Linux 发行阶段未
+  执行，缺失 artifacts 的次生失败保留；不能把本地发行包验收说成远端 CI 已绿。
+- 核对官方 AUTOSAR CP 4.4.0 Transformer/System Template：固定长度成员不能统一自动加
+  padding；变长非末尾元素的对齐规则与整条消息起点另行处理。MESSAGE-TYPE 的模型枚举
+  不直接等于线上类型字节，session/default length/TLV 也未验证。直接 PDF 读取超时、Jina
+  TLS 失败后使用官方搜索索引的精确规范条目；依据链接和边界保存在 docs/classic-arxml.md。
+  不因此放开现有发送门禁，后续还需真实 Classic 编解码及黄金字节互操作。
+- 补齐资产后的最终镜像 someip-agent-vsomeip:classic-verified 为
+  1c6e4597c9a8120b12eb84b1663ce53245ec648242f40558095bb9f5e5339f15，固定 SDK/补丁核验与
+  两项 CTest 均通过。wheel SHA 为 9c6487f176090d5d7caad02e7881cbacba8d46f36cc1660f258aac1fed28e42c；
+  与先前来源审计镜像 9930fad77438b046df0fcf6c43082b584e792c005fd903c8ef28df5823d19fa9 的
+  wheel 相同，新增的两文件仅为测试辅助资产。原生二进制保持
+  6d85f1744c73a58f486c62aa6684a54f3f85f3fde3f63b7759cbafe307c1a20b，未宣称性能改善。
+- build/classic-verified-evidence 完整复测通过 130+98=228 虚拟网、370 后端、22+7+9=38
+  审计与 12 权限/清理；7 份最终 JUnit 均零失败/错误/跳过。模块实际来自 site-packages，
+  无产品源码挂载/PYTHONPATH；classic/parser 的安装文件 SHA 与当前仓库分别完全一致。
+  20602 帧/4412 消息，932 黄金向量、16 分片、40 组选项、114 正常双身份 RPC 对与 32
+  故障恢复对经独立黄金审计和原生导入核对完整，8 故障 case 与 16 刻意不回答请求保留，
+  采集内核丢包为 0。原 2 项失败报告仍在 classic-installed-evidence，不覆盖成通过。
+- 20 项 Classic/9 项源审计专项、Ruff、四版一致性、前端类型/适配器、shell 语法及 diff
+  检查通过；既有后端三项 warning 保留。本轮没有测线速、严格周期或规模长稳，既有性能
+  数字不复制为新性能验收。正式信任升级源、真实 Classic/OEM payload、IPv6 分片和规模
+  长稳仍需继续；Windows/Bootes 不要求实现，整体目标保持 active。

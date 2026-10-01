@@ -1,9 +1,11 @@
 """名称审计正反向验证；测试模型不作为生产目录。"""
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from audit_service_names import audit_names
+from someip_agent.arxml.parser import ArxmlParser
 from someip_agent.domain.models import ArxmlModel, ServiceDefinition
 
 
@@ -32,6 +34,27 @@ def test_names_match_two_sources_without_applying_vehicle_endpoints():
     assert result["matrix_service_count"] == 2
     assert model.model_dump() == before
     assert "不证明序列化" in result["scope"]
+
+
+def test_classic_source_bindings_are_reported_without_claiming_runtime_support():
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "backend/tests/fixtures/classic_service.arxml"
+    )
+    model = ArxmlParser().parse(fixture.read_bytes(), fixture.name)
+    definitions = [{"service_name": "BodyService", "service_id": "0x1234"}]
+    communications = [{"vlan_list": [{"service_list": definitions}]}]
+    result = audit_names(model, definitions, communications)
+    assert result["classic_bound_member_count"] == 2
+    assert result["classic_reference_binding_count"] == 3
+    assert result["deployment_error_count"] == 1
+    assert result["runtime_verified"] is False
+    assert (
+        result["classic_bindings"][0]["member_path"] == "/Classic/DoorControl/SetDoor"
+    )
+    assert result["classic_bindings"][0]["bindings"][0]["direction"] == "input"
+    result["deployment_errors"][0]["errors"].clear()
+    assert model.services[0].deployment_errors
 
 
 @pytest.mark.parametrize(

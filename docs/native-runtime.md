@@ -2,6 +2,8 @@
 
 ## 当前分工
 
+Classic Socket/SoAd 的完整引用绑定和明确未完成项见 [Classic ARXML](classic-arxml.md)。
+
 - `native/src`：固定 vsomeip 3.5.10，C++ 处理在线服务发现、方法、事件、字段、序列化与发生器。
 - `backend/src/someip_agent/soa`：SAT 风格的 SOAOperator / S2sBaseClass，启动二进制后用 socket 初始化与调用。
 - 默认 `SimulationManager` 已改为原生进程控制，不保留 Python 发包回退。
