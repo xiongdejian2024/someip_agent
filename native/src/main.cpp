@@ -45,8 +45,11 @@ int main(int argc, char **argv) {
         std::ifstream input(catalog);
         if (!input) throw std::runtime_error("无法打开服务目录: "+catalog);
         agent::Json services; input >> services;
+        std::ifstream configuration(config);
+        if(!configuration)throw std::runtime_error("无法打开 vsomeip 配置: "+config);
+        agent::Json settings;configuration>>settings;
         boost::asio::io_context io;
-        agent::Runtime runtime(io,services,bind,name);
+        agent::Runtime runtime(io,services,settings,bind,name);
         auto control=agent::Listener::create(io,bind,port,true,[&](auto conn) {
             conn->handler=[&](const auto &message, auto connection){runtime.control(message,connection);};
         });

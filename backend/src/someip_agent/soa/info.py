@@ -67,6 +67,8 @@ class PartnerKeyInfo:
         self.start_args = self.start_config.args() if self.start_config else {}
         self.running = True
         self.instance: str | None = None
+        self.application_name: str | None = None
+        self.application_id: int | None = None
         self.service_status = "OFFLINE"
         self.req_queue: queue.Queue[dict[str, Any]] = queue.LifoQueue(1000)
         self.resp_queue: queue.Queue[dict[str, Any]] = queue.LifoQueue(1000)

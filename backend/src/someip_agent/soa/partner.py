@@ -274,6 +274,8 @@ class S2sBaseClass(WTIAssertions):
                         status = json.loads(message["args"])
                         info.service_status = status["state"]
                         info.instance = status.get("instance")
+                        info.application_name = status.get("application_name")
+                        info.application_id = status.get("application_id")
                         info.no_return_methods = set(status.get("no_return_methods", []))
                         if "subscriptions" in status:
                             info.subscriptions = set(status["subscriptions"])

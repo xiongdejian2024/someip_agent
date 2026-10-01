@@ -43,10 +43,17 @@ const configBundle = await build({
   entryPoints: [fileURLToPath(new URL('../frontend/src/api/serviceConfig.ts', import.meta.url))],
   bundle: true, write: false, platform: 'node', format: 'esm',
 })
-const { byteOrderOverride } = await import(
+const { byteOrderOverride, memberApplication } = await import(
   `data:text/javascript;base64,${Buffer.from(configBundle.outputFiles[0].text).toString('base64')}`,
 )
 assert.deepEqual(byteOrderOverride('arxml'), {}, '遵循源布局时不得发送默认大端覆盖')
 assert.deepEqual(byteOrderOverride('big'), { byte_order: 'big' })
 assert.deepEqual(byteOrderOverride('little'), { byte_order: 'little' })
+assert.deepEqual(memberApplication('routing', 0x3401, false, 1), {}, '默认成员仍共享原有 application')
+assert.deepEqual(memberApplication('routing', 0x3401, true, 1), { application_name: 'routing_member1', application_id: 0x3402 })
+assert.deepEqual(memberApplication('routing', 0x3401, true, 2), { application_name: 'routing_member2', application_id: 0x3403 })
+for (const [id, offset] of [[0xfffe, 1], [0xfffd, 2], [0x1100, 1], [0x10ff, 2], [0, 1], [1.5, 1], [0x3401, 0], [0x3401, 3]]) {
+  assert.throws(() => memberApplication('routing', id, true, offset), /独立成员应用 ID/)
+}
+console.log('独立成员身份配置验证通过：默认兼容、两个显式 ID、保留 ID 和边界拒绝。')
 console.info('服务配置验证通过：源布局缺省不覆盖，明确大小端由后端检查部署冲突。')

@@ -67,13 +67,17 @@ class ServiceSessionManager:
         async with self._lifecycle:
             if len(self._sessions) >= 16:
                 raise ServiceSessionConflict("活动服务会话超过 16，请先停止已有会话")
-            if request.application_id == 0x1101:
+            requested_names = {app["name"] for app in bundle.config["applications"]}
+            requested_ids = {int(app["id"], 16) for app in bundle.config["applications"]}
+            if 0x1101 in requested_ids:
                 raise ServiceSessionConflict(
                     "0x1101 保留给默认信号仿真，请指定独立的 application_id"
                 )
             if any(
-                s.request.application_id == request.application_id
-                or s.request.application_name == request.application_name
+                any(
+                    app["name"] in requested_names or int(app["id"], 16) in requested_ids
+                    for app in s.bundle.config["applications"]
+                )
                 for s in self._sessions.values()
             ):
                 raise ServiceSessionConflict("应用名称或 application_id 已被活动会话占用")
@@ -156,6 +160,8 @@ class ServiceSessionManager:
             members.append(
                 NativeMemberView(
                     key=key,
+                    application_name=info.application_name if info else None,
+                    application_id=info.application_id if info else None,
                     role=config["role"],
                     service_path=spec["source"]["service_path"],
                     deployment_path=spec["source"]["deployment_path"],
@@ -356,6 +362,8 @@ class ServiceSessionManager:
                             "native_monotonic_ns": trace["native_monotonic_ns"],
                             "instance_id": trace["instance_id"],
                             "member": trace["member"],
+                            "application_name": trace.get("application_name"),
+                            "application_id": trace.get("application_id"),
                         },
                     )
                 )

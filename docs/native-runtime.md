@@ -372,6 +372,47 @@ client.send_request_and_ck_resp(
 关联独立等待者，避免互相取走响应。支持 tuple 列表及增量 client_1，传输配置在增量启停时保留。
 更多真实用例见 `native/tests/test_virtual.py`。
 
+### 独立 application 与线上 Client ID
+
+默认字典和 tuple 调用保持兼容：没有 `application_name` 的成员使用进程默认 application，
+`client_1` 等编号仅为逻辑成员别名，不能据此声称具有独立线上身份。需要隔离时，在成员字典
+显式选择 vsomeip JSON `applications` 中已经声明、具有唯一非零 ID 的名称；进程默认名称必须
+仍与 `routing` 一致。每个具名上下文复用 vsomeip 公共 API，不自行分配会话或实现订阅路由。
+
+ARXML 的 `from_arxml` 和服务 API 支持成员 `application_name` / `application_id` 成对配置，
+自动生成所有声明，再将名称传给原生成员。示例初始化参数（已导入对应真实 ARXML 模型）：
+
+```python
+members = {
+    "Provider": {"service": "VehicleStatus", "role": "server",
+                 "application_name": "provider_app", "application_id": 0x4701},
+    "VehicleStatus": {"role": "client", "application_name": "consumer_a",
+                      "application_id": 0x4702},
+    "VehicleStatus_1": {"service": "VehicleStatus", "role": "client",
+                        "application_name": "consumer_b", "application_id": 0x4703},
+}
+# S2sBaseClass.from_arxml(model, members, directory=新目录, settings=settings,
+#                       application_name="routing_app", application_id=0x4700)
+# 方法和事件仍用 VehicleStatus_client / VehicleStatus_client_1，调用形式不变。
+```
+
+在线模式仍必须补齐每个成员的传输、明确端口/对端及发送授权；不绕过白名单。页面可勾选
+独立成员 application，为当前成员和可选内部对端使用宿主 ID +1/+2；实际名称/ID 由原生
+ServiceStatus 返回后展示，不把通知报文中的标准 Client ID 0 当作 application 身份。
+服务 API 检查全部子 application 与活动会话的名称/ID 冲突，0x1101 对子 application 同样保留。
+
+同进程最多初始化 16 个上下文（含路由宿主），消息、可用状态、订阅引用计数和待响应槽按
+application 隔离。同一服务/实例不能重复提供 server；运行中不允许直接切换成员身份/部署，
+应先停止。停止成员清理其待响应槽，但上下文保留到进程退出，重启成员不重置 vsomeip 会话计数。
+这不保证 16 位线上 Session ID 永不回绕；完整长稳/极限在途请求矩阵仍需验证。进程退出先停止
+代理再停止路由宿主并 join 线程；`ping` 额外返回 application_count / pending_requests 供诊断。
+
+`native/tests/test_applications_virtual.py` 覆盖 UDP/TCP 并发、订阅、停止重启、非法身份及迟到
+响应。专用端口 30740–30749，独立 `audit_applications.py` 不导入发送 fixture，手工黄金向量
+核对 114 对请求/响应的两个 Client ID、会话、方向和字节；UDP/TCP 与产品原生离线导入交叉核对。
+审计回归在真实抓包副本篡改身份/会话/Payload、删包和重复时必须拒绝，不放宽既有黄金矩阵。
+这不是任意多节点、所有身份数量或生产实时性的验收声明。
+
 ### SAT 缓存、周期通知与错误语义
 
 - 标准键为 `DoorService_client_1`，带名称的实例为 `DoorService_server_DoorService_BGM`；
@@ -394,11 +435,13 @@ client.send_request_and_ck_resp(
 
 WTI 六个专用辅助 API、`ck_method_timeout`、原始 PartnerKeyInfo 构造及本实例拥有的进程异常恢复
 已接通并在真实 UDP/TCP 上验证；厂商心跳/通道阻塞检测语义尚未完整移植，不能称为完全无差别替换。
-当前编号客户端是共享 vsomeip application 的逻辑成员，
-并不代表每个成员拥有独立的线上 Client ID；独立应用身份与多实例完整矩阵仍需补齐。
+默认编号客户端是共享 vsomeip application 的逻辑成员，并不自动拥有独立的线上 Client ID。
+现在可通过显式成员 application 配置隔离线上身份，限定双身份 UDP/TCP 矩阵见上节；
+更多 application 数量、完整多实例/多节点和长稳矩阵仍需补齐。
 vsomeip 路由管理器按应用 ClientID 去重事件注册，适配器不能假定每次 request_event 都增加引用。
-同一服务/实例/事件只由首个逻辑消费者请求，最后一个消费者停止才 release_event；取消订阅按
-仍活动成员的订阅集合判断。停止一个编号成员不能破坏其他成员的事件接收，全部停止后允许重新注册。
+同一 application 内同一服务/实例/事件只由首个逻辑消费者请求，最后一个消费者停止才
+release_event；取消订阅按同一 application 中仍活动成员的订阅集合判断。停止一个编号成员
+不能破坏其他成员或其他 application 的事件接收，全部停止后允许重新注册。
 事件未到达使用 TimeoutError，与部分旧 SAT 断言的 AssertionError 不同。
 厂商 X86/idl 部署参数明确拒绝，服务 on-wire 类型必须由 catalog 提供，不猜测复杂布局。
 

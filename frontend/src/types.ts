@@ -92,6 +92,8 @@ export interface NativeServiceRequest {
     byte_order?: 'big' | 'little'
     peer_host?: string
     port?: number
+    application_name?: string
+    application_id?: number
   }>
 }
 
@@ -109,6 +111,8 @@ export interface NativeServiceSession {
   last_error: string | null
   members: Array<{
     key: string
+    application_name: string | null
+    application_id: number | null
     role: 'client' | 'server'
     service_path: string
     deployment_path: string | null

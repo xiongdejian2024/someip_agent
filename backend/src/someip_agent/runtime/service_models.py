@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class NativeMemberView(BaseModel):
     key: str
+    application_name: str | None = None
+    application_id: int | None = None
     role: Literal["client", "server"]
     service_path: str
     deployment_path: str | None

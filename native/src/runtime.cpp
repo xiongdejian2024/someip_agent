@@ -10,42 +10,59 @@ Json service_status(const std::shared_ptr<Member> &member, const std::string &st
     return {{"action","event"},{"function","ServiceStatus"},
         {"args",Json{{"state",state},{"instance",member->name},
             {"no_return_methods",no_return},{"service_id",member->service},
-            {"instance_id",member->instance},{"subscriptions",member->subscriptions}}.dump()}};
+            {"instance_id",member->instance},{"subscriptions",member->subscriptions},
+            {"application_name",member->application->get_name()},
+            {"application_id",member->application->get_client()}}.dump()}};
 }
 }
 void Member::emit(const Json &message) {
     connections.erase(std::remove_if(connections.begin(),connections.end(),[](const auto &c){return c.expired();}),connections.end());
     for (auto &weak : connections) if (auto conn=weak.lock()) conn->send(message);
 }
-Runtime::Runtime(boost::asio::io_context &io, Json catalog, std::string bind, std::string name)
-    : io_(io), catalog_(std::move(catalog)), bind_(std::move(bind)),
-      app_(vsomeip::runtime::get()->create_application(name)) {
-    if (!app_->init()) throw std::runtime_error("vsomeip 初始化失败");
-    std::set<std::string> allowed;
-    bool restricted=false;
-    for(auto &[name,spec]:catalog_.items()) if(spec.contains("allowed_subscribers")) {
-        restricted=true;
-        for(auto &host:spec.at("allowed_subscribers")) allowed.insert(host.get<std::string>());
+Runtime::Runtime(boost::asio::io_context &io,Json catalog,Json config,std::string bind,std::string name)
+    : io_(io),catalog_(std::move(catalog)),bind_(std::move(bind)),default_application_(std::move(name)) {
+    std::set<uint16_t> ids;
+    if(!config.at("applications").is_array())throw std::runtime_error("applications 必须为具名配置数组");
+    for(const auto &entry:config.at("applications")) {
+        auto app_name=entry.at("name").get<std::string>();
+        auto id=bounded_number(entry.at("id"),0xFFFE,"application id");
+        if(app_name.empty() || id==0 || configured_applications_.count(app_name) || !ids.insert(id).second)
+            throw std::runtime_error("application 名称或 Client ID 缺失、重复或非法");
+        configured_applications_[app_name]=id;
     }
-    if(restricted)app_->register_message_acceptance_handler([allowed](const vsomeip::message_acceptance_t &remote){
-        auto host=boost::asio::ip::address_v4(remote.remote_address_).to_string();
-        bool accepted=allowed.count(host)>0;
-        std::cout<<Json{{"operation","subscription.policy"},{"host",host},{"accepted",accepted},
-            {"message",accepted?"远端报文通过白名单":"远端报文被白名单拒绝"}}.dump()<<std::endl;
-        return accepted;
-    });
-    app_->register_message_handler(vsomeip::ANY_SERVICE,vsomeip::ANY_INSTANCE,vsomeip::ANY_METHOD,
-        [this](auto message){boost::asio::post(io_,[this,message]{receive(message);});});
-    stack_thread_=std::thread([this]{app_->start();});
+    if(config.at("routing")!=default_application_)
+        throw std::runtime_error("默认 application 必须与本进程 routing 配置一致");
+    for(auto &[name,spec]:catalog_.items()) if(spec.contains("allowed_subscribers")) {
+        restricted_=true;
+        for(auto &host:spec.at("allowed_subscribers")) allowed_subscribers_.insert(host.get<std::string>());
+    }
+    application(default_application_);
+}
+std::shared_ptr<vsomeip::application> Runtime::application(const std::string &name) {
+    if(shutting_down_)throw std::runtime_error("原生进程正在退出");
+    auto configured=configured_applications_.find(name);
+    if(configured==configured_applications_.end())throw std::runtime_error("application 未在 vsomeip 配置中声明: "+name);
+    auto found=applications_.find(name);
+    if(found!=applications_.end())return found->second->application();
+    // 包括默认路由 application。停止逻辑成员不销毁上下文，数量有界且会话不复用。
+    if(applications_.size()>=16)throw std::runtime_error("单进程最多初始化 16 个 application，请建立独立进程");
+    auto stack=std::make_unique<ApplicationStack>(name,configured->second,allowed_subscribers_,restricted_,
+        [this,name](auto message){boost::asio::post(io_,[this,name,message]{receive(name,message);});});
+    auto app=stack->application();applications_.emplace(name,std::move(stack));return app;
 }
 Runtime::~Runtime() { shutdown(); }
 void Runtime::shutdown() {
+    if(shutting_down_)return;
+    shutting_down_=true;
     std::vector<std::string> keys;
     for (auto &[key,m] : members_) keys.push_back(key);
     for (auto &key : keys) stop_member(key);
     for (auto &[id,p] : pending_) p.timer->cancel();
     pending_.clear();
-    if (stack_thread_.joinable()) { app_->clear_all_handler();app_->stop();stack_thread_.join(); }
+    // 先退出代理，最后退出默认路由宿主，保证代理能完成注销。
+    for(auto &[name,stack]:applications_)if(name!=default_application_)stack->stop();
+    auto primary=applications_.find(default_application_);
+    if(primary!=applications_.end())primary->second->stop();
 }
 void Runtime::stop_member(const std::string &key) {
     auto it=members_.find(key);
@@ -57,21 +74,29 @@ void Runtime::stop_member(const std::string &key) {
     ++m->event_epoch;m->event_running=false;
     if(m->event_timer)m->event_timer->cancel();
     if (m->role=="server") {
-        app_->stop_offer_service(m->service,m->instance,m->major,m->minor);
+        m->application->stop_offer_service(m->service,m->instance,m->major,m->minor);
         for (auto &[name,api] : m->apis) if (api.event) {
-            app_->stop_offer_event(m->service,m->instance,api.id);
-            for (auto group:api.groups) app_->unregister_subscription_handler(m->service,m->instance,group);
+            m->application->stop_offer_event(m->service,m->instance,api.id);
+            for (auto group:api.groups) m->application->unregister_subscription_handler(m->service,m->instance,group);
         }
     } else {
         bool another=false;
         for (auto &[other_key,other]:members_)
-            if(other_key!=key && other->role=="client" && other->service==m->service && other->instance==m->instance)another=true;
+            if(other_key!=key && other->application==m->application && other->role=="client" &&
+                other->service==m->service && other->instance==m->instance)another=true;
         for (auto &name : m->subscriptions) subscribe(m,name,false);
-        if(!another)app_->release_service(m->service,m->instance);
+        if(!another) {
+            m->application->release_service(m->service,m->instance);
+            m->application->unregister_availability_handler(m->service,m->instance,m->major,m->minor);
+        }
         // routing_manager_impl 按 application 的 ClientID 去重注册，不按逻辑成员计数。
         // 只有最后一个逻辑消费者停止，才能释放该 application 的事件注册。
         for (auto &[name,api] : m->apis) if (api.event && !has_other_event_consumer(m,api.id))
-            app_->release_event(m->service,m->instance,api.id);
+            m->application->release_event(m->service,m->instance,api.id);
+    }
+    for(auto pending=pending_.begin();pending!=pending_.end();) {
+        if(pending->second.member==m) {pending->second.timer->cancel();pending=pending_.erase(pending);}
+        else ++pending;
     }
     m->emit(service_status(m,"OFFLINE"));
     m->listener->close();
@@ -98,7 +123,24 @@ void Runtime::configure(const std::string &alias, const Json &cfg) {
     m->major=bounded_number(spec.value("major_version",Json(1)),0xFE,"major_version");
     m->minor=number(spec.value("minor_version",Json(0)));
     m->reliable=cfg.value("transport",spec.value("transport","udp"))=="tcp";
-    if (members_.count(m->key)) return;
+    const auto application_name=cfg.value("application_name",default_application_);
+    if(!configured_applications_.count(application_name))
+        throw std::runtime_error("application 未在 vsomeip 配置中声明: "+application_name);
+    if(members_.count(m->key)) {
+        const auto existing=members_.at(m->key);
+        if(existing->application->get_name()!=application_name || existing->service!=m->service ||
+            existing->instance!=m->instance || existing->major!=m->major || existing->minor!=m->minor ||
+            existing->reliable!=m->reliable)
+            throw std::runtime_error("运行中的成员身份或部署不能直接改变，请先停止成员");
+        return;
+    }
+    for(const auto &[key,other]:members_)if(other->service==m->service && other->instance==m->instance) {
+        if(m->role=="server" && other->role=="server")
+            throw std::runtime_error("同一服务/实例只能有一个 server，不能重复提供服务");
+        if(m->role=="client" && other->role=="client" && other->application->get_name()==application_name &&
+            (m->major!=other->major || m->minor!=other->minor || m->reliable!=other->reliable))
+            throw std::runtime_error("共享 application 的客户端服务部署必须一致");
+    }
     for (auto &category : {"methods","events"}) {
         auto entries=spec.value(category,Json::object());
         for (auto &[name,entry] : entries.items()) {
@@ -123,6 +165,7 @@ void Runtime::configure(const std::string &alias, const Json &cfg) {
             }
         } else for(const auto &[name,api]:m->apis)if(api.event)m->subscriptions.insert(name);
     }
+    m->application=application(application_name);
     std::weak_ptr<Member> weak_member=m;
     m->listener=Listener::create(io_,bind_,0,false,[this,weak_member](auto conn){
         auto m=weak_member.lock();if(!m || !m->active){conn->close();return;}
@@ -140,19 +183,20 @@ void Runtime::configure(const std::string &alias, const Json &cfg) {
     const auto reliability=m->reliable ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE;
     for (auto &[name,api]:m->apis) if (api.event) {
         auto type=api.field ? vsomeip::event_type_e::ET_FIELD : vsomeip::event_type_e::ET_EVENT;
-        if (m->role=="server") app_->offer_event(m->service,m->instance,api.id,api.groups,type,
+        if (m->role=="server") m->application->offer_event(m->service,m->instance,api.id,api.groups,type,
             std::chrono::milliseconds::zero(),false,true,nullptr,reliability);
         else if(!has_other_event_consumer(m,api.id))
-            app_->request_event(m->service,m->instance,api.id,api.groups,type,reliability);
+            m->application->request_event(m->service,m->instance,api.id,api.groups,type,reliability);
     }
     if (m->role=="server") {
-        app_->offer_service(m->service,m->instance,m->major,m->minor);
+        m->application->offer_service(m->service,m->instance,m->major,m->minor);
         m->state="START";
     } else {
-        app_->register_availability_handler(m->service,m->instance,
-            [this](auto service,auto instance,bool available){
-                boost::asio::post(io_,[this,service,instance,available]{
+        m->application->register_availability_handler(m->service,m->instance,
+            [this,application_name](auto service,auto instance,bool available){
+                boost::asio::post(io_,[this,application_name,service,instance,available]{
                     for (auto &[key,member]:members_) if (member->role=="client" && member->active &&
+                        member->application->get_name()==application_name &&
                         member->service==service && member->instance==instance) {
                         const std::string next=available ? "START" : "OFFLINE";
                         if(member->state==next)continue;
@@ -166,16 +210,17 @@ void Runtime::configure(const std::string &alias, const Json &cfg) {
                     }
                 });
             },m->major,m->minor);
-        app_->request_service(m->service,m->instance,m->major,m->minor);
+        m->application->request_service(m->service,m->instance,m->major,m->minor);
         // 默认自动注册所有事件，兼容 SAT 启动后的 event 断言。
         // 只在可用状态转变时进行初次订阅；再次注册 availability handler 不能为旧成员重复回放。
     }
     std::cout << Json{{"operation","service.start"},{"member",m->key},{"role",m->role},
+                      {"application_name",application_name},{"application_id",m->application->get_client()},
                       {"message","服务成员已初始化"}}.dump() << std::endl;
 }
 bool Runtime::has_other_event_consumer(const std::shared_ptr<Member> &member,uint16_t event) const {
     for(const auto &[key,other]:members_) {
-        if(key==member->key || !other->active || other->role!="client" ||
+        if(key==member->key || !other->active || other->role!="client" || other->application!=member->application ||
             other->service!=member->service || other->instance!=member->instance)continue;
         for(const auto &[name,api]:other->apis)if(api.event && api.id==event)return true;
     }
@@ -190,16 +235,16 @@ void Runtime::subscribe(std::shared_ptr<Member> m,const std::string &name,bool e
             vsomeip::debounce_filter_t filter;
             filter.interval_=0;
             if(api.field)m->pending_initial_fields.insert(name);
-            app_->subscribe_with_debounce(m->service,m->instance,group,m->major,api.id,filter);
+            m->application->subscribe_with_debounce(m->service,m->instance,group,m->major,api.id,filter);
         }
         else {
             m->field_values.erase(name);
             m->pending_initial_fields.erase(name);
             bool another=false;
-            for(auto &[key,other]:members_) if(key!=m->key && other->active && other->role=="client" &&
+            for(auto &[key,other]:members_) if(key!=m->key && other->active && other->role=="client" && other->application==m->application &&
                 other->service==m->service && other->instance==m->instance)
                 for(auto &sub:other->subscriptions) if(other->apis.at(sub).id==api.id)another=true;
-            if(!another)app_->unsubscribe(m->service,m->instance,group,api.id);
+            if(!another)m->application->unsubscribe(m->service,m->instance,group,api.id);
         }
     }
 }
@@ -233,6 +278,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             result=Json::array();for (auto &[name,spec]:catalog_.items()) result.push_back(name);
         } else if (function=="running_service") {
             for (auto &[key,m]:members_) result[key]={{"state",m->state},{"role",m->role},
+                {"application_name",m->application->get_name()},{"application_id",m->application->get_client()},
                 {"emitted_count",m->count},{"last_value",m->last_value},
                 {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count}};
         } else if (function=="monitor") { monitors_.push_back(conn);result=true; }
@@ -285,7 +331,8 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         } else if (function=="generator_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
             ++m->generator_epoch;if(m->timer)m->timer->cancel();result=true;
-        } else if (function=="ping") result={{"runtime","vsomeip"},{"protocol",1},{"version","3.5.10"}};
+        } else if (function=="ping") result={{"runtime","vsomeip"},{"protocol",1},{"version","3.5.10"},
+            {"application_count",applications_.size()},{"pending_requests",pending_.size()}};
         else throw std::runtime_error("未知控制操作: "+function);
         conn->send({{"action","response"},{"function",function},{"result",result.dump()},{"failtype","FAILTYPE_SUCCESS"}});
     } catch (const std::exception &error) {
@@ -300,6 +347,7 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
         {"service_id",m->service},{"instance_id",m->instance},{"method_id",api.id},{"client_id",client},
         {"session_id",session},{"message_type",type},{"return_code",code},{"payload_hex",hex(payload)},
         {"transport",m->reliable?"tcp":"udp"},{"interface_version",m->major},{"emitted_count",m->count},
+        {"application_name",m->application->get_name()},{"application_id",m->application->get_client()},
         {"last_value",m->last_value},{"observation","vsomeip_api"},
         {"native_monotonic_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()}};
@@ -307,7 +355,7 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
 }
 void Runtime::notify(std::shared_ptr<Member> m,const Api &api,const Bytes &data) {
     auto payload=vsomeip::runtime::get()->create_payload();payload->set_data(data);
-    app_->notify(m->service,m->instance,api.id,payload,true);
+    m->application->notify(m->service,m->instance,api.id,payload,true);
     trace(m,api,data,"tx",2);
 }
 void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_ptr<Connection> conn) {
@@ -354,12 +402,13 @@ void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_
             message->set_interface_version(m->major);
             if(api.fire_and_forget)message->set_message_type(vsomeip::message_type_e::MT_REQUEST_NO_RETURN);
             auto payload=vsomeip::runtime::get()->create_payload();payload->set_data(data);message->set_payload(payload);
-            app_->send(message);
+            m->application->send(message);
             trace(m,api,data,"tx",api.fire_and_forget?1:0,message->get_client(),message->get_session());
             if(!api.fire_and_forget) {
                 uint32_t id=message->get_request();
                 auto timer=std::make_shared<boost::asio::steady_timer>(io_);
-                pending_[id]={conn,m,function,request.value("correlation_id",""),timer};
+                if(!pending_.emplace(id,Pending{conn,m,function,request.value("correlation_id",""),timer}).second)
+                    throw std::runtime_error("线上 Request ID 与未完成请求冲突，不能覆盖原请求");
                 timer->expires_after(std::chrono::milliseconds(request.value("timeout_ms",5000)));
                 timer->async_wait([this,id](auto ec){
                     if(ec)return;
@@ -390,7 +439,7 @@ void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_
             auto payload=vsomeip::runtime::get()->create_payload();payload->set_data(data);response->set_payload(payload);
             response->set_return_code(static_cast<vsomeip::return_code_e>(return_code));
             response->set_message_type(static_cast<vsomeip::message_type_e>(response_type));
-            app_->send(response);trace(m,api,data,"tx",response_type,response->get_client(),response->get_session(),return_code);
+            m->application->send(response);trace(m,api,data,"tx",response_type,response->get_client(),response->get_session(),return_code);
         } else throw std::runtime_error("未知成员操作: "+action);
         if(acknowledge)conn->send({{"action","response"},{"function",function},
             {"result","true"},{"failtype","FAILTYPE_SUCCESS"},
@@ -402,15 +451,26 @@ void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_
                     {"correlation_id",request.value("correlation_id","")}});
     }
 }
-void Runtime::receive(std::shared_ptr<vsomeip::message> message) {
+void Runtime::receive(const std::string &application_name,std::shared_ptr<vsomeip::message> message) {
+    if(shutting_down_)return;
     auto payload=message->get_payload();Bytes data(payload->get_data(),payload->get_data()+payload->get_length());
     uint8_t type=static_cast<uint8_t>(message->get_message_type());
     try {
         if(type==0x80 || type==0x81) {
             auto it=pending_.find(message->get_request());if(it==pending_.end())return;
-            auto p=it->second;p.timer->cancel();pending_.erase(it);
+            auto p=it->second;
             std::string name=p.function;if(name.size()>5 && name.substr(name.size()-5)=="Async")name.resize(name.size()-5);
             auto api=p.member->apis.at(name);
+            // Request ID 相同不足以证明匹配；错误信封不得消费真正请求的超时/响应槽。
+            if(!p.member->active || p.member->application->get_name()!=application_name ||
+                message->get_service()!=p.member->service || message->get_instance()!=p.member->instance ||
+                message->get_method()!=api.id || message->get_interface_version()!=p.member->major ||
+                message->is_reliable()!=p.member->reliable) {
+                std::cout<<Json{{"operation","someip.response.reject"},{"application_name",application_name},
+                    {"request_id",message->get_request()},{"message","响应身份或部署与待完成请求不匹配"}}.dump()<<std::endl;
+                return;
+            }
+            p.timer->cancel();pending_.erase(it);
             const auto return_code=static_cast<uint8_t>(message->get_return_code());
             Json delivery={{"action","response"},{"function",p.function},
                 {"result",Json{{"out",nullptr}}.dump()},{"failtype","FAILTYPE_OTHER_ERROR"},
@@ -432,6 +492,7 @@ void Runtime::receive(std::shared_ptr<vsomeip::message> message) {
             return;
         }
         for(auto &[key,m]:members_) {
+            if(!m->active || m->application->get_name()!=application_name)continue;
             if(m->service!=message->get_service() || m->instance!=message->get_instance())continue;
             if((type==2 && m->role!="client") || ((type==0 || type==1) && m->role!="server"))continue;
             for(auto &[name,api]:m->apis) if(api.id==message->get_method()) {

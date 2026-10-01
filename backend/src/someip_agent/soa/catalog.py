@@ -13,7 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from someip_agent.config import Settings
 from someip_agent.domain.models import (
@@ -46,6 +46,14 @@ class NativeMemberConfig(BaseModel):
     byte_order: Literal["big", "little"] | None = None
     status: bool = True
     heartbeat: int = Field(default=600, ge=1)
+    application_name: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+    application_id: int | None = Field(default=None, ge=1, le=0xFFFE)
+
+    @model_validator(mode="after")
+    def require_application_pair(self) -> NativeMemberConfig:
+        if (self.application_name is None) != (self.application_id is None):
+            raise ValueError("成员 application_name 与 application_id 必须同时配置")
+        return self
 
 
 class NativeCatalogRequest(BaseModel):
@@ -207,10 +215,22 @@ def build_native_bundle(
     members: dict[str, Any] = {}
     service_configs: dict[tuple[int, int], dict[str, Any]] = {}
     server_ids: set[tuple[int, int]] = set()
+    applications = {request.application_name: request.application_id}
+    application_ids = {request.application_id: request.application_name}
     online = any(member.transport != "internal" for member in request.members.values())
     if online and any(member.transport == "internal" for member in request.members.values()):
         raise CatalogBuildError(["同一原生进程不能混合内部隔离模式和在线模式"])
     for alias, member in request.members.items():
+        if member.application_name is not None:
+            name, identifier = member.application_name, member.application_id
+            if name in applications and applications[name] != identifier:
+                raise CatalogBuildError([f"application {name} 的 Client ID 配置冲突"])
+            if identifier in application_ids and application_ids[identifier] != name:
+                raise CatalogBuildError([f"Client ID {identifier} 被多个 application 使用"])
+            applications[name] = identifier
+            application_ids[identifier] = name
+            if len(applications) > 16:
+                raise CatalogBuildError(["单进程最多初始化 16 个 application，包括默认路由宿主"])
         if not alias or len(alias) > 256:
             raise CatalogBuildError(["成员字典键不能为空或超过 256 字符"])
         selection = member.service or alias
@@ -306,6 +326,8 @@ def build_native_bundle(
             "status": member.status,
             "heartbeat": member.heartbeat,
         }
+        if member.application_name is not None:
+            members[alias]["application_name"] = member.application_name
         if selection != alias:
             # 保留 SAT 的服务名、编号客户端键和实例命名；不同 alias 可绑定不同部署。
             members[alias]["definition"] = deepcopy(spec)
@@ -314,7 +336,9 @@ def build_native_bundle(
         "unicast": settings.native_unicast if online else "127.0.0.1",
         "network": name,
         "routing": name,
-        "applications": [{"name": name, "id": f"0x{request.application_id:04x}"}],
+        "applications": [
+            {"name": app, "id": f"0x{identifier:04x}"} for app, identifier in applications.items()
+        ],
         "logging": {"level": "warning", "console": True, "dlt": False},
         "services": list(service_configs.values()),
         "service-discovery": {

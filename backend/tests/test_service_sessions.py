@@ -65,6 +65,50 @@ def test_service_session_network_auth_checked_before_start(tmp_path):
         assert not (tmp_path / "native-services").exists()
 
 
+def test_service_session_subapplications_have_real_identity_and_cross_session_conflict(
+    tmp_path, native_runtime
+):
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime))
+    with TestClient(app) as client:
+        import_model(client)
+        body = request("multi_api", 0x4500)
+        body["members"]["Provider"].update(application_name="provider_api", application_id=0x4501)
+        body["members"]["Consumer"].update(application_name="consumer_api", application_id=0x4502)
+        response = client.post("/api/v1/services/sessions", json=body)
+        assert response.status_code == 200, response.text
+        identifier = response.json()["id"]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            state = client.get("/api/v1/services/sessions").json()[0]
+            if all(member["state"] == "START" for member in state["members"]):
+                break
+            time.sleep(0.01)
+        assert {
+            member["role"]: (member["application_name"], member["application_id"])
+            for member in state["members"]
+        } == {"server": ("provider_api", 0x4501), "client": ("consumer_api", 0x4502)}
+        for name, identifier_conflict in (("provider_api", 0x4600), ("another_api", 0x4502)):
+            assert (
+                client.post(
+                    "/api/v1/services/sessions", json=request(name, identifier_conflict)
+                ).status_code
+                == 409
+            )
+        sub_collision = request("unrelated_api", 0x4600)
+        sub_collision["members"]["Consumer"].update(
+            application_name="third_api", application_id=0x4501
+        )
+        assert client.post("/api/v1/services/sessions", json=sub_collision).status_code == 409
+        sub_reserved = request("reserved_api", 0x4600)
+        sub_reserved["members"]["Consumer"].update(
+            application_name="reserved_sub", application_id=0x1101
+        )
+        assert client.post("/api/v1/services/sessions", json=sub_reserved).status_code == 409
+        assert client.post(f"/api/v1/services/sessions/{identifier}/stop").status_code == 200
+        # 会话关闭才释放上下文；新的进程可以再次申请相同身份。
+        assert client.post("/api/v1/services/sessions", json=body).status_code == 200
+
+
 def test_service_session_native_calls_requests_ack_stop_and_model_binding(tmp_path, native_runtime):
     app = create_app(Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime))
     with TestClient(app) as client:

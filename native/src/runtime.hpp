@@ -1,5 +1,5 @@
 #pragma once
-#include "codec.hpp"
+#include "application.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <map>
 #include <set>
@@ -16,6 +16,7 @@ struct Api {
 };
 struct Member {
     std::string key, role, name, state = "OFFLINE";
+    std::shared_ptr<vsomeip::application> application;
     uint16_t service, instance;
     uint8_t major;
     uint32_t minor;
@@ -43,9 +44,12 @@ struct Member {
 class Runtime {
     boost::asio::io_context &io_;
     Json catalog_;
-    std::string bind_;
-    std::shared_ptr<vsomeip::application> app_;
-    std::thread stack_thread_;
+    std::string bind_, default_application_;
+    std::map<std::string,uint16_t> configured_applications_;
+    std::map<std::string,std::unique_ptr<ApplicationStack>> applications_;
+    std::set<std::string> allowed_subscribers_;
+    bool restricted_ = false, shutting_down_ = false;
+    std::shared_ptr<vsomeip::application> application(const std::string &);
     std::map<std::string,std::shared_ptr<Member>> members_;
     struct Pending {
         std::weak_ptr<Connection> connection;
@@ -59,7 +63,7 @@ class Runtime {
     void configure(const std::string &, const Json &);
     void stop_member(const std::string &);
     void command(std::shared_ptr<Member>, const Json &, std::shared_ptr<Connection>);
-    void receive(std::shared_ptr<vsomeip::message>);
+    void receive(const std::string &,std::shared_ptr<vsomeip::message>);
     void subscribe(std::shared_ptr<Member>, const std::string &, bool);
     bool has_other_event_consumer(const std::shared_ptr<Member> &, uint16_t) const;
     void notify(std::shared_ptr<Member>, const Api &, const Bytes &);
@@ -69,7 +73,7 @@ class Runtime {
     void trace(std::shared_ptr<Member>, const Api &, const Bytes &, const std::string &,
                uint8_t, uint16_t=0, uint16_t=0, uint8_t=0);
 public:
-    Runtime(boost::asio::io_context &, Json, std::string, std::string);
+    Runtime(boost::asio::io_context &, Json, Json, std::string, std::string);
     ~Runtime();
     void control(const Json &, std::shared_ptr<Connection>);
     void shutdown();

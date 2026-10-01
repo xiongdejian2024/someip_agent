@@ -59,7 +59,7 @@ if [[ "$capture_ready" != 1 ]]; then
   exit 1
 fi
 export SOMEIP_AGENT_NATIVE_BINARY=/workspace/build/native/soa_partner
-python -m pytest native/tests/test_virtual.py native/tests/test_arxml_virtual.py native/tests/test_arxml_composite_virtual.py native/tests/test_sat_wti_virtual.py -v --junitxml=build/virtual-evidence/junit.xml
+python -m pytest native/tests/test_virtual.py native/tests/test_arxml_virtual.py native/tests/test_arxml_composite_virtual.py native/tests/test_sat_wti_virtual.py native/tests/test_applications_virtual.py -v --junitxml=build/virtual-evidence/junit.xml
 ip netns exec soa-server python -m pytest native/tests/test_backend_virtual.py native/tests/test_network_virtual.py native/tests/test_capture_virtual.py native/tests/test_ipv4_options_virtual.py native/tests/test_recovery_virtual.py native/tests/test_services_virtual.py -v \
   --basetemp=build/virtual-evidence/backend-pytest \
   --junitxml=build/virtual-evidence/backend-junit.xml
@@ -72,6 +72,9 @@ python native/tests/audit_pcap.py build/virtual-evidence/soa.pcap \
 python native/tests/audit_offline.py build/virtual-evidence/soa.pcap \
   --reference build/virtual-evidence/pcap-audit.json \
   --output build/virtual-evidence/offline-audit.json
+python native/tests/audit_applications.py build/virtual-evidence/soa.pcap \
+  --capture-log build/virtual-evidence/tcpdump.log \
+  --output build/virtual-evidence/application-audit.json
 python -m pytest native/tests/test_audit_pcap.py -v \
   --basetemp=build/virtual-evidence/audit-pytest \
   --junitxml=build/virtual-evidence/audit-junit.xml

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
@@ -64,6 +65,141 @@ def test_bundle_contains_methods_fields_eventgroups_and_provenance(tmp_path):
     )
     with pytest.raises(FileExistsError):
         bundle.write(tmp_path / "runtime")
+
+
+def test_member_applications_preserve_sat_aliases_and_default():
+    body = NativeCatalogRequest.model_validate(
+        {
+            "members": {
+                "VehicleStatus": {"role": "client"},
+                "VehicleStatus_1": {
+                    "service": "VehicleStatus",
+                    "role": "client",
+                    "application_name": "second_client",
+                    "application_id": 0x2202,
+                },
+                "VehicleStatus_2": {
+                    "service": "VehicleStatus",
+                    "role": "client",
+                    "application_name": "second_client",
+                    "application_id": 0x2202,
+                },
+            }
+        }
+    )
+    bundle = build_native_bundle(parse(), body, Settings(_env_file=None))
+    assert bundle.config["applications"] == [
+        {"name": "arxml_partner", "id": "0x1101"},
+        {"name": "second_client", "id": "0x2202"},
+    ]
+    assert "application_name" not in bundle.members["VehicleStatus"]
+    assert bundle.members["VehicleStatus_1"]["application_name"] == "second_client"
+    assert (
+        member_key("VehicleStatus_1", bundle.members["VehicleStatus_1"]) == "VehicleStatus_client_1"
+    )
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        {"application_name": "second_client"},
+        {"application_id": 0x2202},
+        {"application_name": "bad/name", "application_id": 0x2202},
+        {"application_name": "second_client", "application_id": 0},
+        {"application_name": "second_client", "application_id": 0xFFFF},
+    ],
+)
+def test_application_selector_requires_explicit_valid_pair(member):
+    with pytest.raises(ValueError):
+        request(**member)
+
+
+@pytest.mark.parametrize("name,identifier", [("arxml_partner", 0x2202), ("other", 0x1101)])
+def test_application_name_or_id_collision_is_rejected(name, identifier):
+    with pytest.raises(CatalogBuildError, match="冲突|多个"):
+        build_native_bundle(
+            parse(),
+            request(application_name=name, application_id=identifier),
+            Settings(_env_file=None),
+        )
+
+
+def test_application_context_count_is_bounded_including_routing_host():
+    members = {
+        f"Consumer_{i}": {
+            "role": "client",
+            "service": "VehicleStatus",
+            "application_name": f"consumer_{i}",
+            "application_id": 0x3000 + i,
+        }
+        for i in range(16)
+    }
+    body = NativeCatalogRequest(members=members)
+    with pytest.raises(CatalogBuildError, match="16"):
+        build_native_bundle(parse(), body, Settings(_env_file=None))
+    members.pop("Consumer_15")
+    bundle = build_native_bundle(
+        parse(), NativeCatalogRequest(members=members), Settings(_env_file=None)
+    )
+    assert len(bundle.config["applications"]) == 16
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "duplicate_name",
+        "duplicate_id",
+        "zero",
+        "wildcard",
+        "missing_id",
+        "missing_default",
+        "wrong_routing",
+        "object",
+    ],
+)
+def test_native_application_configuration_is_validated_before_start(
+    tmp_path, native_runtime, change
+):
+    bundle = build_native_bundle(parse(), request(), Settings(_env_file=None))
+    config = bundle.config
+    if change in {"duplicate_name", "duplicate_id"}:
+        config["applications"].append(
+            {
+                "name": "arxml_partner" if change == "duplicate_name" else "other",
+                "id": "0x2202" if change == "duplicate_name" else "0x1101",
+            }
+        )
+    elif change in {"zero", "wildcard"}:
+        config["applications"][0]["id"] = "0x0000" if change == "zero" else "0xffff"
+    elif change == "missing_id":
+        config["applications"][0].pop("id")
+    elif change == "missing_default":
+        config["applications"][0]["name"] = "other"
+    elif change == "wrong_routing":
+        config["routing"] = "other"
+    else:
+        config["applications"] = {"name": "arxml_partner", "id": "0x1101"}
+    catalog_path, config_path = bundle.write(tmp_path / change)
+    result = subprocess.run(
+        [
+            native_runtime,
+            "run",
+            "--name",
+            "arxml_partner",
+            "--catalog",
+            str(catalog_path),
+            "--config",
+            str(config_path),
+            "-p",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "native.main" in result.stdout + result.stderr
+    assert "native.ready" not in result.stdout
 
 
 @pytest.mark.parametrize(

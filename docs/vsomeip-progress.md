@@ -615,3 +615,58 @@
   最新版发布源、IPv6 分片、选项专用语义/跨片复制位一致性、完整 ARXML/OEM 与长稳仍未完成。
   Ruff、shell/YAML 语法、版本一致性和 diff 空白检查通过；本机没有 pwsh，不能宣称本轮
   Windows 脚本已实际执行或通过语法解析。代码、测试与记录提交推送，新远程 CI 单独观察。
+
+## 2026-10-01 同进程独立 application 与 SAT 身份隔离
+
+- 上一分析轮仅只读核对，没有代码进展；本轮继续完整目标，处理一个二进制内多个逻辑
+  client 原先共用线上 Client ID 的边界。核对固定 vsomeip 3.5.10 的公共 application/runtime
+  API 和 SAT 原始 Operator/base_partner 后，使用具名 application，不自写身份/订阅协议栈。
+  新 ApplicationStack 模块负责 init/start/stop/join；默认路由宿主最后退出。
+- 成员字典可选择已声明 application；ARXML/from_arxml 与服务 API 成对接收名称/ID，生成
+  所有声明并保持 SAT 的标准成员键、控制帧和方法/事件调用形式。旧字典/tuple 默认共享原
+  application，编号 client 不自动等同于独立线上身份。页面可显式选择独立成员身份，生成
+  宿主 ID +1/+2，状态展示原生返回的实际名称/ID；纯配置函数验证边界、保留 ID 和默认兼容。
+- 消息、可用状态、订阅引用计数、待响应请求和停止操作按 application 隔离；响应消费请求槽
+  前检查所属 application、服务、实例、方法、版本及传输。停止成员取消并删除其请求槽，
+  保留具名上下文到进程退出，以免成员重启重置会话。16 个上下文上限包括路由宿主，不能
+  声称 16 位 Session ID 永不回绕。重复 server、运行中切换身份/部署和未声明选择明确拒绝。
+  Python 服务 API 将子 application 纳入跨会话名称/ID 冲突和 0x1101 保留检查；原生状态和
+  监控保留 application 身份，不把标准通知 Client ID 0 冒充 application ID。
+- 新增 10 项 UDP/TCP veth 用例，使用具名 provider 和两个 client，覆盖并发、取消订阅、
+  停止/重启、拒绝非法身份及迟到响应。独立 oracle 不导入发送 fixture，专用端口手工列出
+  黄金向量，核对 0x7741/0x7742 两个线上 Client ID 和 114 对请求响应的会话、方向与字节；
+  UDP/TCP 均与产品原生 PCAP 导入交叉核对。真实副本篡改身份/会话/Payload、删包或重复
+  必须失败，新增 5 项严格审计，未放宽原 932 黄金向量、16 分片和 40 选项矩阵。
+- 首轮 focused-evidence 在客户端夹具没有 services 时失败，retry-evidence 又因编号成员
+  未显式指定基础 service/name 不能按 SAT 标准键找到成员；均保留异常堆栈与失败抓包。
+  修正夹具而不改生产命名规则后，applications-focused-verified-evidence 的 10 项通过，
+  1880 帧、114 对方法请求响应及 4 条通知独立/原生一致，内核采集丢包 0。服务 API 测试
+  原误用 DELETE 停止路由，改为现有 POST /stop，关闭后同身份的新进程可重新初始化。
+- applications-source-evidence 通过 130+90=220 虚拟网、22 审计、12 权限/清理、286 后端，
+  逐份 JUnit 零失败/错误/跳过；19285 帧/3807 条消息，原矩阵与新增 114 对请求响应均核对
+  完整，采集内核丢包 0。监控身份字段补齐后单独重跑后端；最初命令漏启容器 IPv6 导致
+  ::1 bind 两项失败，保留 backend-regression-final.xml；正确参数的
+  backend-regression-final-ipv6.xml 286 项通过。未修改宿主网卡、未跳过 IPv6 测试。
+  vsomeip TCP 停止时 accept 回调的 Operation canceled 日志原样保留，不称全部日志无 error；
+  新成员夹具确认自有原生进程正常退出码 0。
+- 最终镜像的不挂产品源码安装包 applications-installed-evidence 同样通过 220 虚拟网、
+  22 审计、12 权限/清理及 286 后端，JUnit 零失败/错误/跳过；18751 帧/3870 条消息，
+  原矩阵与新增两身份的 114 对方法请求响应、4 条通知核对完整，采集内核丢包 0。
+  全部产品模块来源经 site-packages 校验，测试与证据之外没有挂载源码，未设置 PYTHONPATH。
+- 最终产品镜像 someip-agent-vsomeip:applications-test SHA-256 为
+  0a7bd959047aaa66f83c5e2a9e7558435d26864c3e881163bc97d9de9cf51e0a；源码和镜像的二进制
+  一致为 6ac843c9ef6871576f2d40aab43df02d7792639425af3c608dc2dc1e2c3dbd92。
+  最终 wheel 构建 SHA 为 b4a36ba05d52260ecb5699eed81059be93bea0327b6657238ddacd60f47b538e，
+  不复用旧 Python 产品哈希。两项 CTest 通过，固定 vsomeip/libtins 来源及补丁保持不变。
+- applications-performance-evidence 的最终安装包独立完成 16 阶段，1600 RPC 成功、3200
+  请求/响应及 13193 条事件逐序号核对完整，16 份采集内核丢包均为 0，另有 12 权限/清理和
+  10 统计口径回归通过。该负载沿用默认 application，不冒充双身份长稳；本次 10 ms 原生
+  UDP 仅 291 条/约 96.9 条每秒，RPC P99 14.21–51.98 ms，低频抖动及完整 Python/IPC
+  开销均保留，不因短测 verified 就宣称周期、性能或硬实时达标。详情见 docs/performance.md。
+- 本轮修改文件 Ruff 格式及检查、前端类型检查/构建、配置适配器、版本一致性及 diff 空白
+  通过。全目录格式检查发现四份未修改旧测试的既有格式差异，保留不做无关机械改写。
+- 34cba18 的远程 run 36821436040 已终态：Linux 原生/安装包/短负载、前后端通过，Windows
+  在 build-native.ps1 第 28 行因 CaptureTriplet/OverlayTriplets/Packet_ROOT 未配置拒绝。
+  未绕过授权 SDK/null 捕获门禁。Windows 实际编译、驱动、安装升级、正式签名最新版源、
+  完整 SAT 厂商心跳、更多应用数量/多实例/故障长稳、IPv6 分片和完整 ARXML/OEM 仍需继续；
+  整体目标保持 active，不能把本轮限定矩阵当成全部功能和发布完成。

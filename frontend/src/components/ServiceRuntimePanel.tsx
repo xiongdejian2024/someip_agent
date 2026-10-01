@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, describeApiError } from '../api/client'
 import { logError, logInfo } from '../api/logger'
-import { byteOrderOverride, type ByteOrderSelection } from '../api/serviceConfig'
+import { byteOrderOverride, memberApplication, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
 import type { NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
 import { Icon } from './Icon'
@@ -12,6 +12,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const [transport, setTransport] = useState<'internal' | 'udp' | 'tcp'>('internal')
   const [byteOrder, setByteOrder] = useState<ByteOrderSelection>('arxml')
   const [applicationId, setApplicationId] = useState('0x3401')
+  const [independentApplications, setIndependentApplications] = useState(false)
   const [peer, setPeer] = useState('10.77.0.2')
   const [port, setPort] = useState('30520')
   const [instance, setInstance] = useState('')
@@ -81,13 +82,15 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     const appId = Number(applicationId)
     if (!Number.isInteger(instanceId) || !instances.includes(instanceId)) throw new Error('请选择已部署的实例')
     if (!Number.isInteger(appId) || appId <= 0 || appId >= 0xffff) throw new Error('应用 ID 必须为 1 至 65534 的整数，可使用十六进制')
+    const routingName = `web_${crypto.randomUUID().replaceAll('-', '')}`
     const created = await api.startServiceSession({
-      application_name: `web_${crypto.randomUUID().replaceAll('-', '')}`,
+      application_name: routingName,
       application_id: appId,
       members: {
         [selected.name]: {
           service: selected.path, deployment_path: selected.deploymentPath, role, transport,
           instance_id: instanceId, ...byteOrderOverride(byteOrder),
+          ...memberApplication(routingName, appId, independentApplications, 1),
           ...(transport === 'internal' ? {} : { peer_host: peer, port: Number(port) }),
         },
         ...(transport === 'internal' && includeInternalPeer ? {
@@ -95,6 +98,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
             service: selected.path, deployment_path: selected.deploymentPath,
             role: role === 'client' ? 'server' as const : 'client' as const,
             transport: 'internal' as const, instance_id: instanceId, ...byteOrderOverride(byteOrder),
+            ...memberApplication(routingName, appId, independentApplications, 2),
           },
         } : {}),
       },
@@ -127,6 +131,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       <label>传输<select value={transport} onChange={event => setTransport(event.target.value as typeof transport)}><option value="internal">内部隔离（不发 SD）</option><option value="udp">UDP 在线</option><option value="tcp">TCP 在线</option></select></label>
       <label>部署实例<select value={instance || String(instances[0] ?? '')} onChange={event => setInstance(event.target.value)}>{instances.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>应用 ID<input value={applicationId} onChange={event => setApplicationId(event.target.value)} /></label>
+      <label className="service-runtime-checkbox"><input type="checkbox" checked={independentApplications} onChange={event => setIndependentApplications(event.target.checked)} />各成员使用独立 application（宿主 ID + 1/+2）</label>
       <label>序列化字节序<select value={byteOrder} onChange={event => setByteOrder(event.target.value as ByteOrderSelection)}><option value="arxml">遵循 ARXML（缺省标量大端）</option><option value="big">明确大端（冲突时拒绝）</option><option value="little">明确小端（冲突时拒绝）</option></select></label>
       {transport === 'internal' && <label className="service-runtime-checkbox"><input type="checkbox" checked={includeInternalPeer} onChange={event => setIncludeInternalPeer(event.target.checked)} />同一会话加入内部测试对端</label>}
       {transport !== 'internal' && <><label>授权对端 IPv4<input value={peer} onChange={event => setPeer(event.target.value)} /></label><label>服务端口<input value={port} onChange={event => setPort(event.target.value)} /></label></>}
@@ -138,7 +143,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     <div className="service-runtime-sessions">{sessions.map(item => <article key={item.id}>
       <button className={`button ghost${item.id === sessionId ? ' active' : ''}`} onClick={() => { setSessionId(item.id); setMemberKey(item.members[0]?.key ?? ''); setAction(item.members[0]?.role === 'server' ? 'notify' : 'call'); setFunctionName(''); setPending([]) }}>{item.application_name} · ID 0x{item.application_id.toString(16)} · {item.running ? `进程运行 PID ${item.pid}` : item.active ? '故障（需释放）' : '已停止'}</button>
       <small>模型 {item.model_id} · SHA-256 {item.source_sha256 ?? '未知'}</small>
-      {item.members.map(value => <small key={value.key}>{value.key} · {value.transport} · {value.state} · socket {value.connected ? '已连接' : '已断开'}{value.last_error ? ` · ${value.last_error}` : ''}</small>)}
+      {item.members.map(value => <small key={value.key}>{value.key} · application {value.application_name ?? '等待原生状态'} · ID {value.application_id == null ? '未知' : `0x${value.application_id.toString(16)}`} · {value.transport} · {value.state} · socket {value.connected ? '已连接' : '已断开'}{value.last_error ? ` · ${value.last_error}` : ''}</small>)}
       {item.last_error && <span className="error">{item.last_error}</span>}
       {item.active && <button className="button secondary" disabled={busy} onClick={() => void run('停止原生服务会话', async () => { await api.stopServiceSession(item.id); setSessions(await api.serviceSessions()); setPending([]) })}><Icon name="stop" />停止并释放会话</button>}
     </article>)}</div>

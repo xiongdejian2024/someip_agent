@@ -9,6 +9,7 @@ from pathlib import Path
 
 import dpkt
 import pytest
+from audit_applications import audit as audit_applications
 from audit_offline import audit as audit_native
 from audit_pcap import audit, composite_golden, composite_payload
 
@@ -41,6 +42,46 @@ def write_copy(path, frames, link_type, packet):
         writer.writepkt(packet, ts=frames[0][0])
         for timestamp, frame in frames:
             writer.writepkt(frame, ts=timestamp)
+
+
+@pytest.mark.parametrize(
+    "change", ["client", "session", "payload", "missing", "duplicate"]
+)
+def test_application_audit_rejects_tampered_real_messages(tmp_path, captured, change):
+    frames, link_type, _ = captured
+    changed, modified = [], False
+    for timestamp, frame in frames:
+        network = dpkt.ethernet.Ethernet(frame).data
+        if (
+            not modified
+            and isinstance(network, dpkt.ip.IP)
+            and isinstance(network.data, dpkt.udp.UDP)
+        ):
+            layer = network.data
+            if layer.dport == 30740 and len(layer.data) == 18 and layer.data[14] == 0:
+                modified = True
+                if change == "missing":
+                    continue
+                if change == "duplicate":
+                    changed.append((timestamp, frame))
+                else:
+                    raw = bytearray(frame)
+                    offset = 14 + network.hl * 4 + 8
+                    raw[
+                        offset + {"client": 9, "session": 11, "payload": 17}[change]
+                    ] ^= 1
+                    frame = bytes(raw)
+        changed.append((timestamp, frame))
+    assert modified, "缺少真实两身份请求，不能用空测试验收审计器"
+    path = tmp_path / (change + ".pcap")
+    with path.open("wb") as output:
+        writer = dpkt.pcap.Writer(
+            output, linktype=link_type, snaplen=max(len(frame) for _, frame in changed)
+        )
+        for timestamp, frame in changed:
+            writer.writepkt(frame, ts=timestamp)
+    with pytest.raises(AssertionError, match="Client ID|黄金|会话"):
+        audit_applications(path, tmp_path)
 
 
 def collision_packet(kind):
