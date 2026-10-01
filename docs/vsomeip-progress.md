@@ -931,3 +931,53 @@
 - 上一提交386428b 的远端 run 36846054968 已确认 completed/success：前端、后端、原生、
   虚拟网、安装包、短负载、Linux 发行包、真实签名升级/回滚及无 Python/SDK 运行全通过；
   Windows 按配置 skipped。本轮修改的远端状态需以新提交/run 为准，旧绿不代表新提交已绿。
+
+## 2026-10-01：CP 4.4.0 可选前缀与 VSA_LINEAR 源字典
+
+- 分类：本轮实质进展。上一轮仅完成只读分析，就持续重构目标没有实现或验收推进；本轮按
+  明确 continuation 恢复实施。起始三个未提交 ARXML 文件为此前本任务的改动，已逐项核对，
+  没有撤销用户文件；未使用子智能体，Bootes/Windows 排除，未改真实车辆网卡或源配置。
+- 沿用固定 vsomeip/lxml，不新增生产依赖。Implementation VSA_LINEAR 从完整类型关系解析
+  size indicator、payload 源名/类型及上界，归一成附源字典元数据的变长数组，不当作普通
+  struct 写双前缀。CP 4.4.0 的长度字段类型来自 indicator；字典里是元素数、wire 上是字节数。
+  仅明确 AUTOSAR_00046.xsd 的可选普通 struct/fixed-array 前缀缺省为零，未知版本不套默认。
+- 原生 Codec 保留源字典形状，计数必须是非负整数并等于列表长度；数组字节前缀包含实际元素
+  编码，不另写 count。空数组、非末尾绝对对齐、截断、非法计数、上界、错误元数据、未知
+  profile 与 Application/Implementation profile 冲突均有拒绝路径。其他 VSA profile/多维
+  profile、超大声明上界与未知布局仍未支持，不能用 AP fixture 代替车型 header/session 验收。
+- 57 项类型/Classic/复合布局专项通过。初期新单元夹具把 SHORT-NAME 节点纳入类型索引导致
+  覆盖实体路径，随后仅修正夹具索引与局部引用变更范围；错误堆栈保留在工具输出。
+  原生构建核对固定源码/补丁后，两项 CTest 通过，覆盖双字节序与1/2/4字节 VSA 黄金前缀。
+- 使用 agent-reach 的 gh 路线核对原 run 36849453663：已 completed/success，前后端、原生/
+  虚拟网/安装包/短负载及 Linux 发行/签名升级回滚/干净运行全部通过，Windows skipped。
+  mcporter 不可用、Jina 超时后查官方 AUTOSAR 索引，不把 PDF 下载失败称为全文阅读。
+- 镜像 someip-agent-vsomeip:vsa-test 为
+  4ea05f4950e4acf8f2352ef2c5ea49052b887012b0bcaabfbce5083688e12297；wheel SHA 为
+  bcd654d96a78a1633c95d0047b47939825eb35a0ac3d4b73dda37f579fbc74f4；原生二进制 SHA 为
+  c2d00cddd44e8fd90c596c14fe8639a017c27cc00e3492a8b30de5da327d2c44。
+  三个解析模块的当前仓库/安装文件 SHA 完全一致，模块来自 site-packages，无产品源码挂载。
+- build/vsa-installed-source-evidence 在 network=none、只读三份原文件和非 root UID 下验证：
+  131 个服务与137定义/3978通信行同名/同 ID，1067成员/2228绑定及177部署错误不变。
+  信号布局错误由此前934降至112（重复引用计数）：62缺失动态数组宽度、23超数组资源门禁、
+  26缺少完整布局绑定、1空结构。新增按信号路径/type_ref 的错误清单和分组，完整异常栈在
+  parse.log；runtime_verified=false，没有激活车型或复制车辆端点。
+- 真实源73个 VSA 类型中63个 uint32 indicator 类型图已解析，10个因上界超过65536拒绝。
+  源中实际存在1048576、150000、3000000上界；后续需分开声明上界与实际 wire/IPC 预算，
+  不以提升一个常量冒充大数组/大包验收。62缺失宽度包含 Application CATEGORY=STRING，
+  其 Implementation 为未标 VSA profile 的 count+ARRAY；需处理正式文本元数据/版本规则，
+  不因字段名相似就当作 VSA_LINEAR。
+- 新增12组 veth VSA 用例覆盖 UDP/TCP、双字节序、三种 indicator 位宽，沿用 SAT 字典启动
+  二进制/socket 初始化，验证 RPC、事件、复合字段读写/通知、空和最大有效数量以及拒绝。
+  黄金审计另加192组手工向量，含错误字节长度和 padding 的反向检查。
+- build/vsa-installed-evidence 首轮实际256功能用例、1316黄金向量及原生导入通过，但审计
+  反向测试4失败/21通过：仍写死旧1124组总数。原失败 JUnit/PCAP 完整保留；修正为
+  原1124+新192=1316，另加4项 VSA 审计回归，没有删测试或放宽实际字节要求。
+  使用同一产品镜像在新目录 build/vsa-verified-evidence 重跑完整安装包流水线。
+- 最终复测通过158+98=256虚拟网、408后端、29+7+9=45审计及12权限/清理；7份 JUnit
+  均零失败/错误/跳过，既有3项后端 warning 保留。24448帧/4914原生消息，1316黄金向量、
+  16分片、40选项、114正常双身份 RPC 对与32恢复对经独立字节审计及原生导入核对，
+  8故障case/16刻意不回答请求保留，采集内核丢包0。源解析与第一次失败证据均未覆盖。
+- Ruff lint、变更文件格式检查、版本一致性、前端类型/服务适配器、shell/diff 检查通过。
+  全后端 format-check 另发现3个既有未格式化测试文件，未做无关修改。本轮未测性能/长稳；
+  原生迁移、Classic/OEM header/session/文本类型、大数组、IPv6分片、规模长稳以及正式信任
+  升级源和真实升级按钮验收仍需继续，完整目标保持 active。

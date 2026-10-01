@@ -97,6 +97,28 @@ def test_missing_composite_length_does_not_guess_from_numeric_message_type():
         resolver.apply_layout(SCHEMA, bindings)
 
 
+@pytest.mark.parametrize("schema_file", ["AUTOSAR_00046.xsd", "AUTOSAR_00048.xsd", "unknown.xsd"])
+def test_optional_fixed_length_defaults_only_for_identified_cp44_schema(schema_file):
+    root, props, _, bindings = inputs()
+    root.set(
+        "{http://www.w3.org/2001/XMLSchema-instance}schemaLocation",
+        f"http://autosar.org/schema/r4.0 {schema_file}",
+    )
+    props.remove(props.xpath("./*[local-name()='SIZE-OF-STRUCT-LENGTH-FIELDS']")[0])
+    props.remove(props.xpath("./*[local-name()='SIZE-OF-ARRAY-LENGTH-FIELDS']")[0])
+    schema = deepcopy(SCHEMA)
+    schema["fields"][1].pop("max_length")
+    schema["fields"][1]["length"] = 3
+    resolver = ClassicReferenceResolver(root, _element_path)
+    if schema_file == "AUTOSAR_00046.xsd":
+        deployed = resolver.apply_layout(schema, bindings)
+        assert deployed["length_bytes"] == deployed["fields"][1]["length_bytes"] == 0
+        assert deployed["fields"][2]["length_bytes"] == 0
+    else:
+        with pytest.raises(WireTypeError, match="LENGTH-FIELD"):
+            resolver.apply_layout(schema, bindings)
+
+
 def test_missing_classic_alignment_cannot_borrow_ap_default():
     root, _, resolver, bindings = inputs()
     alignment = root.xpath("//*[local-name()='ALIGNMENT']")[0]

@@ -16,6 +16,8 @@ def apply_layout(
     alignment: str | None,
     struct_width: str | None,
     array_width: str | None,
+    *,
+    classic_cp44: bool = False,
 ) -> dict[str, Any]:
     """共享显式布局：长度以字节计，对齐属性以 bit 计，不覆盖源类型图。"""
     orders = {"MOST-SIGNIFICANT-BYTE-FIRST": "big", "MOST-SIGNIFICANT-BYTE-LAST": "little"}
@@ -37,6 +39,18 @@ def apply_layout(
         kind = node["type"]
         if kind in {"array", "struct"}:
             value = array_width if kind == "array" else struct_width
+            if classic_cp44:
+                if kind == "array" and "vsa" in node:
+                    # CP 4.4.0 的动态长度类型来自 size indicator，不套用后续版本默认32位。
+                    indicator_width = int(node["vsa"]["size_type"][4:]) // 8
+                    if value is not None and value != str(indicator_width):
+                        raise WireTypeError(
+                            "VSA_LINEAR 长度字段与 CP 4.4.0 size indicator 类型冲突"
+                        )
+                    value = str(indicator_width)
+                elif value is None and (kind == "struct" or "length" in node):
+                    # 未配置可选长度字段：固定结构/数组按类型深度优先连续序列化。
+                    value = "0"
             if value not in {"0", "1", "2", "4"}:
                 raise WireTypeError(f"复合类型缺少或非法 {kind} LENGTH-FIELD: {value}")
             node["length_bytes"] = int(value)

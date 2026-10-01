@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import logging
+from collections import Counter
 from pathlib import Path
 
 from someip_agent.arxml.parser import ArxmlParser
@@ -80,6 +81,20 @@ def audit_names(model, definitions, communications):
         "wire_schema_error_count": sum(
             signal.wire_error is not None for signal in signals
         ),
+        "wire_schema_error_groups": dict(
+            Counter(
+                signal.wire_error for signal in signals if signal.wire_error is not None
+            )
+        ),
+        "wire_schema_errors": [
+            {
+                "signal_path": signal.path,
+                "type_ref": signal.type_ref,
+                "error": signal.wire_error,
+            }
+            for signal in signals
+            if signal.wire_error is not None
+        ],
         "classic_bound_member_count": sum(
             bool(member.classic_bindings)
             for service in model.services

@@ -9,6 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from lxml import etree
 from soa_partner.src.base_partner import S2sBaseClass
 from soa_partner.src.Operator import SOAOperator
 from someip_agent.arxml.parser import ArxmlParser
@@ -33,7 +34,7 @@ WIDTHS = (0, 1, 2, 4)
 @pytest.mark.parametrize("struct_width", WIDTHS)
 @pytest.mark.parametrize("array_width", WIDTHS)
 def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
-    transport, byte_order, struct_width, array_width, alignment=8
+    transport, byte_order, struct_width, array_width, alignment=8, vsa_bits=None
 ):
     port = (
         (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
@@ -45,6 +46,27 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
     content = (
         WORKSPACE / "backend/tests/fixtures/composite_service.arxml"
     ).read_bytes()
+    value = deepcopy(VALUE)
+    if vsa_bits is not None:
+        port = (
+            30900
+            + (transport == "tcp")
+            + 2 * (byte_order == "little")
+            + 4 * (8, 16, 32).index(vsa_bits)
+        )
+        root = etree.fromstring(content)
+        extra = etree.fromstring(
+            (WORKSPACE / "backend/tests/fixtures/vsa_type.xml").read_bytes()
+        )
+        extra.xpath(".//*[local-name()='BASE-TYPE-SIZE']")[0].text = str(vsa_bits)
+        root.xpath("//*[local-name()='AR-PACKAGE']/*[local-name()='ELEMENTS']")[
+            0
+        ].extend(extra)
+        for reference in root.xpath("//*[local-name()='IMPLEMENTATION-DATA-TYPE-REF']"):
+            if reference.text == "/Composite/FixedWords":
+                reference.text = "/Composite/LinearWords"
+        content = etree.tostring(root)
+        value["samples"] = {"validElements": 2, "words": value["samples"]}
     content = content.replace(b"<ALIGNMENT>8", f"<ALIGNMENT>{alignment}".encode())
     if byte_order == "little":
         content = content.replace(
@@ -138,8 +160,8 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
         key = "EnvelopeService_client"
         assert client.wait_for_service_reconnect(key, timeout=10)
         calls = []
-        state = deepcopy(VALUE)
-        changed = {**deepcopy(VALUE), "tag": 8}
+        state = deepcopy(value)
+        changed = {**deepcopy(value), "tag": 8}
 
         def reply(server_key, message):
             if message["action"] == "request":
@@ -163,30 +185,30 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
 
         server.register_callback("EnvelopeService_server", reply)
         assert client.send_request_and_return_resp(
-            key, "Transform", {"payload": VALUE}, timeout=3
-        ) == {"out": {"payload": VALUE}}
+            key, "Transform", {"payload": value}, timeout=3
+        ) == {"out": {"payload": value}}
         assert client.send_request_and_return_resp(
             key, "MappedScalar", {"value": 0x1234}, timeout=3
         ) == {"out": {"value": 0x1234}}
         # 不把 START 当 SD 订阅完成；真实周期通知必须交付后停止，不能用历史默认值通过。
         server.send_event_notify_thread_start(
-            "EnvelopeService_server", "EnvelopeChanged", VALUE, 0.05
+            "EnvelopeService_server", "EnvelopeChanged", value, 0.05
         )
         assert client.chk_notify(
-            key, "EnvelopeChanged", VALUE, timeout=5, fuzz_match=False
+            key, "EnvelopeChanged", value, timeout=5, fuzz_match=False
         )
         server.send_event_notify_thread_stop("EnvelopeService_server")
         # 先以真实字段通知证明订阅就绪，再对一次性 Setter 更新做断言，不重试业务。
         server.send_event_notify_thread_start(
-            "EnvelopeService_server", "EnvelopeState", VALUE, 0.05
+            "EnvelopeService_server", "EnvelopeState", value, 0.05
         )
         assert client.chk_notify(
-            key, "EnvelopeState", VALUE, timeout=5, fuzz_match=False
+            key, "EnvelopeState", value, timeout=5, fuzz_match=False
         )
         server.send_event_notify_thread_stop("EnvelopeService_server")
         assert client.send_request_and_return_resp(
             key, "GetEnvelopeState", {}, timeout=3
-        ) == {"out": VALUE}
+        ) == {"out": value}
         assert client.send_request_and_return_resp(
             key, "SetEnvelopeState", {"EnvelopeState": changed}, timeout=3
         ) == {"out": changed}
@@ -197,7 +219,7 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
             key, "GetEnvelopeState", {}, timeout=3
         ) == {"out": changed}
         expected_calls = [
-            ("Transform", {"payload": VALUE}),
+            ("Transform", {"payload": value}),
             ("MappedScalar", {"value": 0x1234}),
             ("GetEnvelopeState", {}),
             ("SetEnvelopeState", {"EnvelopeState": changed}),
@@ -205,12 +227,32 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
         ]
         assert calls == expected_calls
         # 非法固定长度/上界必须在原生编码阶段拒绝，不能产生伪成功或默认重放。
-        for field, invalid in (
+        invalid_values = [
             ("samples", [1]),
             ("bytes", [1, 2, 3, 4]),
             ("matrix", [[1, 2], [4, 5, 6]]),
-        ):
-            bad = {**deepcopy(VALUE), "tag": 99, field: invalid}
+        ]
+        if vsa_bits is not None:
+            for words in ([], [1, 2, 3]):
+                variant = {
+                    **deepcopy(value),
+                    "samples": {"validElements": len(words), "words": words},
+                }
+                assert client.send_request_and_return_resp(
+                    key, "Transform", {"payload": variant}, timeout=3
+                ) == {"out": {"payload": variant}}
+                expected_calls.append(("Transform", {"payload": variant}))
+            invalid_values.extend(
+                ("samples", invalid)
+                for invalid in (
+                    {"validElements": 1, "words": [1, 2]},
+                    {"validElements": -1, "words": []},
+                    {"validElements": 4, "words": [1, 2, 3, 4]},
+                    {"validElements": True, "words": [1]},
+                )
+            )
+        for field, invalid in invalid_values:
+            bad = {**deepcopy(value), "tag": 99, field: invalid}
             client.send_method_request(key, "Transform", {"payload": bad})
             deadline = time.monotonic() + 3
             while True:
@@ -245,4 +287,15 @@ def test_arxml_variable_alignment_with_absolute_prefix_offsets_over_veth(
     # 同时验证 RPC、事件、字段 Getter/Setter/通知；保留相同 SAT 字典初始化入口。
     test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
         transport, byte_order, struct_width, array_width, alignment
+    )
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+@pytest.mark.parametrize("byte_order", ["big", "little"])
+@pytest.mark.parametrize("bits", [8, 16, 32])
+def test_arxml_vsa_source_dictionary_rpc_event_field_and_rejections_over_veth(
+    transport, byte_order, bits
+):
+    test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
+        transport, byte_order, 0, bits // 8, 64, bits
     )

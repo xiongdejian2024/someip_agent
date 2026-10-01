@@ -92,6 +92,53 @@ int main() {
         auto text_values=Json::array({"a","bc"});
         require(hex(Codec::encode(strings,text_values))=="0009016100000000026263","变长元素数组黄金字节错误");
         require(Codec::decode(strings,Codec::encode(strings,text_values))==text_values,"变长元素数组对齐解码失败");
+        // 字典里的 indicator 是元素数量；线上只写一个数组字节长度，不序列化 count。
+        for(auto width:{1,2,4})for(auto little:{false,true}) {
+            Json vsa={{"type","array"},{"max_length",3},{"length_bytes",width},
+                {"alignment_bytes",8},{"byte_order",little?"little":"big"},
+                {"element",Json{{"type","uint16"},{"byte_order",little?"little":"big"}}},
+                {"vsa",Json{{"profile","VSA_LINEAR"},{"size_name","validElements"},
+                    {"payload_name","words"},{"size_type","uint"+std::to_string(width*8)}}}};
+            Json value={{"validElements",2},{"words",Json::array({0x1234,0xabcd})}};
+            auto expected=unhex(little?"3412cdab":"1234abcd");
+            Bytes prefix(width,0);prefix[little?0:width-1]=4;
+            expected.insert(expected.begin(),prefix.begin(),prefix.end());
+            require(Codec::encode(vsa,value)==expected,"VSA 字节长度与元素数量混淆或双前缀");
+            require(Codec::decode(vsa,expected)==value,"VSA 未保留源字典字段");
+            Json envelope={{"type","struct"},{"fields",Json::array({
+                Json{{"name","tag"},{"type","uint8"}},Json(vsa),
+                Json{{"name","tail"},{"type","uint8"}}
+            })}};
+            envelope["fields"][1]["name"]="data";
+            Json nested={{"tag",7},{"data",value},{"tail",9}};
+            auto golden=expected;golden.insert(golden.begin(),7);
+            golden.insert(golden.end(),(-(16+golden.size()))%8,0);golden.push_back(9);
+            require(Codec::encode(envelope,nested)==golden,"VSA 非末尾绝对对齐错误");
+            require(Codec::decode(envelope,golden)==nested,"VSA 嵌套字典解码错误");
+            Json empty={{"validElements",0},{"words",Json::array()}};
+            require(Codec::decode(vsa,Codec::encode(vsa,empty))==empty,"空 VSA 往返失败");
+            nested["data"]=empty;
+            require(Codec::decode(envelope,Codec::encode(envelope,nested))==nested,"空 VSA 非末尾对齐失败");
+            for(auto invalid:{Json(-1),Json(1),Json(3),Json(256),Json(true),Json(2.0),Json("2")}) {
+                auto bad=value;bad["validElements"]=invalid;
+                rejects([&]{Codec::encode(vsa,bad);});
+            }
+            auto missing=value;missing.erase("validElements");
+            rejects([&]{Codec::encode(vsa,missing);});
+            rejects([&]{Codec::encode(vsa,Json::array({0x1234,0xabcd}));});
+            auto too_many=value;too_many["validElements"]=4;too_many["words"]=Json::array({1,2,3,4});
+            rejects([&]{Codec::encode(vsa,too_many);});
+            auto truncated=expected;truncated.pop_back();
+            rejects([&]{Codec::decode(vsa,truncated);});
+            auto wrong_length=expected;wrong_length[little?0:width-1]=3;
+            rejects([&]{Codec::decode(vsa,wrong_length);});
+            auto fixed_vsa=vsa;fixed_vsa["length"]=2;
+            rejects([&]{Codec::encode(fixed_vsa,value);});
+            rejects([&]{Codec::decode(fixed_vsa,expected);});
+            auto unknown=vsa;unknown["vsa"]["profile"]="VSA_SQUARE";
+            rejects([&]{Codec::encode(unknown,value);});
+            rejects([&]{Codec::decode(unknown,expected);});
+        }
         rejects([]{number(Json(-1));});
         rejects([]{bounded_number(Json(65536),65535,"service_id");});
         std::cout<<Json{{"message","原生编解码基础类型、字节序、数组及异常边界测试通过"}}.dump()<<std::endl;

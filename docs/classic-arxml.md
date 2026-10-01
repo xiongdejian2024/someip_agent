@@ -48,7 +48,7 @@ Classic 的完整头/session 部署与互操作验证，不能用 AP 对齐用�
 Classic 解析器按绑定方向读取 I-SIGNAL props 和唯一 serializer 的 description；要求明确
 SOMEIP 1.0.0 / SERIALIZER / 64-bit header，不把该 header 加入业务 payload。
 请求与响应可以使用不同布局；字节序、显式结构/数组长度字段传播到嵌套类型，源模型不被修改。
-缺失长度字段、多个变体、多 transformer、非零 START-POSITION、未知/TLV/细粒度属性仍拒绝。
+未识别版本的缺失长度字段、多个变体、多 transformer、非零 START-POSITION、未知/TLV/细粒度属性仍拒绝。
 这里没有按 MESSAGE-TYPE 数字或 SR 接口类型推导报文类型，也没有解除服务部署门禁。
 
 共用原生 Codec 已支持 32/64-bit 对齐：以整条消息起点（含 16 字节 SOME/IP 头）计算，
@@ -56,6 +56,25 @@ SOMEIP 1.0.0 / SERIALIZER / 64-bit header，不把该 header 加入业务 payloa
 结构/数组长度不计算自己的前缀，包含其内部实际编码字节；外部 padding 不混入该长度。
 这些规则依据上述 4.4.0 规范的 00037、00218、00259、00263；AP 显式属性也复用相同 Codec。
 编码写零 padding，解码按布局跳过 padding，不把固定数据强制对齐。
+
+## CP 4.4.0 的可选前缀与 VSA_LINEAR
+
+仅当源 schemaLocation 明确为 r4.0 / AUTOSAR_00046.xsd 时，未配置可选 struct/fixed-array
+长度属性按无前缀处理；未知版本仍要求明确宽度。不是把所有动态数组默认成四字节。
+依据为 00042 的深度优先顺序及 00216/00220 的可选前缀条件。
+
+Implementation 的 VSA_LINEAR 必须为有序 size indicator + ARRAY payload 的 STRUCTURE。
+类型解析保留二者源 SHORT-NAME、整数位宽和唯一变长维度上界，不按字段名字猜语义。
+CP 4.4.0 的 SWS_SomeIpXf_00076/00234 区分字典中有效元素个数与线上有效数据字节长度；
+长度字段类型来自 size indicator。字典例 `{"validElements":2,"words":[4660,43981]}` 的
+uint16 payload 长度是 4 字节，不是 2，也不另写一个 count 字段。
+依据为 [CP 4.4.0 Transformer](https://www.autosar.org/fileadmin/standards/R18-10_R4.4.0_R1.5.0/CP/AUTOSAR_SWS_SOMEIPTransformer.pdf)
+及 [Software Component Template 的 TPS_SWCT_01647/01649](https://www.autosar.org/fileadmin/standards/R18-10_R4.4.0_R1.5.0/CP/AUTOSAR_TPS_SoftwareComponentTemplate.pdf)。
+
+原生编码要求计数是非负整数且等于列表实际长度；解码从字节长度重建有效个数与源字典形状。
+未知 profile、错误顺序/元数据、有符号 indicator、Application/Implementation profile 冲突、
+多维 profile、计数不一致或超上界均拒绝。当前 ARRAY-SIZE 资源门禁仍为 1–65536；
+真实文件中更大的数组未称为支持。AP 显式属性继续使用其明确长度宽度，不套 CP 默认规则。
 
 原生 CTest 包含绝对偏移、空数组、末尾变长、固定成员不补齐及变长元素数组黄金字节。
 `backend/tests/test_classic_layout.py` 验证真实类型/映射链上的嵌套布局、call/return 独立字节序
@@ -70,6 +89,8 @@ SOMEIP 1.0.0 / SERIALIZER / 64-bit header，不把该 header 加入业务 payloa
 `native/tests/audit_service_names.py` 在核对源名称时同时导出完整 Classic 绑定和部署错误，
 仍返回 `runtime_verified=false`。它只读，不激活车型/版本，不迁移车辆 IP/VLAN。
 当前真实 V6.12.0 与 H47A/V_6_12_0 的 131 个服务名/ID 一致，1067 个成员保留 2228 条引用
-绑定；本轮 `build/alignment-source-evidence/names.json` 重新核对同样的三份源文件，934 个
-重复引用计数的信号布局错误仍未消除，缺失复合长度字段的完整堆栈在 parse.log。
+绑定。早期 alignment-source-evidence 的934条布局错误保留；本轮
+`build/vsa-source-evidence/names.json` 的重复引用计数为112。真实73个 VSA 类型中63个的
+uint32 indicator/类型图已解析，10个因上界超过65536拒绝；其他缺失数组宽度、无绑定布局、
+空结构与重复引用仍有门禁，完整堆栈保存在各自 parse.log，不覆盖旧失败记录。
 源引用/显式布局解析成功不是车型全部服务可用。

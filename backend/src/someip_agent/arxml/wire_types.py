@@ -55,6 +55,9 @@ class WireTypeResolver:
             ):
                 raise WireTypeError(f"DATA-TYPE-MAP 目标不是完整 implementation 类型: {target}")
             schema = self.resolve(target, (*chain, reference))
+            profile = _value(element, "DYNAMIC-ARRAY-SIZE-PROFILE", direct=True)
+            if profile is not None and profile != schema.get("vsa", {}).get("profile"):
+                raise WireTypeError("Application 与 Implementation 动态数组 profile 不一致")
         else:
             raise WireTypeError(f"应用类型 {reference} 需要明确 DATA-TYPE-MAP 和部署布局")
         self._check_size(schema)
@@ -66,6 +69,11 @@ class WireTypeResolver:
         if len(categories) != 1:
             raise WireTypeError("implementation 类型缺少唯一 CATEGORY，不能选择变体")
         category = str(categories[0]).strip()
+        profile = _value(element, "DYNAMIC-ARRAY-SIZE-PROFILE", direct=True)
+        if profile is not None:
+            if category != "STRUCTURE" or profile != "VSA_LINEAR":
+                raise WireTypeError(f"动态数组 profile {profile} / {category} 尚未接通")
+            return self._linear_vsa(element, chain)
         if category in {"VALUE", "TYPE_REFERENCE"}:
             if element.xpath("./*[local-name()='SUB-ELEMENTS']"):
                 raise WireTypeError("基础类型/别名不得混入 SUB-ELEMENTS")
@@ -110,6 +118,52 @@ class WireTypeResolver:
                 "element": self._implementation(child, chain),
             }
         raise WireTypeError(f"复合类型 {category} 尚未实现明确部署布局")
+
+    def _linear_vsa(self, element: etree._Element, chain: tuple[str, ...]) -> dict[str, Any]:
+        """new-world VSA：保留字典字段名，wire 上只有一个以字节计的长度字段。"""
+        children = element.xpath(
+            "./*[local-name()='SUB-ELEMENTS']/*[local-name()='IMPLEMENTATION-DATA-TYPE-ELEMENT']"
+        )
+        if len(children) != 2:
+            raise WireTypeError("VSA_LINEAR 必须依次包含 size indicator 与 payload 两个元素")
+        indicator, payload = children
+        names = [_value(child, "SHORT-NAME", direct=True) for child in children]
+        if any(not name for name in names) or names[0] == names[1]:
+            raise WireTypeError("VSA_LINEAR 字段名缺失或重复")
+        size = self._implementation(indicator, chain)
+        if size["type"] not in {"uint8", "uint16", "uint32"}:
+            raise WireTypeError("VSA_LINEAR size indicator 必须为 uint8/16/32")
+        forbidden = {"ARRAY-SIZE", "ARRAY-SIZE-HANDLING", "ARRAY-SIZE-SEMANTICS"}
+        for child in children:
+            if any(_value(child, tag, direct=True) is not None for tag in forbidden):
+                raise WireTypeError("VSA_LINEAR size/payload 外层不得声明数组维度元数据")
+        if _value(payload, "CATEGORY", direct=True) != "ARRAY":
+            raise WireTypeError("VSA_LINEAR 第二个元素必须为 ARRAY payload")
+        elements = payload.xpath(
+            "./*[local-name()='SUB-ELEMENTS']/*[local-name()='IMPLEMENTATION-DATA-TYPE-ELEMENT']"
+        )
+        if (
+            len(elements) != 1
+            or _value(elements[0], "ARRAY-SIZE-SEMANTICS", direct=True) != "VARIABLE-SIZE"
+        ):
+            raise WireTypeError("VSA_LINEAR payload 必须包含唯一变长维度")
+        if _value(elements[0], "ARRAY-SIZE-HANDLING", direct=True) not in {
+            None,
+            "ALL-INDICES-SAME-ARRAY-SIZE",
+        }:
+            raise WireTypeError("VSA_LINEAR ARRAY-SIZE-HANDLING 不支持")
+        result = self._implementation(payload, chain)
+        if result["element"]["type"] == "array":
+            raise WireTypeError("VSA_LINEAR 不支持多维数组，不能静默改用其他 profile")
+        if result["max_length"] >= 1 << int(size["type"][4:]):
+            raise WireTypeError("VSA_LINEAR size indicator 容量不足以表示最大元素数量")
+        result["vsa"] = {
+            "profile": "VSA_LINEAR",
+            "size_name": names[0],
+            "payload_name": names[1],
+            "size_type": size["type"],
+        }
+        return result
 
     @staticmethod
     def _check_size(schema: dict[str, Any]) -> None:

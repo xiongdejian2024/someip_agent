@@ -142,7 +142,11 @@ def audit(path: Path) -> dict:
                         port = next(
                             (
                                 port
-                                for port in (*range(30530, 30594), *range(30730, 30858))
+                                for port in (
+                                    *range(30530, 30594),
+                                    *range(30730, 30858),
+                                    *range(30900, 30912),
+                                )
                                 if port in (transport.sport, transport.dport)
                             ),
                             None,
@@ -645,7 +649,8 @@ def audit(path: Path) -> dict:
         "sat_recovery_packets": recovery_checks,
         "paused_inflight_replay_absent": ["udp", "tcp"],
         "service_api_packets": service_checks,
-        "arxml_composite_packets": composite_golden(composite_packets),
+        "arxml_composite_packets": composite_golden(composite_packets)
+        + vsa_golden(composite_packets),
         "ipv4_fragment_packets": fragment_checks,
         "ipv4_option_packets": option_audit.verify(),
         "incomplete_segments": incomplete_segments,
@@ -676,7 +681,9 @@ def composite_payload(order, struct_width, array_width, tag=7, alignment=8):
     # 仅变长 bytes 非末尾时补齐，计算基点包括 16 字节头及外层结构长度字段。
     pad = (-(16 + struct_width + len(first))) % (alignment // 8) if array_width else 0
     body = (
-        first + b"\x00" * pad + prefix(6 + 2 * array_width, array_width)
+        first
+        + b"\x00" * pad
+        + prefix(6 + 2 * array_width, array_width)
         + rows
         + prefix(2, struct_width)
         + temperature
@@ -701,7 +708,9 @@ def composite_golden(packets):
     ]
     for order, width, array_width, alignment in profiles:
         payload = composite_payload(order, width, array_width, alignment=alignment)
-        changed = composite_payload(order, width, array_width, tag=8, alignment=alignment)
+        changed = composite_payload(
+            order, width, array_width, tag=8, alignment=alignment
+        )
         for transport in ("udp", "tcp"):
             port = (
                 (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
@@ -768,6 +777,104 @@ def composite_golden(packets):
                         "required_messages": required,
                     }
                 )
+    return checks
+
+
+def vsa_payload(order, width, tag=7, words=(0x1234, 0xABCD)):
+    # 与产品类型图/Codec 独立；indicator 只作字典元素数量，不写入 wire。
+    body = bytes([tag]) + (2 * len(words)).to_bytes(width, order)
+    body += b"".join(word.to_bytes(2, order) for word in words)
+    body += b"\0" * (-(16 + len(body)) % 8)
+    body += (2).to_bytes(width, order) + b"\x01\x02"
+    body += b"\0" * (-(16 + len(body)) % 8)
+    body += (6 + 2 * width).to_bytes(width, order)
+    body += (3).to_bytes(width, order) + b"\x01\x02\x03"
+    body += (3).to_bytes(width, order) + b"\x04\x05\x06"
+    body += (-2).to_bytes(2, order, signed=True)
+    return body.hex()
+
+
+def vsa_golden(packets):
+    checks = []
+    for order in ("big", "little"):
+        for width in (1, 2, 4):
+            payload = vsa_payload(order, width)
+            changed = vsa_payload(order, width, tag=8)
+            variants = [
+                vsa_payload(order, width, words=words) for words in ((), (1, 2, 3))
+            ]
+            for transport in ("udp", "tcp"):
+                port = (
+                    30900
+                    + (transport == "tcp")
+                    + 2 * (order == "little")
+                    + 4 * (1, 2, 4).index(width)
+                )
+                allowed = {payload, *variants}
+                for (
+                    observed_transport,
+                    observed_port,
+                    method,
+                    kind,
+                    actual,
+                ), count in packets.items():
+                    if (
+                        count
+                        and (observed_transport, observed_port, method, kind)
+                        == (transport, port, 1, 0)
+                        and actual not in allowed
+                    ):
+                        raise AssertionError(
+                            f"非法 VSA 请求出现在报文: {transport} {port} {actual}"
+                        )
+                scalar = (0x1234).to_bytes(2, order).hex()
+                required = [
+                    (1, 0, payload, 1),
+                    (1, 0x80, payload, 1),
+                    (2, 0, scalar, 1),
+                    (2, 0x80, scalar, 1),
+                    (0x8001, 2, payload, 1),
+                    (0x0101, 0, "", 2),
+                    (0x0101, 0x80, payload, 1),
+                    (0x0101, 0x80, changed, 1),
+                    (0x0102, 0, changed, 1),
+                    (0x0102, 0x80, changed, 1),
+                    (0x8101, 2, payload, 1),
+                    (0x8101, 2, changed, 1),
+                    *[
+                        (1, kind, variant, 1)
+                        for variant in variants
+                        for kind in (0, 0x80)
+                    ],
+                ]
+                for method, kind, expected, minimum in required:
+                    count = packets[(transport, port, method, kind, expected)]
+                    if count < minimum:
+                        raise AssertionError(
+                            f"VSA 黄金报文缺失: {transport} {port} {method:#x} {kind:#x} {expected}"
+                        )
+                    checks.append(
+                        {
+                            "transport": transport,
+                            "service_port": port,
+                            "service_id": 0x3456,
+                            "method_id": method,
+                            "message_type": kind,
+                            "payload_hex": expected,
+                            "byte_order": order,
+                            "alignment_bits": 64,
+                            "struct_length_bytes": 0,
+                            "array_length_bytes": width,
+                            "array_semantics": "VSA_LINEAR",
+                            "source_host": "10.77.0.2" if kind == 0 else "10.77.0.1",
+                            "destination_host": "10.77.0.1"
+                            if kind == 0
+                            else "10.77.0.2",
+                            **({"client_id": 0x7722} if kind != 2 else {}),
+                            "observed_segments": count,
+                            "required_messages": minimum,
+                        }
+                    )
     return checks
 
 

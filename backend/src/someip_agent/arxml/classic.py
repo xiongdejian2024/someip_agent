@@ -22,6 +22,12 @@ class ResolvedClassicBinding:
 class ClassicReferenceResolver:
     def __init__(self, root: etree._Element, element_path: Callable[[etree._Element], str]) -> None:
         self._path = element_path
+        schema = root.get("{http://www.w3.org/2001/XMLSchema-instance}schemaLocation", "").split()
+        self._cp44 = (
+            len(schema) == 2
+            and schema[0] == "http://autosar.org/schema/r4.0"
+            and schema[1].rsplit("/", 1)[-1] == "AUTOSAR_00046.xsd"
+        )
         self._fine_grained = bool(
             root.xpath("//*[local-name()='SOMEIP-DATA-PROTOTYPE-TRANSFORMATION-PROPS']")
         )
@@ -149,6 +155,7 @@ class ClassicReferenceResolver:
                     _value(description, "ALIGNMENT"),
                     _value(props, "SIZE-OF-STRUCT-LENGTH-FIELDS"),
                     _value(props, "SIZE-OF-ARRAY-LENGTH-FIELDS"),
+                    classic_cp44=self._cp44,
                 )
             )
         if not layouts or any(layout != layouts[0] for layout in layouts[1:]):

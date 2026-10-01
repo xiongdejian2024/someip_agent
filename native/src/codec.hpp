@@ -40,6 +40,22 @@ inline Bytes unhex(const std::string &text) {
     return out;
 }
 class Codec {
+    static uint32_t vsa_capacity(const Json &schema) {
+        const auto &vsa=schema.at("vsa");
+        const auto size_name=vsa.at("size_name").get<std::string>();
+        const auto payload_name=vsa.at("payload_name").get<std::string>();
+        const auto size_type=vsa.at("size_type").get<std::string>();
+        if(vsa.at("profile")!="VSA_LINEAR" || size_name.empty() || payload_name.empty()
+           || size_name==payload_name || schema.contains("length") || !schema.contains("max_length"))
+            throw std::runtime_error("VSA_LINEAR 元数据非法或不是有界变长数组");
+        uint32_t capacity;
+        if(size_type=="uint8")capacity=UINT8_MAX;
+        else if(size_type=="uint16")capacity=UINT16_MAX;
+        else if(size_type=="uint32")capacity=UINT32_MAX;
+        else throw std::runtime_error("VSA_LINEAR size indicator 类型不支持");
+        bounded_number(schema.at("max_length"),capacity,"VSA_LINEAR 数量上界");
+        return capacity;
+    }
     static bool variable(const Json &schema) {
         const std::string type=schema.value("type","struct");
         if(type=="string" || type=="bytes")return true;
@@ -94,16 +110,27 @@ public:
             if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
             data.insert(data.end(),body.begin(),body.end());
         } else if (type == "array") {
-            if (!value.is_array()) throw std::runtime_error("数组参数必须为列表");
-            if(schema.contains("max_length") && value.size()>number(schema["max_length"]))
+            const Json *items=&value;
+            if(schema.contains("vsa")) {
+                auto capacity=vsa_capacity(schema);
+                if(!value.is_object())throw std::runtime_error("VSA_LINEAR 参数必须保留源字典字段");
+                const auto &vsa=schema.at("vsa");
+                items=&value.at(vsa.at("payload_name").get<std::string>());
+                const auto &indicator=value.at(vsa.at("size_name").get<std::string>());
+                if(!indicator.is_number_integer())throw std::runtime_error("VSA_LINEAR 有效数量必须为整数");
+                auto count=bounded_number(indicator,capacity,"VSA_LINEAR 有效数量");
+                if(count!=items->size())throw std::runtime_error("VSA_LINEAR 有效数量与 payload 元素数量不一致");
+            }
+            if (!items->is_array()) throw std::runtime_error("数组参数必须为列表");
+            if(schema.contains("max_length") && items->size()>number(schema["max_length"]))
                 throw std::runtime_error("变长数组元素数量超限");
             Bytes body;
             auto prefix=schema.contains("length") && schema.value("length_bytes",0)==0?0:length_width(schema);
             auto body_offset=message_offset+data.size()+prefix;
-            for(size_t i=0;i<value.size();++i)
-                encode_one(body,schema.at("element"),value[i],body_offset,last && i+1==value.size());
+            for(size_t i=0;i<items->size();++i)
+                encode_one(body,schema.at("element"),(*items)[i],body_offset,last && i+1==items->size());
             if (schema.contains("length")) {
-                if (value.size() != number(schema["length"])) throw std::runtime_error("定长数组长度错误");
+                if (items->size() != number(schema["length"])) throw std::runtime_error("定长数组长度错误");
                 if(schema.value("length_bytes",0)!=0)length_prefix(data,body.size(),schema,little);
             } else length_prefix(data,body.size(),schema,little);
             data.insert(data.end(), body.begin(), body.end());
@@ -168,6 +195,7 @@ public:
             return out;
         }
         if (type == "array") {
+            if(schema.contains("vsa"))vsa_capacity(schema);
             Json out = Json::array();
             if (schema.contains("length")) {
                 bool prefixed=schema.value("length_bytes",0)!=0;
@@ -194,6 +222,11 @@ public:
                     out.push_back(decode_one(data,offset,schema.at("element"),false));
                     if (offset == before || offset > end) throw std::runtime_error("数组元素长度非法");
                 }
+            }
+            if(schema.contains("vsa")) {
+                const auto &vsa=schema.at("vsa");
+                return Json{{vsa.at("size_name").get<std::string>(),out.size()},
+                            {vsa.at("payload_name").get<std::string>(),std::move(out)}};
             }
             return out;
         }

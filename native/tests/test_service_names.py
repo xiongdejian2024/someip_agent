@@ -34,6 +34,8 @@ def test_names_match_two_sources_without_applying_vehicle_endpoints():
     assert result["matrix_service_count"] == 2
     assert model.model_dump() == before
     assert "不证明序列化" in result["scope"]
+    assert result["wire_schema_errors"] == []
+    assert result["wire_schema_error_groups"] == {}
 
 
 def test_classic_source_bindings_are_reported_without_claiming_runtime_support():
@@ -55,6 +57,11 @@ def test_classic_source_bindings_are_reported_without_claiming_runtime_support()
     assert result["classic_bindings"][0]["bindings"][0]["direction"] == "input"
     result["deployment_errors"][0]["errors"].clear()
     assert model.services[0].deployment_errors
+    assert len(result["wire_schema_errors"]) == result["wire_schema_error_count"]
+    assert (
+        sum(result["wire_schema_error_groups"].values())
+        == result["wire_schema_error_count"]
+    )
 
 
 @pytest.mark.parametrize(

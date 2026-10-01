@@ -11,7 +11,13 @@ import dpkt
 import pytest
 from audit_applications import audit as audit_applications
 from audit_offline import audit as audit_native
-from audit_pcap import audit, composite_golden, composite_payload
+from audit_pcap import (
+    audit,
+    composite_golden,
+    composite_payload,
+    vsa_golden,
+    vsa_payload,
+)
 
 
 @pytest.fixture(scope="module")
@@ -130,7 +136,8 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(
     assert checked["ipv4_fragment_packets"] == reference["ipv4_fragment_packets"]
     # 原生导入审计必须采用相同的实际分片/方向边界，而非从其他流借帧数。
     result = audit_native(path, checked, tmp_path)
-    assert len(result["golden_messages"]) == 1124
+    # 原1124组 + 12个 VSA profile 各16组；不降低任何原有审计要求。
+    assert len(result["golden_messages"]) == 1316
     assert len(result["fragment_imports"]) == 16
     assert len(result["ipv4_option_imports"]) == 40
     assert result["statistics"]["packet_count"] == len(frames) + 1
@@ -367,3 +374,47 @@ def test_composite_audit_rejects_invalid_request_not_just_callback_count():
     packets[("udp", 30530, 1, 0, composite_payload("big", 0, 0, tag=99))] = 1
     with pytest.raises(AssertionError, match="非法复合 ARXML 请求"):
         composite_golden(packets)
+
+
+def test_vsa_manual_goldens_count_byte_length_and_all_profiles():
+    assert (
+        vsa_payload("big", 1)
+        == "07041234abcd00000201020000000000080301020303040506fffe"
+    )
+    assert (
+        vsa_payload("big", 2)
+        == "0700041234abcd000002010200000000000a00030102030003040506fffe"
+    )
+    assert (
+        vsa_payload("little", 1)
+        == "07043412cdab00000201020000000000080301020303040506feff"
+    )
+    vectors = vsa_golden(defaultdict(lambda: 2))
+    assert len(vectors) == 192
+    assert len({(v["transport"], v["service_port"]) for v in vectors}) == 12
+    assert {v["array_length_bytes"] for v in vectors} == {1, 2, 4}
+    assert all(v["array_semantics"] == "VSA_LINEAR" for v in vectors)
+
+
+@pytest.mark.parametrize("change", ["missing", "count_as_bytes", "wrong_padding"])
+def test_vsa_audit_rejects_missing_or_bad_wire_layout(change):
+    packets = Counter(
+        {
+            (
+                v["transport"],
+                v["service_port"],
+                v["method_id"],
+                v["message_type"],
+                v["payload_hex"],
+            ): 2
+            for v in vsa_golden(defaultdict(lambda: 2))
+        }
+    )
+    payload = vsa_payload("big", 1)
+    packets[("udp", 30900, 1, 0, payload)] = 0
+    if change == "count_as_bytes":
+        packets[("udp", 30900, 1, 0, "0702" + payload[4:])] = 1
+    elif change == "wrong_padding":
+        packets[("udp", 30900, 1, 0, payload[:12] + payload[16:])] = 1
+    with pytest.raises(AssertionError, match="VSA 黄金报文缺失|非法 VSA"):
+        vsa_golden(packets)

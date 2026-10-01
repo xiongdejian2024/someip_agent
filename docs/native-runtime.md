@@ -272,6 +272,13 @@ UDP/TCP、显式大端/小端均实际验证基础方法、事件和字段三种
 数组前缀为 0 的模型只有固定数组；非零模型另含上界为 3 的变长数组，不把变长数组的 0 前缀
 列为支持。每一维只读取自己的 ARRAY-SIZE/SEMANTICS，不能借用内层不同长度或语义。
 
+VSA_LINEAR 另保留源 size/payload 字典字段，不把它当普通结构体写双前缀；编码核对有效
+元素数量，线上数组长度以字节计，解码重建源字段及元素个数。CP 4.4.0 的宽度推导和版本
+边界见 [Classic 布局](classic-arxml.md)。AP 显式 fixture 使用同一原生 Codec，12组
+UDP/TCP × 双字节序 × uint8/16/32 indicator 用例验证 RPC、事件、字段 Getter/Setter/通知、
+空/最大有效数量及错误计数/越界拒绝；手工黄金字节另核对192组向量。此矩阵不是大数组、
+其他 VSA profile 或真实 Classic header/session 的整车验收。
+
 字段实际执行更新前 Getter、一次 Setter、更新通知和更新后 Getter，先收到真实准备通知才发
 一次性业务，不重试 Setter。PCAP 独立核对 768 组手工推导的请求/响应/通知字节，包含两次
 Getter 请求及不同字段值的响应。非法定长、变长超上界、内层维数请求均必须失败、不执行服务
