@@ -29,6 +29,13 @@
 验收。不得复制车辆端点到宿主网卡、凭名称猜测序列化、用SAT示例业务替代。
 这不等于承诺实现所有AUTOSAR/OEM扩展，但未支持的用户业务输入必须保持可见。
 
+2026-10-02 新的逐事件组审计另发现两份业务源存在部署差异：330 条 comm 通知声明对应
+323 个唯一事件，ARXML 投影有315个；262个EventGroup集合一致、53个不一致、8个缺失。
+证据为`build/classic-event-groups-source-retry-evidence/names.json`。
+已修复解析器把服务全部组复制到每个事件的问题，改为完整 provider/routing 引用逐成员绑定；
+这不消除源文件之间的矛盾，也没有解除Classic门禁。用户尚未确认冲突优先级/一致版本，
+不能擅自以comm替换ARXML的组ID或用名称一致宣称车型业务运行完成。
+
 ### 2. 真实升级按钮与正式最新版源
 
 `frontend/src/pages/SettingsPage.tsx`已接通检查、验签后显示升级按钮、安装与健康恢复轮询。
@@ -83,3 +90,10 @@ Classic原始header属性另保留2223条去重记录，仍有103布局错误和
 1600次RPC、13198条已产生事件逐序号完整核对，16份采集内核丢包均零；不代表严格周期或长稳。
 aed13eb的CI36881157501为completed/success，源码/安装包各266功能与435后端、16负载阶段、
 19发行包升级测试及干净运行通过，日志保留在`build/ipc-large-write-ci-evidence/ci.log`。
+
+2026-10-02 已核对上一升级状态提交`908cf05dabbda4afdded6f716983b8a790539284`的
+[CI 36887461838](https://github.com/xiongdejian2024/someip_agent/actions/runs/36887461838)：
+completed/success。实际日志`build/rollback-status-ci-evidence/ci.log`确认源码/安装包各
+266项虚拟网、450项原生后端，16个短负载阶段verified、34项Linux升级/回滚及干净发行包
+验收通过；普通非原生后端370通过/80跳过是另一口径。Windows按当前范围跳过。
+这是上一提交的证据，不作为本轮EventGroup修改的新CI结果。

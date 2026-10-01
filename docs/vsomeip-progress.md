@@ -1188,3 +1188,30 @@
   重载为0.1.1，状态complete、健康版本/备份断言通过，JUnit1通过、命令退出0。
   `build/rollback-status-linux-retry-evidence`串行完整34项通过、零失败/错误/跳过，1 warning。
   后续新提交CI单独查询，不沿用aed13eb绿色；正式信任源、业务源部署解释仍未完成，目标active。
+
+## 2026-10-02 Classic EventGroup 逐成员绑定与真实源差异
+
+- 修复服务级组集合向所有事件扩散的投影：按完整 provided-service 和 routing 引用读取
+  consumed-event-group 的明确ID；重复ECU去重，明确多组事件保留全部。重复/缺失路径、
+  provider不唯一和非法ID保留完整异常栈与部署错误，不按短名/服务ID猜组。
+  未解除Classic头/session/payload门禁，也未把车型端点带到宿主。
+- 87项Classic/布局/源审计专项回归通过。首次源审计错误拒绝合法重复通知声明的日志保留；
+  修正为同一业务定义的明确多组声明才合并，不兼容未知分隔符或冲突类型。
+  `build/classic-event-groups-source-retry-evidence/names.json`核对131服务名称/ID；
+  330通知行对应323唯一事件，ARXML有315个，组集合262一致/53不一致/8缺失/0多出。
+  原103布局错误、177部署错误保留，runtime_verified=false；已询问用户源冲突的处理依据。
+- 新镜像`someip-agent-vsomeip:classic-event-groups-test`，ID
+  `356da5b667bc09f363f6d45ddd64d93cc1d5c3affd1b56a686eaf4cd2c79f120`；wheel构建SHA
+  `7e180fa3509cff79a2dddbe798c757c99c7c86c01b098e207f55366b85afbf5a`。
+  固定SDK提交再次核验，4项CTest通过；原生SHA仍为
+  `c6fba843210451bf5af1b3bc3e70978b02a54d60de67e06383dcf748c0609589`。
+  site-packages内parser/classic文件SHA与当前源码一致，不挂载产品源码/PYTHONPATH。
+- `build/classic-event-groups-installed-evidence`整轮命令退出0：266虚拟网、466后端、
+  59审计/名称与12权限/清理通过，7份JUnit零失败/错误/跳过，3个既有后端warning保留。
+  抓包26926帧，内核丢包0；1316黄金向量、16分片、40组选项以及114双身份RPC对/
+  32恢复RPC对分别核对。测试夹具的线上回归不是53处车型源差异已经解决。
+  Ruff与改动文件格式通过；全目录格式检查仍发现3个未修改测试文件的既有差异，
+  parser的5项既有mypy类型错误仍存在，未宣称全后端类型检查通过。
+- 上一提交908cf05的CI36887461838已completed/success；实际日志保存在
+  `build/rollback-status-ci-evidence/ci.log`，包括34项Linux升级/回滚与干净发行包验收。
+  新提交CI独立跟踪，不借上一提交结果宣称本轮CI完成。正式升级信任源仍待提供，目标active。

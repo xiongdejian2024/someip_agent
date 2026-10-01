@@ -210,6 +210,121 @@ def audit_names(model, definitions, communications):
     }
 
 
+def audit_event_groups(model, definitions):
+    """仅以 Service/Event ID 联接逐成员组，不按两份源的名字差异自动创建别名。"""
+    declared, actual, identities = {}, {}, {}
+    declaration_rows = 0
+    for service in definitions:
+        service_id = name_index([service]).popitem()[0]
+        for member in service["child"]:
+            if member["rpc_type"] != "Event" and not (
+                member["rpc_type"] == "Field"
+                and member["rpc_specific_type"] == "Notification Event"
+            ):
+                continue
+            value = member["method_event_id"]
+            if isinstance(value, bool) or not isinstance(value, (str, int)):
+                raise TypeError("矩阵 Event ID 类型非法")
+            event_id = int(value, 0) if isinstance(value, str) else value
+            if not 0x8000 <= event_id <= 0xFFFE:
+                raise ValueError("矩阵 Event ID 超出可用范围")
+            key = service_id, event_id
+            identity = (
+                service["service_name"],
+                *(
+                    member.get(field)
+                    for field in (
+                        "method_event_name",
+                        "rpc_type",
+                        "rpc_specific_type",
+                        "field_property_name",
+                        "field_property_data_type",
+                        "event_notification_event_parameter",
+                        "udp_tcp",
+                    )
+                ),
+            )
+            if key in identities and identities[key] != identity:
+                raise ValueError(
+                    "矩阵同一 Service/Event ID 的业务定义冲突，不能保留第一条"
+                )
+            identities[key] = identity
+            group = member["event_group_name_event_group_id"]
+            # 当前矩阵每条声明一个 name@ID；不猜测未知多组字符串分隔符。
+            if not isinstance(group, str) or group.count("@") != 1:
+                raise ValueError("矩阵 EventGroup 必须是明确的 name@ID")
+            name, raw = group.split("@")
+            identifier = int(raw, 0)
+            if not name.strip() or not 1 <= identifier <= 0xFFFE:
+                raise ValueError("矩阵 EventGroup 名称或 ID 非法")
+            declaration_rows += 1
+            if key not in declared:
+                declared[key] = (
+                    service["service_name"],
+                    member["method_event_name"],
+                    set(),
+                )
+            declared[key][2].add(identifier)
+    for service in model.services:
+        for event in service.events:
+            key = service.service_id, event.event_id
+            if key in actual:
+                raise ValueError("ARXML 重复 Service/Event ID，不能以覆盖方式核对")
+            actual[key] = (service.name, event.name, sorted(event.event_group_ids))
+    comparisons, missing, extra = [], [], []
+    for (service_id, event_id), (service_name, member_name, groups) in declared.items():
+        base = {
+            "service_id": service_id,
+            "event_id": event_id,
+            "comm_service": service_name,
+            "comm_member": member_name,
+            "comm_group_ids": sorted(groups),
+        }
+        record = actual.get((service_id, event_id))
+        if record is None:
+            missing.append(base)
+        else:
+            arxml_service, arxml_member, arxml_groups = record
+            comparisons.append(
+                {
+                    **base,
+                    "arxml_service": arxml_service,
+                    "arxml_member": arxml_member,
+                    "arxml_group_ids": arxml_groups,
+                    "matched": service_name == arxml_service
+                    and sorted(groups) == arxml_groups,
+                }
+            )
+    for (service_id, event_id), (service_name, member_name, groups) in actual.items():
+        if (service_id, event_id) not in declared:
+            extra.append(
+                {
+                    "service_id": service_id,
+                    "event_id": event_id,
+                    "arxml_service": service_name,
+                    "arxml_member": member_name,
+                    "arxml_group_ids": groups,
+                }
+            )
+    mismatch_count = sum(not item["matched"] for item in comparisons)
+    return {
+        "scope": "仅逐 Service/Event ID 的 EventGroup 引用核对；不证明订阅/通知线上运行",
+        "declared_count": len(declared),
+        "declaration_row_count": declaration_rows,
+        "arxml_count": len(actual),
+        "compared_count": len(comparisons),
+        "matched_count": len(comparisons) - mismatch_count,
+        "mismatch_count": mismatch_count,
+        "missing_count": len(missing),
+        "extra_count": len(extra),
+        "comparisons": comparisons,
+        "missing_in_arxml": missing,
+        "extra_in_arxml": extra,
+        "verified": bool(declared) and not (mismatch_count or missing or extra),
+        "runtime_verified": False,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arxml", type=Path, required=True)
@@ -238,6 +353,9 @@ def main():
             json.loads(sources["communication_define"]),
         )
         result["vsa_type_graph"] = audit_vsa_declarations(sources["arxml"])
+        result["event_group_members"] = audit_event_groups(
+            model, json.loads(sources["service_define"])
+        )
         result["source_sha256"] = {
             key: hashlib.sha256(data).hexdigest() for key, data in sources.items()
         }
@@ -247,8 +365,20 @@ def main():
         logger.info(
             "源服务名称审计通过：%s 个；不代表业务布局就绪", result["service_count"]
         )
+        groups = result["event_group_members"]
+        logger.info(
+            "逐事件 EventGroup 核对：一致 %s，不一致 %s，缺失 %s，多出 %s；线上未验收",
+            groups["matched_count"],
+            groups["mismatch_count"],
+            groups["missing_count"],
+            groups["extra_count"],
+        )
         print(
             f"源名称核对通过：{result['service_count']} 个；布局错误：{result['wire_schema_error_count']}，详见日志"
+        )
+        print(
+            f"EventGroup 一致 {groups['matched_count']}，不一致 {groups['mismatch_count']}，"
+            f"缺失 {groups['missing_count']}，多出 {groups['extra_count']}；不代表线上运行"
         )
     except Exception:
         logger.exception("源服务名称审计失败")

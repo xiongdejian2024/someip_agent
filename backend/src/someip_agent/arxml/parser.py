@@ -287,6 +287,8 @@ class ArxmlParser:
             raise ArxmlParseError(str(exc)) from exc
         services: dict[str, ServiceDefinition] = {}
         services_by_id: defaultdict[int, list[ServiceDefinition]] = defaultdict(list)
+        provided_paths: defaultdict[str, set[str]] = defaultdict(set)
+        event_routes: defaultdict[tuple[str, int], set[str]] = defaultdict(set)
 
         for instance in root.iter():
             if _local_name(instance) != "PROVIDED-SERVICE-INSTANCE":
@@ -326,6 +328,7 @@ class ArxmlParser:
                 continue
             if instance_id is not None and instance_id not in service.instance_ids:
                 service.instance_ids.append(instance_id)
+            provided_paths[name].add(_element_path(instance))
 
         if not services:
             return {}
@@ -368,6 +371,13 @@ class ArxmlParser:
                 "EventGroup" in (_reference_name(_text(reference)) or "")
                 for reference in _descendants(identifier, "ROUTING-GROUP-REF")
             )
+            if is_event:
+                for service in target_services:
+                    event_routes[service.name, method_id].update(
+                        value
+                        for reference in _descendants(identifier, "ROUTING-GROUP-REF")
+                        if (value := _text(reference)) is not None
+                    )
             try:
                 bindings = references.resolve(pdu_reference)
                 for service in target_services:
@@ -406,16 +416,36 @@ class ArxmlParser:
                         sender_interfaces,
                     )
 
-        event_groups = self._classic_event_groups(root)
         for name, service in services.items():
-            group_ids = event_groups.get(name, [])
             service.instance_ids.sort()
             service.methods.sort(
                 key=lambda item: (item.method_id is None, item.method_id, item.name)
             )
             service.events.sort(key=lambda item: (item.event_id is None, item.event_id, item.name))
             for event in service.events:
-                event.event_group_ids = list(group_ids)
+                if event.event_id is None:
+                    continue
+                try:
+                    groups: set[int] = set()
+                    for provided_path in provided_paths[name]:
+                        groups.update(
+                            references.event_groups(
+                                provided_path, event_routes[name, event.event_id]
+                            )
+                        )
+                    event.event_group_ids = sorted(groups)
+                except WireTypeError as exc:
+                    event.event_group_ids = []
+                    error = f"Classic 事件 {event.path or event.name} 的 EventGroup 无法绑定: {exc}"
+                    if error not in service.deployment_errors:
+                        service.deployment_errors.append(error)
+                    if error not in warnings:
+                        warnings.append(error)
+                    logger.warning(
+                        "Classic EventGroup 完整引用解析失败，禁止自动原生初始化",
+                        extra={"operation": "arxml.classic.event_groups", "event_path": event.path},
+                        exc_info=True,
+                    )
 
         warnings.append(
             "未发现 SERVICE-INTERFACE；已从 Classic AUTOSAR Socket/SoAd "
@@ -598,21 +628,6 @@ class ArxmlParser:
                 fire_and_forget=interface_name in sender_interfaces,
             )
         service.methods.append(method)
-
-    @staticmethod
-    def _classic_event_groups(root: etree._Element) -> dict[str, list[int]]:
-        result: defaultdict[str, list[int]] = defaultdict(list)
-        for instance in root.iter():
-            if _local_name(instance) != "CONSUMED-SERVICE-INSTANCE":
-                continue
-            service_name = _reference_name(_first_text(instance, "PROVIDED-SERVICE-INSTANCE-REF"))
-            if not service_name:
-                continue
-            for group in _descendants(instance, "CONSUMED-EVENT-GROUP"):
-                group_id = _parse_int(_first_text(group, "EVENT-GROUP-IDENTIFIER"))
-                if group_id is not None and group_id not in result[service_name]:
-                    result[service_name].append(group_id)
-        return {name: sorted(values) for name, values in result.items()}
 
     def _apply_deployments(
         self,

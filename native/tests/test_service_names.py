@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from audit_service_names import audit_names, audit_vsa_declarations
+from audit_service_names import audit_event_groups, audit_names, audit_vsa_declarations
 from lxml import etree
 from someip_agent.arxml.parser import ArxmlParser
 from someip_agent.domain.models import (
@@ -112,6 +112,87 @@ def test_classic_source_bindings_are_reported_without_claiming_runtime_support()
         sum(result["wire_schema_error_groups"].values())
         == result["wire_schema_error_count"]
     )
+
+
+def event_inputs():
+    model, definitions, _ = inputs()
+    model.services[0].events = [
+        EventDefinition(name="ArxmlName", event_id=0x8001, event_group_ids=[7])
+    ]
+    definitions[0]["child"] = [
+        {
+            "method_event_id": "0x8001",
+            "method_event_name": "CommName",
+            "rpc_type": "Field",
+            "rpc_specific_type": "Notification Event",
+            "event_group_name_event_group_id": "ExplicitGroup@0x0007",
+        }
+    ]
+    return model, definitions
+
+
+def test_member_group_audit_joins_ids_but_preserves_both_names_and_model():
+    model, definitions = event_inputs()
+    before = model.model_dump()
+    report = audit_event_groups(model, definitions)
+    assert report["verified"] and report["matched_count"] == 1
+    assert report["comparisons"][0]["comm_member"] == "CommName"
+    assert report["comparisons"][0]["arxml_member"] == "ArxmlName"
+    assert not report["runtime_verified"] and model.model_dump() == before
+
+
+@pytest.mark.parametrize("change", ["broadcast", "missing", "extra", "service_name"])
+def test_member_group_audit_preserves_mismatch_and_missing_evidence(change):
+    model, definitions = event_inputs()
+    if change == "broadcast":
+        model.services[0].events[0].event_group_ids.append(8)
+    elif change == "missing":
+        model.services[0].events.clear()
+    elif change == "extra":
+        model.services[0].events.append(EventDefinition(name="Extra", event_id=0x8002))
+    else:
+        model.services[0].name = "SATExampleService"
+    report = audit_event_groups(model, definitions)
+    assert not report["verified"] and not report["runtime_verified"]
+    assert (
+        report["mismatch_count"] + report["missing_count"] + report["extra_count"] == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "change", ["duplicate", "bool", "unknown_groups", "missing_name", "range"]
+)
+def test_member_group_audit_rejects_ambiguous_declarations(change):
+    model, definitions = event_inputs()
+    row = definitions[0]["child"][0]
+    if change == "duplicate":
+        other = deepcopy(row)
+        other["field_property_data_type"] = "ConflictingType"
+        definitions[0]["child"].append(other)
+    elif change == "bool":
+        row["method_event_id"] = True
+    elif change == "unknown_groups":
+        row["event_group_name_event_group_id"] = "A@7B@8"
+    elif change == "missing_name":
+        row["event_group_name_event_group_id"] = "@7"
+    else:
+        row["method_event_id"] = "0x0001"
+    with pytest.raises((ValueError, TypeError)):
+        audit_event_groups(model, definitions)
+
+
+def test_member_group_audit_merges_only_explicit_groups_of_identical_business_definition():
+    model, definitions = event_inputs()
+    row = definitions[0]["child"][0]
+    other = deepcopy(row)
+    other["event_group_name_event_group_id"] = "OtherAudience@8"
+    other["client"] = ""  # 消费者预留不改变同一事件的业务定义。
+    definitions[0]["child"].extend([other, deepcopy(row)])
+    model.services[0].events[0].event_group_ids = [7, 8]
+    report = audit_event_groups(model, definitions)
+    assert report["verified"] and report["declared_count"] == 1
+    assert report["declaration_row_count"] == 3
+    assert report["comparisons"][0]["comm_group_ids"] == [7, 8]
 
 
 @pytest.mark.parametrize(

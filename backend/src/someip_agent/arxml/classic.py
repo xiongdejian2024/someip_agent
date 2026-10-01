@@ -42,6 +42,9 @@ class ClassicReferenceResolver:
             "CLIENT-SERVER-OPERATION",
             "DATA-TRANSFORMATION",
             "TRANSFORMATION-TECHNOLOGY",
+            "PROVIDED-SERVICE-INSTANCE",
+            "CONSUMED-EVENT-GROUP",
+            "SO-AD-ROUTING-GROUP",
         }
         for element in root.iter():
             if not isinstance(element.tag, str) or etree.QName(element).localname not in tags:
@@ -70,6 +73,34 @@ class ClassicReferenceResolver:
                 for signal in signals:
                     for target in targets:
                         self._targets.setdefault(signal, set()).add((target, target_tag, direction))
+        self._consumed_instances = root.xpath("//*[local-name()='CONSUMED-SERVICE-INSTANCE']")
+
+    def event_groups(self, provided_path: str, routing_paths: set[str]) -> set[int]:
+        """按完整 provider/routing 引用绑定成员，不把服务的全部组复制给每个事件。"""
+        self._resolve(provided_path, "PROVIDED-SERVICE-INSTANCE")
+        result: set[int] = set()
+        for instance in self._consumed_instances:
+            providers = self._references(instance, "PROVIDED-SERVICE-INSTANCE-REF")
+            if provided_path not in providers:
+                continue
+            if providers != [provided_path]:
+                raise WireTypeError("Classic EventGroup 的 provider 引用不唯一")
+            for group in instance.xpath(".//*[local-name()='CONSUMED-EVENT-GROUP']"):
+                routes = self._references(group, "ROUTING-GROUP-REF")
+                if not routing_paths.intersection(routes):
+                    continue
+                self._resolve(self._path(group), "CONSUMED-EVENT-GROUP")
+                for path in routes:
+                    self._resolve(path, "SO-AD-ROUTING-GROUP")
+                raw = _value(group, "EVENT-GROUP-IDENTIFIER", direct=True)
+                try:
+                    identifier = int(raw, 0) if raw is not None else None
+                except ValueError as exc:
+                    raise WireTypeError("Classic EventGroup ID 不是明确整数") from exc
+                if identifier is None or not 1 <= identifier <= 0xFFFE:
+                    raise WireTypeError("Classic EventGroup ID 缺失或超出可用范围")
+                result.add(identifier)
+        return result
 
     @staticmethod
     def _references(element: etree._Element, name: str) -> list[str]:

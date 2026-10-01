@@ -42,6 +42,30 @@ protocol、transformer version、header length、message type、SR session 和 i
 - 缺失链的旧名称投影仅供浏览，服务附带 `deployment_errors`，不能生成原生配置；
 - 完整引用链也不能解除 Classic payload 门禁；目前仍明确拒绝自动原生初始化。
 
+## EventGroup 逐成员绑定
+
+事件的 Header ID 与完整 `ROUTING-GROUP-REF` 联接 consumed service 的完整
+`PROVIDED-SERVICE-INSTANCE-REF` 和 consumed event group 的 routing 引用，读取明确
+`EVENT-GROUP-IDENTIFIER`。不再把同一服务的所有组 ID 复制给每个事件，也不根据
+`EventGroup` 名字/服务 ID 推测组 ID。重复 ECU 的同一组去重，事件明确引用多个组时保留全部。
+被引用的 provider、group、routing 路径重复、routing 目标不存在、provider 不唯一或非法组 ID
+都会隔离该事件的组列表，并保留部署错误与完整异常栈。没有明确组引用的事件保持空组，
+原生目录仍拒绝缺失 EventGroup 的事件，不退回服务级组列表。
+
+`backend/tests/test_classic_event_groups.py` 覆盖多事件分组、多组事件、重复 ECU、同短名隔离、
+非法 ID、重复/缺失路径及现有 Classic 门禁。它验证模型绑定，不冒充车型线上订阅验收。
+
+2026-10-02 的 `build/classic-event-groups-source-retry-evidence/names.json` 逐
+Service/Event ID 核对 H47A/V_6_12_0：330 条通知声明对应 323 个唯一事件，ARXML 投影有
+315 个；262 个组集合一致，53 个不一致，8 个缺失，没有多出事件。
+同一业务定义在不同 EventGroup 的重复行是明确多组关系，不任取第一条；业务类型/名称/传输
+冲突仍拒绝。报告保留两边原名，不通过删前缀/后缀生成别名，`runtime_verified=false`。
+例如 NaviService 的 Event 0x8011：ARXML 组 0x100B，comm 组 0x100D；
+INI_GNSS 的 Event 0x8003：ARXML 组 0x6C11，comm 组 0x0002。
+名称/Service ID 一致不能消除这些部署冲突，待用户确定一致版本或冲突处理依据。
+首次审计把合法重复声明误当冲突的失败日志保留在
+`build/classic-event-groups-source-evidence/parse.log`，后续报告没有覆盖它。
+
 真实 V6.12.0 文件包含 ALIGNMENT=64、HEADER-LENGTH=64 和 active session 属性，不能把
 这些值直接当作原生 Codec 的成员 padding，或在 payload 中自行追加头。4.4.0 的
 SWS_SomeIpXf_00259/00263 区分变长非末尾元素的对齐与固定长度元素：不能为所有成员统一
