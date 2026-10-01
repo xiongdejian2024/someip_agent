@@ -89,6 +89,15 @@ def _health(url: str, version: str, process: subprocess.Popen[bytes], timeout: f
     raise TimeoutError("升级后版本/健康检查失败")
 
 
+def _launch(root: Path, plan: dict[str, Any]) -> subprocess.Popen[bytes]:
+    # 重启的是独立应用，不继承 onefile 升级器临时运行目录的生命周期。
+    return subprocess.Popen(
+        [str(root / plan["executable"]), *plan.get("arguments", [])],
+        cwd=root,
+        env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
+    )
+
+
 def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
     package = Path(plan["package"]).resolve()
     root = Path(plan["install_root"]).resolve()
@@ -122,8 +131,17 @@ def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
             extract_release(package, prepared)
             if (prepared / "VERSION").read_text().strip() != plan["version"]:
                 raise ValueError("升级包 VERSION 与签名清单不一致")
-            if not (prepared / plan["executable"]).is_file():
-                raise ValueError("升级包缺少主程序")
+            for name in plan.get("required_executables", [plan["executable"]]):
+                relative = Path(name)
+                if relative.is_absolute() or ".." in relative.parts or ":" in str(relative):
+                    raise ValueError("升级包程序路径非法")
+                if not (prepared / relative).is_file():
+                    raise ValueError(f"升级包缺少主程序或必需程序: {name}")
+                if os.name != "nt" and (
+                    not stat.S_IMODE((prepared / relative).stat().st_mode) & 0o111
+                    or not os.access(prepared / relative, os.X_OK)
+                ):
+                    raise ValueError(f"升级包程序没有执行权限: {name}")
         elif package.suffix.lower() == ".exe" and os.name == "nt":
             # 主程序退出前完成备份准备；拷贝失败不会让主程序先停机。
             shutil.copytree(root, prepared)
@@ -160,13 +178,17 @@ def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"安装器返回错误码 {result.returncode}")
-        executable = root / plan["executable"]
-        process = subprocess.Popen([str(executable), *plan.get("arguments", [])], cwd=root)
+        process = _launch(root, plan)
         _health(plan["health_url"], plan["version"], process, float(plan.get("health_timeout", 30)))
         logger.info(
             "在线升级完成", extra={"operation": "update.complete", "version": plan["version"]}
         )
-        return {"status": "complete", "version": plan["version"], "backup": str(backup)}
+        return {
+            "status": "complete",
+            "version": plan["version"],
+            "backup": str(backup),
+            "pid": process.pid,
+        }
     except Exception:
         logger.exception("在线升级失败，开始恢复旧版本", extra={"operation": "update.rollback"})
         if process and process.poll() is None:
@@ -187,9 +209,8 @@ def apply_update(plan: dict[str, Any]) -> dict[str, Any]:
                 root.rename(failed)
             backup.rename(root)
             try:
-                restored = subprocess.Popen(
-                    [str(root / plan["executable"]), *plan.get("arguments", [])], cwd=root
-                )
+                restored = _launch(root, plan)
+                plan["rollback_pid"] = restored.pid
                 _health(
                     plan["health_url"],
                     previous_version,
@@ -234,6 +255,8 @@ def main() -> None:
     except Exception as exc:
         logger.exception("独立升级进程失败", extra={"operation": "update.worker"})
         result = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+        if plan.get("rollback_pid"):
+            result["rollback_pid"] = plan["rollback_pid"]
     status_file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
 
 

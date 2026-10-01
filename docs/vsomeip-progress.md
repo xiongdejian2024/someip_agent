@@ -775,3 +775,56 @@
   Windows 在 build-native.ps1 第 28 行因授权 SDK/triplet/Packet_ROOT 未配置失败，堆栈已核对。
   它不是本轮提交的 CI。正式签名最新版升级源/Windows 实机、真实 OEM 布局、IPv6 分片及
   规模长稳仍未完成；整体目标保持 active，不再要求实现 Bootes。
+
+## 2026-10-01：Linux 独立发行包与真实签名升级（本轮）
+
+- 分类：实质进展。上轮只读分析已核对原生数据面和 Python IPC 成本，本轮推进 Linux
+  在线升级的实际缺口；Windows 打包/调试按更新目标暂缓，CI 改为显式手动选项。
+  Bootes 不要求实现，未修改 SAT 调用形式、源服务名称或 SOME/IP/SD 协议栈。
+- 先查现有依赖，复用已有 PyInstaller 可选依赖、zipfile、httpx 和 Ed25519；Linux 主程序
+  为 onedir，独立升级器为 onefile。完整 ZIP 包含前端、原生二进制、依赖/插件、执行权限、
+  原生许可/补丁和构建摘要；不要求目标机安装 Python。打包时将库别名转为实际文件，保持
+  解压拒绝符号链接的既有门禁。当前仅验证 Debian 12/aarch64，不承诺全部 Linux/架构。
+- 修正 POSIX 缺省升级器名、外置暂存和执行权限门禁；新旧应用独立启动时重置 PyInstaller
+  运行环境。主进程退出前验证主程序、升级器及随包原生程序，缺少必需程序先拒绝；新程序
+  启动/版本健康失败恢复旧目录并确认旧版健康，失败现场保留。状态记录实际重启/回滚 PID，
+  测试只清理本次目录内对应进程，不把回滚失败报告为成功。
+- 首次构建因缺 libpython3.11 失败，完整 CalledProcessError 堆栈保留；仅在构建镜像补齐
+  共享库，宿主未安装软件。首次 19 项测试中 2 项失败：macOS Docker 共享目录权限位 0644
+  但 os.access(X_OK) 为真；产品改为同时校验权限位和访问结果，不放宽原断言。
+  build/linux-update-first-evidence 的失败 JUnit/应用/升级日志保留。
+- build/linux-update-current-evidence 对当前夹具完整通过 19 项：临时受信 HTTPS、实际
+  Ed25519/SHA、真实冻结主程序/升级器、新版健康及旧版备份；故意删除新包 Python 运行库
+  后真实启动失败、旧程序恢复健康。发行包测试不指定安装根目录/升级器/静态目录或原生
+  路径，确认缺省发现；另有 build/linux-default-discovery-evidence 两项独立正/反向通过。
+  新版由临时源码副本四份一致版本真实编译，不改仓库版本，不发布测试版或测试密钥。
+- 夹具改为由已验证仓库 SemVer 生成下一 patch，避免将未来 CI 固定为 0.1.0；新增 2 项
+  正式/先行版本变化测试通过。原签名清单脚本、版本源、SAT 字典/长度帧契约保持一致。
+- build/linux-clean-verified-evidence 在仅含 Debian slim + 发行目录的镜像验证：无已安装
+  Python/SDK，网页、版本健康、随包原生发生器启停可用，二进制 SHA 与 build-info 一致；
+  容器 network=none，自有进程/容器已退出。Docker Hub 构建和显式 pull 两次 TLS 超时，
+  改用 ECR Debian 镜像，基础摘要为
+  3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251。
+- 打包镜像 someip-agent-linux:update-final 为
+  8de860ccaa43ffc2945f999634286740d32f489702b4eb9a4fbd559aef4df0dd；干净运行镜像为
+  a0d3c924f21d62372585eb80fba9692130de4dd8691933dca4f8180d1817463a。
+  基线 ZIP SHA 为 8c5044e07e98e55e61d30540213f774b713577452f7f754ecb72b3bd182ef117，
+  原生二进制仍为 6d85f1744c73a58f486c62aa6684a54f3f85f3fde3f63b7759cbafe307c1a20b；
+  vsomeip 3.5.10/libtins 4.6 固定输入与局部补丁未改。不据此宣称性能改善或线速。
+- build/linux-update-installed-evidence 完整通过 130+98=228 虚拟网、348 当时后端回归、
+  22+7+8=37 审计和 12 权限/清理；20544 帧/4389 消息，932 黄金向量、16 分片、40 组选项、
+  114 正常身份 RPC 对及 32 故障恢复对一致，采集内核丢包 0。模块来自 site-packages，
+  无产品源码挂载/PYTHONPATH；升级 service/worker 另单独核对并加入正式模块来源入口。
+- 新增版本夹具测试后补跑 350 项时，独立启动命令漏了既有 IPv6 sysctl，2 项 ::1 绑定失败，
+  build/linux-backend-current-evidence 保留失败报告；诊断 all/default/lo disable_ipv6 均为 1。
+  按正式入口开启容器内 IPv6 后，build/linux-backend-verified-evidence 的 350 项全通过，
+  不跳过或改 IPv6 测试。上述所有最终 JUnit 均零失败/错误/跳过，既有三项后端警告保留。
+- Ruff、版本一致性、前端类型/构建、服务适配器、shell 语法、CI YAML 与 diff 检查通过；
+  前端既有大 chunk 警告未做无关改写。测试夹具之外新增文件仅为打包/验收与文档。
+- 上一提交 7606fd6 的 run 36835256810 已终态：Linux 原生/安装包/短负载及前后端成功，
+  Windows 失败；历史结果保留，不冒充本轮 CI。新 CI 复用同一原生镜像执行 Linux 升级与
+  干净运行，不重复编译第二套底座；Windows 默认不运行。
+- 正式 HTTPS 最新版源和信任公钥仍未配置，已向用户询问 GitHub Releases 或企业源；不
+  公开发行临时测试包、不使用测试信任根。真实 OEM/Classic I-SIGNAL 序列化链仍需接通，
+  AP-only resolver 的代码证据已重新核对。完整 ARXML/OEM、IPv6 分片、规模长稳和 Linux
+  实际浏览器点击/生产发布验收继续推进；整体目标保持 active，Windows/Bootes 不再列为门禁。

@@ -173,7 +173,7 @@ ARXML 名称、PCAP payload、服务描述和模型输出都是不可信内容�
 ```json
 {
   "version": "0.2.0",
-  "download_url": "https://updates.example.com/someip-agent-0.2.0-x64.exe",
+  "download_url": "https://updates.example.com/someip-agent-0.2.0-linux-x64.zip",
   "sha256": "<64 hex characters>",
   "release_notes": "<可选发布说明>",
   "signature": "<base64 Ed25519 signature>"
@@ -182,13 +182,15 @@ ARXML 名称、PCAP payload、服务描述和模型输出都是不可信内容�
 
 签名原文严格为 UTF-8 编码的
 `version + "\n" + sha256 + "\n" + download_url`。客户端必须先验证签名，再比较版本和
-下载；下载完成后校验哈希。通过独立 updater 进程替换程序和保留上一版本回滚属于下一阶段。
+下载；下载完成后校验哈希。现有独立 updater 在准备校验后执行替换、重启健康确认和旧版本
+回滚；Linux 真实发行包验收见 [Linux 打包与升级](linux-packaging.md)。正式签名发布源仍需配置。
 签名私钥只能存在于受保护的发布环境，不能进入仓库或安装包。
 
 ## 8. 部署形态
 
 - **开发机**：Vite 与 FastAPI 分进程，支持热更新；
-- **Windows 桌面**：PyInstaller onedir + Inno Setup，默认仅监听回环地址；
+- **Linux 本地发行版**：PyInstaller onedir + 独立 onefile 升级器，完整 ZIP，默认仅监听回环；
+- **Windows 桌面**：已有构建脚本保留，按用户要求暂缓打包/调试，不作为本阶段完成门禁；
 - **团队服务**：前后端独立容器，经 TLS 反向代理，外接身份、数据库和对象存储；
 - **台架/车辆**：数据面代理部署到直连网卡主机，控制面与代理使用双向认证通道。
 

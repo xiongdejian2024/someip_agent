@@ -1,4 +1,4 @@
-"""为 Windows 安装包生成与后端兼容的 Ed25519 签名升级清单。"""
+"""为完整发行包生成与后端兼容的 Ed25519 签名升级清单。"""
 
 from __future__ import annotations
 

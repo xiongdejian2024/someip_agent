@@ -17,8 +17,11 @@ ARXML 建模、SOME/IP / SOME/IP-SD 编解码、PCAP 导入、信号仿真与智
 - vsomeip 原生信号仿真与服务发现，Python 通过控制 socket 管理二进制，周期生成和编码不再由 Python 执行；
 - OpenAI 兼容模型配置、SSE 流式智能体、Markdown/表格/代码块显示与停止生成；
 - 根版本、Python 包版本、前端版本与源码版本的语义版本一致性校验；
-- Docker 开发环境，以及 PyInstaller + Inno Setup 的 Windows 安装包流水线；
+- Docker 开发环境和 PyInstaller Linux 完整 ZIP 发行包；Windows 打包/调试暂缓，保留手动流水线；
 - 签名更新清单、下载哈希校验、独立升级器准备确认、重启验证与失败回滚；正式发布源需配置。
+
+Linux 独立发行包构建、真实 HTTPS 升级/失败回滚和无 Python/SDK 的干净运行验收，见
+[Linux 打包与升级](docs/linux-packaging.md)。
 
 ## 架构概览
 

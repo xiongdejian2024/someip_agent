@@ -67,10 +67,52 @@ def test_release_version_mismatch_preserves_old_install(tmp_path) -> None:
     assert (tmp_path / "installed" / "VERSION").read_text() == "0.1.0"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="验证 POSIX 发行包执行权限")
+def test_release_nonexecutable_is_rejected_before_shutdown(tmp_path, monkeypatch):
+    archive = tmp_path / "release.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("VERSION", "0.2.0")
+        bundle.writestr("someip-agent", "无执行权限")
+    update = plan(tmp_path, archive)
+    monkeypatch.setattr(
+        "someip_agent.update.worker._wait_parent", lambda _pid: pytest.fail("不应先停机")
+    )
+    with pytest.raises(ValueError, match="执行权限"):
+        apply_update(update)
+    assert (tmp_path / "installed" / "VERSION").read_text() == "0.1.0"
+
+
+def test_release_missing_updater_is_rejected_before_shutdown(tmp_path, monkeypatch):
+    update = plan(tmp_path, release(tmp_path))
+    update["required_executables"] = ["someip-agent", "someip-agent-updater"]
+    monkeypatch.setattr(
+        "someip_agent.update.worker._wait_parent", lambda _pid: pytest.fail("不应先停机")
+    )
+    with pytest.raises(ValueError, match="必需程序"):
+        apply_update(update)
+    assert (tmp_path / "installed" / "VERSION").read_text() == "0.1.0"
+
+
+def test_restart_uses_independent_pyinstaller_environment(tmp_path, monkeypatch):
+    from someip_agent.update.worker import _launch
+
+    monkeypatch.setenv("PYINSTALLER_RESET_ENVIRONMENT", "0")
+    launches = []
+    monkeypatch.setattr(
+        "someip_agent.update.worker.subprocess.Popen", lambda *a, **kw: launches.append((a, kw))
+    )
+    _launch(tmp_path, {"executable": "someip-agent", "arguments": ["--test"]})
+    assert launches[0][0][0] == [str(tmp_path / "someip-agent"), "--test"]
+    assert launches[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert os.environ["PYINSTALLER_RESET_ENVIRONMENT"] == "0"
+
+
 def test_atomic_install_and_backup(tmp_path, monkeypatch) -> None:
     update = plan(tmp_path, release(tmp_path))
 
     class Process:
+        pid = 12345
+
         def poll(self):
             return 0
 
@@ -88,6 +130,8 @@ def test_failed_health_rolls_back_and_restarts_old_version(tmp_path, monkeypatch
     health_versions = []
 
     class Process:
+        pid = 12345
+
         def poll(self):
             return 0
 
@@ -114,6 +158,8 @@ def test_failed_rollback_health_is_not_reported_as_recovered(tmp_path, monkeypat
     update = plan(tmp_path, release(tmp_path))
 
     class Process:
+        pid = 12345
+
         def poll(self):
             return 0
 

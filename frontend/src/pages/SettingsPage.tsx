@@ -195,7 +195,7 @@ export function SettingsPage({ currentVersion }: { currentVersion?: string } = {
           </section>
 
           <section className="panel settings-section updater-section">
-            <div className="settings-section-header"><span className="settings-icon purple"><Icon name="refresh" /></span><div><span className="panel-kicker">APPLICATION UPDATE</span><h2>版本与在线升级</h2><p>Windows 客户端通过签名更新包进行安全升级。</p></div><span className="version-chip">{updateInfo?.current_version || currentVersion ? `v${updateInfo?.current_version ?? currentVersion}` : '版本未知'}</span></div>
+            <div className="settings-section-header"><span className="settings-icon purple"><Icon name="refresh" /></span><div><span className="panel-kicker">APPLICATION UPDATE</span><h2>版本与在线升级</h2><p>发行版通过签名更新包进行安全升级，失败时恢复旧版本。</p></div><span className="version-chip">{updateInfo?.current_version || currentVersion ? `v${updateInfo?.current_version ?? currentVersion}` : '版本未知'}</span></div>
             <div className="update-row"><div><strong>更新来源</strong><span>由后端 HTTPS 发布清单与验签公钥配置，点击检查后确认可用版本。</span></div></div>
             <div className={`update-status${updateInfo?.available ? ' available' : ''}`}>
               <span><Icon name={updateInfo?.available ? 'arrowDown' : updateInfo?.latest_version ? 'check' : 'info'} />{updateInfo ? (updateInfo.available ? `发现新版本 v${updateInfo.latest_version ?? '—'}` : updateInfo.latest_version ? '当前已是最新版本' : '尚未配置更新源') : '尚未检查更新'}</span>

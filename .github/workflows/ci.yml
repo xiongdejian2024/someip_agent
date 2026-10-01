@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_windows:
+        description: "手动执行暂缓的 Windows 安装包构建（需要授权 SDK）"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,6 +36,27 @@ jobs:
         run: make native-installed-test
       - name: 安装包短负载与逐序号线上核验
         run: make native-performance
+      - name: 配置 Linux 发行包的前端构建环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 构建 Linux 完整发行包
+        run: |
+          npm --prefix frontend ci --no-audit --no-fund
+          make package-linux
+      - name: 隔离验收真实签名升级与失败回滚
+        run: make linux-update-test
+      - name: 无 Python 和 SDK 的干净发行包验收
+        run: make linux-clean-test
+      - name: 保存发行包、完整堆栈与升级证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-package-update-evidence
+          path: |
+            build/linux-update-evidence/
+            build/linux-clean-evidence/
+          if-no-files-found: error
       - name: 保留抓包、日志和测试报告
         if: always()
         uses: actions/upload-artifact@v4
@@ -83,6 +109,7 @@ jobs:
         run: >-
           python -m ruff check backend/src backend/tests
           scripts/check_version.py scripts/create_update_manifest.py
+          packaging/linux
           native/tests/audit_pcap.py native/tests/audit_offline.py native/tests/test_audit_pcap.py
           native/tests/audit_ipv4_options.py
           native/tests/test_evidence_permissions.py native/tests/test_recovery_virtual.py
@@ -126,6 +153,7 @@ jobs:
 
   windows-package:
     name: Windows 安装包
+    if: github.event_name == 'workflow_dispatch' && inputs.build_windows
     needs: [backend-test, frontend-build, native-runtime]
     runs-on: windows-latest
     steps:

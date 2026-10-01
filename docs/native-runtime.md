@@ -623,5 +623,6 @@ WTI 虚拟网测试用空列表事件做有界的订阅准备探针：服务可�
 签名私钥只能在发布环境。`backend/tests/test_update_e2e.py` 用本地受信 HTTPS 源与真实进程验证
 整个升级链路，`test_update_worker.py` 验证健康失败回滚及连续升级。
 
-Windows 原生构建、独立 updater 和 ZIP/EXE 打包已接入脚本；当前宿主无法证明 Windows 实机安装、
+Linux 默认升级器与完整 ZIP 构建/验收见 [Linux 发行包](linux-packaging.md)。Windows 打包和调试
+按用户要求暂缓，CI 仅保留显式手动选项。Windows 原生构建、独立 updater 和 ZIP/EXE 打包已接入脚本；当前宿主无法证明 Windows 实机安装、
 DLL 加载及 Inno Setup 回滚成功，必须由 Windows 验收补证后才可发布。

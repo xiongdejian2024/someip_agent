@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -141,7 +142,8 @@ class UpdateService:
             root, helper, packaged = await asyncio.to_thread(self._install_paths)
             target, info = await self._stage_release()
             manifest: dict[str, object] = {"version": info.latest_version, "sha256": info.sha256}
-            if target.suffix.lower() not in {".zip", ".exe"}:
+            formats = {".zip", ".exe"} if os.name == "nt" else {".zip"}
+            if target.suffix.lower() not in formats:
                 raise UpdateError("不支持的安装包格式")
             await asyncio.to_thread(
                 self._schedule_install, target, manifest, root, helper, packaged
@@ -157,9 +159,16 @@ class UpdateService:
             root = Path(sys.executable).resolve().parent
         if root is None:
             raise UpdateError("开发启动模式没有安装目录，请使用发行版执行在线升级")
-        helper = self._settings.update_helper_binary or root / "someip-agent-updater.exe"
+        helper_name = "someip-agent-updater.exe" if os.name == "nt" else "someip-agent-updater"
+        helper = self._settings.update_helper_binary or root / helper_name
         if not helper.is_file():
             raise UpdateError("发行版缺少独立升级器")
+        if os.name != "nt" and (
+            not stat.S_IMODE(helper.stat().st_mode) & 0o111 or not os.access(helper, os.X_OK)
+        ):
+            raise UpdateError("独立升级器没有执行权限")
+        if (self._settings.data_dir / "updates").resolve().is_relative_to(root.resolve()):
+            raise UpdateError("升级暂存目录必须位于安装目录之外")
         return root, helper, packaged
 
     def _schedule_install(
@@ -174,12 +183,15 @@ class UpdateService:
             "version": manifest["version"],
             "sha256": manifest["sha256"],
             "health_url": f"http://127.0.0.1:{self._settings.port}/api/v1/health",
+            "required_executables": [executable, helper.name],
         }
+        if packaged and sys.platform == "linux":
+            plan["required_executables"].append("_internal/native/soa_partner")
         from uuid import uuid4
 
         plan_path = target.parent / ("install-plan-" + uuid4().hex + ".json")
         plan_path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
-        # 将独立 onefile 升级器放到安装目录之外，避免 Windows 的文件占用锁。
+        # 独立 onefile 升级器移到安装目录外，避免替换自己的运行文件。
         import shutil
 
         outside_helper = target.parent / helper.name
@@ -187,6 +199,7 @@ class UpdateService:
         try:
             process = subprocess.Popen(
                 [str(outside_helper), "--plan", str(plan_path)],
+                env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
                 start_new_session=os.name != "nt",
                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) if os.name == "nt" else 0,
             )
