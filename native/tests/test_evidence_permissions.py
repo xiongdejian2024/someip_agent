@@ -151,12 +151,17 @@ def test_capture_exit_before_ready_fails_instead_of_starting_tests(sandbox):
     _root, commands, _script, evidence = sandbox
     (commands / "ip").write_text("#!/bin/bash\nexit 0\n")
     capture = commands / "tcpdump"
-    capture.write_text("#!/bin/bash\nexit 43\n")
+    capture.write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$@" > build/virtual-evidence/capture.args\nexit 43\n'
+    )
     capture.chmod(0o755)
     result = run(sandbox)
     assert result.returncode == 1, result.stderr.decode()
     assert "采集进程提前退出" in result.stderr.decode()
     assert not (evidence / "junit.xml").exists()
+    arguments = (evidence / "capture.args").read_text().splitlines()
+    assert arguments[arguments.index("-B") + 1] == "65536"
+    assert "--immediate-mode" in arguments and arguments[-1] == "udp or tcp"
 
 
 @pytest.mark.parametrize(

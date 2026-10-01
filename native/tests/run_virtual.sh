@@ -40,7 +40,10 @@ printf '%s\n' '正在创建隔离的虚拟以太网：server <-> bridge <-> clie
 source native/tests/virtual_network.sh
 setup_virtual_network
 ip -j link show > build/virtual-evidence/interfaces.json
-tcpdump --immediate-mode -i soa-bridge -s 0 -B 16384 -w build/virtual-evidence/soa.pcap 'udp or tcp' > build/virtual-evidence/tcpdump.log 2>&1 &
+# 大数组验收同时承载业务与IPC流量；使用有界64MiB采集缓冲，不过滤掉失败流量。
+# 仍要求采集内核丢包为0，不能以扩大缓冲替代抓包完整性审计。
+printf '%s\n' '启动完整UDP/TCP观测：64MiB采集缓冲，仍严格检查内核丢包'
+tcpdump --immediate-mode -i soa-bridge -s 0 -B 65536 -w build/virtual-evidence/soa.pcap 'udp or tcp' > build/virtual-evidence/tcpdump.log 2>&1 &
 capture_pid=$!
 capture_ready=0
 for attempt in {1..500}; do
