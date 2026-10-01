@@ -4,6 +4,7 @@ import asyncio
 import codecs
 import json
 import socket
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -32,9 +33,14 @@ def send_data_to(conn: socket.socket, data: dict[str, Any]) -> None:
     conn.sendall(f"{len(body):08x}".encode("ascii") + body)
 
 
-def recv_exact(conn: socket.socket, size: int) -> bytes:
+def recv_exact(conn: socket.socket, size: int, *, deadline: float | None = None) -> bytes:
     parts = bytearray()
     while len(parts) < size:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("原生控制帧超过绝对接收时限")
+            conn.settimeout(remaining)
         data = conn.recv(size - len(parts))
         if not data:
             raise EOFError("原生控制连接已关闭")
@@ -42,14 +48,14 @@ def recv_exact(conn: socket.socket, size: int) -> bytes:
     return bytes(parts)
 
 
-def recv_data_from(conn: socket.socket) -> bytes:
-    header = recv_exact(conn, 8)
+def recv_data_from(conn: socket.socket, *, deadline: float | None = None) -> bytes:
+    header = recv_exact(conn, 8, deadline=deadline)
     if any(ch not in b"0123456789abcdefABCDEF" for ch in header):
         raise ValueError("控制消息长度头非法")
     size = int(header, 16)
     if not 0 < size <= MAX_FRAME:
         raise ValueError("控制消息大小超限")
-    return recv_exact(conn, size)
+    return recv_exact(conn, size, deadline=deadline)
 
 
 def member_messages(conn: socket.socket) -> Iterator[dict[str, Any]]:

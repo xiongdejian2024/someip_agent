@@ -101,6 +101,8 @@ class S2sBaseClass(WTIAssertions):
         auto_restart: bool = True,
         monitor_interval: float = 5,
         restart_limit: int = 3,
+        liveness_timeout: float | None = 1,
+        liveness_failures: int = 3,
         **native_options: Any,
     ) -> None:
         if X86 or idl:
@@ -115,8 +117,23 @@ class S2sBaseClass(WTIAssertions):
         self._closed = False
         self._lifecycle = threading.RLock()
         self._auto_restart = auto_restart and not attach
+        if liveness_timeout is not None and (
+            isinstance(liveness_timeout, bool)
+            or not math.isfinite(liveness_timeout)
+            or not 0 < liveness_timeout <= 3
+        ):
+            raise ValueError("原生活性探测时限必须为 0 至 3 秒内有限正数")
         self._supervisor = NativeSupervisor(
-            self.sim_operator, self._restart_owned_runtime, monitor_interval, restart_limit
+            self.sim_operator,
+            self._restart_owned_runtime,
+            monitor_interval,
+            restart_limit,
+            probe=(
+                (lambda: self.sim_operator.probe_liveness(liveness_timeout))
+                if liveness_timeout is not None
+                else None
+            ),
+            liveness_failures=liveness_failures,
         )
         self.method_default_timeout = 5.1
         self._method_timing = MethodTimingAudit()

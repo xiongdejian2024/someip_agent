@@ -7,7 +7,6 @@ import logging
 import os
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -143,7 +142,10 @@ def wti_partners(request):
         server, client = objects
         for name in SERVICES:
             assert client.wait_for_service_reconnect(f"{name}_client", timeout=10)
-        time.sleep(0.3)
+        # 服务可用不等于 SD 订阅已确认。空列表仅作准备探针，不能充当业务黄金向量。
+        for name in SERVICES:
+            for suffix in ("WarningMsgList", "TelltaleList"):
+                wait_subscription(server, client, name, suffix)
         yield server, client, transport
     finally:
         for partner in objects:
@@ -161,6 +163,32 @@ def wti_partners(request):
                 process.wait(timeout=5)
         for handle in handles:
             handle.close()
+
+
+def wait_subscription(server, client, name, suffix):
+    stopped = threading.Event()
+    errors = []
+
+    def probe():
+        try:
+            while not stopped.is_set():
+                server.send_event_notify(f"{name}_server", suffix, {"list": []})
+                stopped.wait(0.05)
+        except Exception as error:
+            logger.exception("WTI 订阅准备探针发送失败")
+            errors.append(error)
+
+    thread = threading.Thread(target=probe, name="wti-subscription-probe")
+    thread.start()
+    try:
+        assert client.chk_notify(
+            f"{name}_client", suffix, {"list": []}, timeout=5, fuzz_match=False
+        )
+    finally:
+        stopped.set()
+        thread.join(timeout=2)
+        assert not thread.is_alive() and not errors
+    client.empty_event_list(f"{name}_client")
 
 
 @pytest.mark.parametrize("auto", [False, True])

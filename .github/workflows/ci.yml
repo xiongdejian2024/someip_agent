@@ -75,7 +75,8 @@ jobs:
           python -m ruff check backend/src backend/tests
           scripts/check_version.py scripts/create_update_manifest.py
           native/tests/audit_pcap.py native/tests/audit_offline.py native/tests/test_audit_pcap.py
-          native/tests/test_evidence_permissions.py
+          native/tests/test_evidence_permissions.py native/tests/test_recovery_virtual.py
+          native/tests/test_sat_wti_virtual.py
 
       - name: 执行后端测试
         run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing

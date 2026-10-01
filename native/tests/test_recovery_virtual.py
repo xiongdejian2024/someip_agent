@@ -8,12 +8,14 @@ import os
 import signal
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from soa_partner.src.base_partner import PartnerKeyInfo, S2sBaseClass
 from soa_partner.src.Operator import SOAOperator
+from someip_agent.soa.operator import NativeRuntimeError
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
@@ -42,7 +44,7 @@ def recovering_clients(request):
 
 
 @contextmanager
-def owned_partners(transport, owned_role):
+def owned_partners(transport, owned_role, **options):
     catalog = json.loads((ROOT / "catalog.json").read_text())
     catalog["DoorService"]["transport"] = transport
     catalog_path = EVIDENCE / f"recovery-{transport}-catalog.json"
@@ -99,7 +101,7 @@ def owned_partners(transport, owned_role):
                     / f"recovery-owned-{node}-{transport}-{time.time_ns()}.log",
                 )
                 partner = S2sBaseClass(
-                    members, operator=operator, monitor_interval=0.05
+                    members, operator=operator, **{"monitor_interval": 0.05, **options}
                 )
             else:
                 handle = (EVIDENCE / f"recovery-remote-{node}-{transport}.log").open(
@@ -158,6 +160,120 @@ def owned_partners(transport, owned_role):
         root_logger.removeHandler(log_handler)
         root_logger.setLevel(previous_level)
         log_handler.close()
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+@pytest.mark.parametrize("owned_role", ["server", "client"])
+def test_paused_owned_process_recovers_without_business_replay(transport, owned_role):
+    with owned_partners(
+        transport, owned_role, liveness_timeout=0.08, liveness_failures=2
+    ) as (server, client, _transport):
+        owned = server if owned_role == "server" else client
+        calls = []
+
+        def reply(key, message):
+            if message["action"] == "request" and message["function"] == "SetPosition":
+                args = json.loads(message["args"])
+                calls.append(args)
+                server.send_method_response(
+                    key, "SetPosition", args, request_id=message["request_id"]
+                )
+
+        server.register_callback("DoorService_server", reply)
+        client.unregister_event("DoorService_client", ["Angle"])
+        assert client.send_request_and_return_resp(
+            "DoorService_client", "SetPosition", {"position": 57}, timeout=2
+        ) == {"out": {"position": 57}}
+        server.send_event_notify_thread_start(
+            "DoorService_server", "Position", {"position": 88}, 0.03
+        )
+        server.send_event_notify_thread_update(
+            "DoorService_server", "Position", {"position": 90}
+        )
+        assert client.chk_notify(
+            "DoorService_client", "Position", {"position": 90}, timeout=2
+        )
+        old = owned.sim_operator.process
+        assert old is not None and old.poll() is None
+        old.send_signal(signal.SIGSTOP)
+        # 信号送达是异步的；必须观察内核暂停状态，不能把发送成功当成故障已生效。
+        wait_until(
+            lambda: any(
+                line.startswith("State:") and "T" in line
+                for line in Path(f"/proc/{old.pid}/status").read_text().splitlines()
+            ),
+            timeout=1,
+        )
+        status = Path(f"/proc/{old.pid}/status").read_text()
+        assert any(
+            line.startswith("State:") and "T" in line for line in status.splitlines()
+        )
+        assert old.poll() is None, "暂停与退出必须是不同故障"
+        old_info = client.partner_infos["DoorService_client"]
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = None
+            if owned_role == "client":
+                # IPC 已发送、原生控制循环暂停；恢复绝不能替用户重放该业务请求。
+                pending = executor.submit(
+                    client.send_request_and_return_resp,
+                    "DoorService_client",
+                    "SetPosition",
+                    {"position": 123},
+                    timeout=3,
+                )
+                wait_until(lambda: bool(old_info.response_waiters), timeout=1)
+            wait_until(lambda: owned._supervisor.restart_count == 1, timeout=10)
+            if pending is not None:
+                with pytest.raises((NativeRuntimeError, TimeoutError)):
+                    pending.result(timeout=4)
+                assert not old_info.response_waiters
+        assert old.poll() == -signal.SIGKILL
+        assert (
+            owned.sim_operator.process is not old
+            and owned.sim_operator.process.poll() is None
+        )
+        assert owned._supervisor.restart_reason == "control_unresponsive"
+        assert owned._supervisor.probe_failure_count >= 2
+        assert client.wait_for_service_reconnect("DoorService_client", timeout=5)
+        assert client.ck_coming_event(
+            "DoorService_client", "Position", {"position": 90}, timeout=3
+        )
+        assert (
+            "UpdateAngleEvent"
+            not in client.partner_infos["DoorService_client"].subscriptions
+        )
+        server.send_event_notify("DoorService_server", "Angle", {"angle": 999})
+        assert client.ck_no_event("DoorService_client", "Angle", timeout=0.15)
+        assert calls == [{"position": 57}], "暂停前或在途业务请求被重复执行"
+        assert client.send_request_and_return_resp(
+            "DoorService_client", "SetPosition", {"position": 99}, timeout=2
+        ) == {"out": {"position": 99}}
+        assert calls == [{"position": 57}, {"position": 99}]
+        wait_until(lambda: owned._supervisor.last_probe_error is None)
+        evidence = {
+            "transport": transport,
+            "owned_role": owned_role,
+            "paused_state": next(
+                line for line in status.splitlines() if line.startswith("State:")
+            ),
+            "old_pid": old.pid,
+            "old_exit_code": old.returncode,
+            "new_pid": owned.sim_operator.process.pid,
+            "restart_reason": owned._supervisor.restart_reason,
+            "probe_failure_count": owned._supervisor.probe_failure_count,
+            "restart_count": owned._supervisor.restart_count,
+            "business_calls": calls,
+            "subscriptions": sorted(
+                client.partner_infos["DoorService_client"].subscriptions
+            ),
+        }
+        owned.close()
+        assert not owned._supervisor.thread.is_alive()
+        assert owned.sim_operator.process.poll() is not None
+        evidence["closed"] = True
+        (EVIDENCE / f"liveness-{owned_role}-{transport}-audit.json").write_text(
+            json.dumps(evidence, ensure_ascii=False, indent=2)
+        )
 
 
 def test_owned_native_process_recovers_members_callbacks_and_latest_cycle(

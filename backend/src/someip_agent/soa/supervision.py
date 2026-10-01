@@ -9,7 +9,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 
-from .operator import NativeRuntimeError, SOAOperator
+from .operator import NativeOperationError, NativeRuntimeError, SOAOperator
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,9 @@ class NativeSupervisor:
         interval: float = 5,
         restart_limit: int = 3,
         restart_window: float = 60,
+        *,
+        probe: Callable[[], float] | None = None,
+        liveness_failures: int = 3,
     ) -> None:
         if (
             not math.isfinite(interval)
@@ -29,6 +32,8 @@ class NativeSupervisor:
             or restart_limit < 1
             or not math.isfinite(restart_window)
             or restart_window <= 0
+            or type(liveness_failures) is not int
+            or not 1 <= liveness_failures <= 100
         ):
             raise ValueError("进程监督周期、重启次数和窗口必须为正数")
         self.operator = operator
@@ -37,6 +42,13 @@ class NativeSupervisor:
         self.restart_limit = restart_limit
         self.restart_window = restart_window
         self.restart_count = 0
+        self.probe = probe
+        self.liveness_failures = liveness_failures
+        self.probe_failure_count = 0
+        self.consecutive_probe_failures = 0
+        self.last_probe_error: str | None = None
+        self.last_probe_latency: float | None = None
+        self.restart_reason: str | None = None
         self.state = "idle"
         self.last_error: str | None = None
         self._attempts: deque[float] = deque()
@@ -63,7 +75,35 @@ class NativeSupervisor:
                 if process is None:
                     raise NativeRuntimeError("监督对象没有本实例拥有的原生进程")
                 code = process.poll()
-                if code is None:
+                unresponsive = False
+                if code is None and self.probe is not None:
+                    try:
+                        self.last_probe_latency = self.probe()
+                        self.consecutive_probe_failures = 0
+                        self.last_probe_error = None
+                        self.state = "watching"
+                    except NativeOperationError:
+                        # 不兼容回执不是暂停证据，禁止通过反复杀进程来掩盖协议错误。
+                        raise
+                    except (OSError, EOFError, ValueError, NativeRuntimeError) as error:
+                        self.probe_failure_count += 1
+                        self.consecutive_probe_failures += 1
+                        self.last_probe_error = f"{type(error).__name__}: {error}"
+                        self.state = "suspect"
+                        logger.exception(
+                            "原生控制通道无响应，累计连续探测失败",
+                            extra={"operation": "soa.supervisor.liveness"},
+                        )
+                    if self._stop.is_set():
+                        break
+                    if self.operator.process is not process:
+                        self.consecutive_probe_failures = 0
+                        continue
+                    code = process.poll()
+                    unresponsive = code is None and (
+                        self.consecutive_probe_failures >= self.liveness_failures
+                    )
+                if code is None and not unresponsive:
                     continue
                 # 沿用 SAT：正常退出、重复启动错误及显式 kill 不自动恢复。
                 if code in {0, 1, -9}:
@@ -79,14 +119,24 @@ class NativeSupervisor:
                 if len(self._attempts) >= self.restart_limit:
                     raise NativeRuntimeError("原生进程反复异常，重启次数超过窗口限制")
                 self._attempts.append(now)
+                if self._stop.is_set():
+                    break
+                if unresponsive and not self.operator.kill_unresponsive_owned_process(process):
+                    continue
+                self.restart_reason = "control_unresponsive" if unresponsive else "process_exit"
                 self.state = "recovering"
                 logger.error(
-                    "原生进程异常退出，恢复活动成员配置",
-                    extra={"operation": "soa.supervisor.recover", "exit_code": code},
+                    "原生进程异常，恢复活动成员配置",
+                    extra={
+                        "operation": "soa.supervisor.recover",
+                        "exit_code": code,
+                        "reason": self.restart_reason,
+                    },
                 )
                 self.recover()
                 if not self._stop.is_set():
                     self.restart_count += 1
+                    self.consecutive_probe_failures = 0
                     self.state = "watching"
                     logger.info(
                         "原生进程与活动成员已恢复",

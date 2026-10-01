@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import socket
@@ -50,6 +51,7 @@ class SOAOperator:
         self.process: subprocess.Popen[bytes] | None = None
         self.pid: int | None = None
         self.tcp_socket: socket.socket | None = None
+        self._connected_address: tuple[str, int] | None = None
         self._lock = Lock()
         self._stop_lock = Lock()
         self._log: Any = None
@@ -115,6 +117,8 @@ class SOAOperator:
                 conn = socket.create_connection((self.host, self.operator_port), timeout=1)
                 conn.settimeout(timeout)
                 self.tcp_socket = conn
+                peer = conn.getpeername()
+                self._connected_address = (str(peer[0]), int(peer[1]))
                 logger.info("vsomeip 控制 socket 已连接", extra={"operation": "native.connect"})
                 return
             except (ConnectionRefusedError, TimeoutError):
@@ -168,6 +172,62 @@ class SOAOperator:
         except Exception:
             logger.exception("原生控制操作失败", extra={"operation": f"native.{function}"})
             raise
+
+    def probe_liveness(self, timeout: float = 1) -> float:
+        """独立短连接检查原生控制循环；不消耗业务连接响应、不表示车辆服务可用。"""
+        if isinstance(timeout, bool) or not math.isfinite(timeout) or not 0 < timeout <= 3:
+            raise ValueError("原生活性探测时限必须为 0 至 3 秒内有限正数")
+        if self._connected_address is None:
+            raise NativeRuntimeError("尚未建立控制连接，不能确定活性探测端点")
+        started = time.monotonic()
+        deadline = started + timeout
+        try:
+            with socket.create_connection(self._connected_address, timeout=timeout) as connection:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("原生活性连接超过绝对时限")
+                connection.settimeout(remaining)
+                send_data_to(connection, {"action": "request", "function": "ping", "args": None})
+                response = json.loads(recv_data_from(connection, deadline=deadline))
+                if (
+                    not isinstance(response, dict)
+                    or response.get("action") != "response"
+                    or response.get("function") != "ping"
+                    or response.get("failtype") != "FAILTYPE_SUCCESS"
+                ):
+                    raise NativeOperationError("原生活性回执不符合 ping 契约")
+                result = json.loads(response.get("result", "null"))
+                if not isinstance(result, dict) or result.get("runtime") != "vsomeip":
+                    raise NativeOperationError("原生活性回执缺少 vsomeip 来源")
+                if self.mode == "services" and (
+                    type(result.get("protocol")) is not int or result["protocol"] != 1
+                ):
+                    raise NativeOperationError("原生活性回执的控制协议版本不匹配")
+                if self.mode == "network" and result.get("mode") != "network":
+                    raise NativeOperationError("原生活性回执的运行模式不匹配")
+            return time.monotonic() - started
+        except Exception:
+            logger.exception("原生控制活性探测失败", extra={"operation": "native.liveness"})
+            raise
+
+    def kill_unresponsive_owned_process(self, expected: subprocess.Popen[bytes]) -> bool:
+        """只强制结束本实例仍拥有的同一无响应进程，不能按缓存 PID 操作其他进程。"""
+        with self._stop_lock:
+            if self.process is not expected or expected.poll() is not None:
+                return False
+            try:
+                expected.kill()
+                expected.wait(timeout=5)
+                logger.warning(
+                    "无响应原生进程已结束，等待活动配置恢复",
+                    extra={"operation": "native.liveness.kill", "pid": expected.pid},
+                )
+                return True
+            except Exception:
+                logger.exception(
+                    "结束无响应原生进程失败", extra={"operation": "native.liveness.kill"}
+                )
+                raise
 
     def stop_operator(self) -> None:
         # 监控故障和生命周期停止可能同时发生，清理必须幂等且串行。

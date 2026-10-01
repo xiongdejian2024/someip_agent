@@ -414,8 +414,10 @@ def audit(path: Path) -> dict:
                 )
     recovery_checks = []
     for transport in ("udp", "tcp"):
+        if recovery_packets[(transport, "client", 1, 0, "007b")]:
+            raise AssertionError(f"暂停中的在途请求被重放到真实网络: {transport} 007b")
         for owner in ("server", "client"):
-            for payload in ("0005", "002a"):
+            for payload in ("0005", "002a", "0039", "0063"):
                 for kind in (0, 0x80):
                     count = recovery_packets[(transport, owner, 1, kind, payload)]
                     if not count:
@@ -600,6 +602,7 @@ def audit(path: Path) -> dict:
         "arxml_catalog_packets": arxml_checks,
         "sat_wti_packets": wti_checks,
         "sat_recovery_packets": recovery_checks,
+        "paused_inflight_replay_absent": ["udp", "tcp"],
         "service_api_packets": service_checks,
         "ipv4_fragment_packets": fragment_checks,
         "incomplete_segments": incomplete_segments,

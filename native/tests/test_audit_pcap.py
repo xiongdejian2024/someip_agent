@@ -14,7 +14,9 @@ from audit_pcap import audit
 
 @pytest.fixture(scope="module")
 def captured():
-    path = Path(os.environ.get("SOMEIP_AGENT_AUDIT_PCAP", "build/virtual-evidence/soa.pcap"))
+    path = Path(
+        os.environ.get("SOMEIP_AGENT_AUDIT_PCAP", "build/virtual-evidence/soa.pcap")
+    )
     # 正式入口先产生真实抓包；缺少证据必须失败，不跳过或用模拟文件代替。
     assert path.is_file(), f"缺少真实虚拟网 PCAP：{path}"
     with path.open("rb") as source:
@@ -30,7 +32,9 @@ def write_copy(path, frames, link_type, packet):
     with path.open("wb") as output:
         # veth/offload 的真实记录可能大于 MTU；Writer 默认 1500 不能承载原始帧。
         writer = dpkt.pcap.Writer(
-            output, linktype=link_type, snaplen=max(len(packet), *(len(f) for _, f in frames))
+            output,
+            linktype=link_type,
+            snaplen=max(len(packet), *(len(f) for _, f in frames)),
         )
         # 插在最前且采用相同文件时间，不制造离线时钟倒退。
         writer.writepkt(packet, ts=frames[0][0])
@@ -74,7 +78,9 @@ def collision_packet(kind):
 @pytest.mark.parametrize(
     "kind", ["ordinary_tcp", "ordinary_udp", "foreign_source", "reverse_direction"]
 )
-def test_unrelated_id_collision_does_not_change_fragment_evidence(tmp_path, captured, kind):
+def test_unrelated_id_collision_does_not_change_fragment_evidence(
+    tmp_path, captured, kind
+):
     frames, link_type, reference = captured
     path = tmp_path / (kind + ".pcap")
     write_copy(path, frames, link_type, collision_packet(kind))
@@ -82,7 +88,7 @@ def test_unrelated_id_collision_does_not_change_fragment_evidence(tmp_path, capt
     assert checked["ipv4_fragment_packets"] == reference["ipv4_fragment_packets"]
     # 原生导入审计必须采用相同的实际分片/方向边界，而非从其他流借帧数。
     result = audit_native(path, checked, tmp_path)
-    assert len(result["golden_messages"]) == 148
+    assert len(result["golden_messages"]) == 164
     assert len(result["fragment_imports"]) == 16
     assert result["statistics"]["packet_count"] == len(frames) + 1
 
@@ -130,3 +136,37 @@ def test_complete_packet_cannot_replace_missing_real_fragment(tmp_path, captured
         audit(path)
     with pytest.raises(AssertionError, match="分片审计原始帧数量不一致"):
         audit_native(path, reference, tmp_path)
+
+
+def test_paused_inflight_business_replay_is_rejected(tmp_path, captured):
+    frames, link_type, _reference = captured
+    for _timestamp, frame in frames:
+        packet = dpkt.ethernet.Ethernet(frame)
+        network = packet.data
+        if not isinstance(network, dpkt.ip.IP) or network.src != socket.inet_aton(
+            "10.77.0.1"
+        ):
+            continue
+        transport = network.data
+        if not isinstance(transport, dpkt.udp.UDP) or transport.dport != 30501:
+            continue
+        body = transport.data
+        # 手工 SOME/IP 头：服务 1234、方法 1、ClientID 5522、REQUEST、长度为两字节。
+        if (
+            len(body) != 18
+            or body[:4] != bytes.fromhex("12340001")
+            or body[8:10] != bytes.fromhex("5522")
+            or body[14] != 0
+            or body[16:] != bytes.fromhex("0039")
+        ):
+            continue
+        transport.data = body[:16] + bytes.fromhex("007b")
+        transport.sum = network.sum = 0
+        replay = bytes(packet)
+        break
+    else:
+        pytest.fail("真实抓包缺少 owned client 的 UDP 恢复前请求")
+    path = tmp_path / "inflight-business-replay.pcap"
+    write_copy(path, frames, link_type, replay)
+    with pytest.raises(AssertionError, match="在途请求被重放"):
+        audit(path)
