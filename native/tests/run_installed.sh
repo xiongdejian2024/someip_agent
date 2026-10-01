@@ -16,6 +16,7 @@ try:
     for name in (
         "someip_agent.runtime.network", "someip_agent.domain.models",
         "someip_agent.soa.operator", "someip_agent.soa.partner",
+        "someip_agent.soa.ipc",
         "someip_agent.soa.identity",
         "someip_agent.soa.supervision", "someip_agent.pcap.native",
         "someip_agent.pcap.importer", "soa_partner.src.base_partner",

@@ -84,3 +84,5 @@ python -m pytest native/tests/test_audit_pcap.py -v \
 python -m pytest native/tests/test_audit_identity_recovery.py -v \
   --basetemp=build/virtual-evidence/identity-audit-pytest \
   --junitxml=build/virtual-evidence/identity-audit-junit.xml
+python -m pytest native/tests/test_service_names.py -v \
+  --junitxml=build/virtual-evidence/service-names-junit.xml

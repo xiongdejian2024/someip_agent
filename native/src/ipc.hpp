@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <cstdlib>
 #ifndef _WIN32
 #include <execinfo.h>
 #else
@@ -17,6 +18,13 @@ namespace agent {
 using Json = nlohmann::json;
 using Tcp = boost::asio::ip::tcp;
 constexpr std::size_t max_frame = 4 * 1024 * 1024;
+
+inline bool ipc_tcp_no_delay() {
+    const auto *value=std::getenv("SOMEIP_AGENT_IPC_TCP_NODELAY");
+    if(!value || std::string(value)=="1")return true;
+    if(std::string(value)=="0")return false;
+    throw std::runtime_error("SOMEIP_AGENT_IPC_TCP_NODELAY 只能为 0 或 1");
+}
 
 inline void log_error(const std::string &operation, const std::exception &error) {
     Json stack=Json::array();
@@ -42,7 +50,21 @@ public:
     std::function<void(const Json &, std::shared_ptr<Connection>)> handler;
     std::function<void()> on_close;
     Connection(boost::asio::io_context &io, bool control) : socket(io), framed(control) {}
-    void start() { read(); }
+    void start() {
+        try {
+            // 仅作用于本地控制/成员 IPC；不修改 vsomeip 的线上 SOME/IP socket。
+            socket.set_option(Tcp::no_delay(ipc_tcp_no_delay()));
+            read();
+        } catch(const std::exception &error) {
+            log_error("ipc.options",error);
+            close();
+        }
+    }
+    bool tcp_no_delay() const {
+        Tcp::no_delay option;
+        socket.get_option(option);
+        return option.value();
+    }
     void send(const Json &message) {
         std::string body = message.dump(-1, ' ', true);
         if(body.size()>max_frame) {

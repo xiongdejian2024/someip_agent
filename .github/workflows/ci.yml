@@ -92,9 +92,10 @@ jobs:
           native/tests/ipv4_option_vectors.py
           native/tests/benchmark_virtual.py native/tests/performance_metrics.py
           native/tests/test_performance_metrics.py
+          native/tests/audit_service_names.py native/tests/test_service_names.py
 
-      - name: 性能统计口径回归
-        run: python -m pytest native/tests/test_performance_metrics.py
+      - name: 统计与源服务名称审计回归
+        run: python -m pytest native/tests/test_performance_metrics.py native/tests/test_service_names.py
 
       - name: 执行后端测试
         run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing

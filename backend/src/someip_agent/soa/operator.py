@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-from .ipc import recv_data_from, send_data_to
+from .ipc import configure_ipc_socket, ipc_tcp_no_delay, recv_data_from, send_data_to
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class SOAOperator:
         log_path: str | Path | None = None,
         mode: Literal["services", "network"] = "services",
     ) -> None:
+        ipc_tcp_no_delay()  # 必须在启动进程/连接 socket 之前拒绝非法配置。
         self.name = name or "soa_partner"
         self.operator_port = operator_port
         self.binary = str(binary or os.environ.get("SOMEIP_AGENT_NATIVE_BINARY", "soa_partner"))
@@ -115,7 +116,12 @@ class SOAOperator:
                         time.sleep(0.05)
                         continue
                 conn = socket.create_connection((self.host, self.operator_port), timeout=1)
-                conn.settimeout(timeout)
+                try:
+                    configure_ipc_socket(conn)
+                    conn.settimeout(timeout)
+                except Exception:
+                    conn.close()
+                    raise
                 self.tcp_socket = conn
                 peer = conn.getpeername()
                 self._connected_address = (str(peer[0]), int(peer[1]))
@@ -183,6 +189,7 @@ class SOAOperator:
         deadline = started + timeout
         try:
             with socket.create_connection(self._connected_address, timeout=timeout) as connection:
+                configure_ipc_socket(connection)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("原生活性连接超过绝对时限")

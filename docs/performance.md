@@ -165,7 +165,7 @@ RPC P99 各配置约 14.21–51.98 ms，仍是完整 Python/IPC/业务回调链�
 
 这些性能阶段沿用默认 application，证明旧调用链路在本轮改造后仍可完整核对；不是独立
 application 的完整负载/长稳矩阵。双 Client ID 的并发和停止恢复由单独 10 项功能用例及
-114 对请求响应黄金审计证明，两种证据不能互相替代。IPC 代码未显式设置 TCP_NODELAY，
+114 对请求响应黄金审计证明，两种证据不能互相替代。当时 IPC 代码未显式设置 TCP_NODELAY，
 可作为后续分层时延实验的假设，但尚未证明 Nagle/延迟 ACK 是上述 RPC 尾延迟的原因。
 
 ## 身份能力门禁后的默认链路复测
@@ -193,3 +193,59 @@ application 的完整负载/长稳矩阵。双 Client ID 的并发和停止恢�
 本次性能仍为默认 application 链路；显式身份的启动握手额外包含 ping/实际成员查询两个
 控制往返，未单独测量其初始化时延。双身份故障后的 32 对 RPC 和 8 组真实故障另有功能/
 被动抓包证据，不冒充多 application 负载、极限请求回绕或长稳性能验收。
+
+## IPC TCP_NODELAY 同二进制开关对照
+
+2026-10-01 使用同一个 `someip-agent-vsomeip:ipc-options-test` 镜像
+`4170b023166f58a1515b8d9f7cfee2f0d014cbc6387f3b049f0dc4f117ddee92`，原生二进制 SHA
+`6d85f1744c73a58f486c62aa6684a54f3f85f3fde3f63b7759cbafe307c1a20b`，wheel 构建 SHA
+`b18dd52de3d109a38ee1885a44047d8ad59a367236e0e2316f078db0d2f281bf`。平台与前文一致。
+先关闭再开启，仅改变 IPC 两端标准 TCP 选项，不修改 vsomeip 的线上 TCP 设置；两轮测量
+期间没有并行运行本项目构建/功能验收。每阶段测量前读取 Python control/member 与原生
+accepted control/member 的实际 socket 选项，匹配实验值才开始；结果保存 ipc_socket_options。
+这不是多轮随机交错实验，仍受宿主活动和虚拟机调度影响。
+
+```bash
+make native-performance NATIVE_IMAGE=someip-agent-vsomeip:ipc-options-test \
+  NATIVE_PERFORMANCE_EVIDENCE=build/ipc-nodelay-off-evidence 'PERFORMANCE_ARGS=--ipc-tcp-no-delay 0'
+make native-performance NATIVE_IMAGE=someip-agent-vsomeip:ipc-options-test \
+  NATIVE_PERFORMANCE_EVIDENCE=build/ipc-nodelay-on-evidence 'PERFORMANCE_ARGS=--ipc-tcp-no-delay 1'
+```
+
+两轮各 16 阶段全部 verified，分别 1600 次 RPC 成功、3200 条请求/响应及 13201/13188 条
+已产生事件完整交付。所有阶段采集内核丢包为 0、运行中的原生成员错误回调为空；各有 12
+权限/清理与 10 统计回归通过。事件总数不同来自发生器跳过过期 tick，不把少产生等同网络丢包。
+
+每行各 200 次 RPC；完成速率为完整 Python/IPC/业务回调链路，单位 RPC/s，P99 单位 ms。
+
+| 传输 | blob 字节 | 并发 | 关闭速率 | 开启速率 | 关闭 P99 | 开启 P99 |
+|---|---:|---:|---:|---:|---:|---:|
+| UDP | 32 | 1 | 54.5 | 55.7 | 34.539 | 28.203 |
+| UDP | 32 | 4 | 143.3 | 312.5 | 47.492 | 16.210 |
+| UDP | 1024 | 1 | 81.4 | 81.4 | 14.530 | 15.806 |
+| UDP | 1024 | 4 | 302.5 | 299.0 | 15.592 | 16.148 |
+| TCP | 32 | 1 | 52.5 | 52.7 | 33.338 | 33.336 |
+| TCP | 32 | 4 | 139.5 | 304.4 | 41.895 | 15.900 |
+| TCP | 1024 | 1 | 80.6 | 82.2 | 15.241 | 14.489 |
+| TCP | 1024 | 4 | 293.8 | 255.2 | 17.513 | 39.847 |
+
+32 字节四并发明显改善，但 1024 字节 TCP 四并发本次反而更慢、尾延迟更高，原样保留；
+不宣称所有配置都受益，也不能由此把剩余时延全部归因于 Python、GIL、Nagle 或延迟 ACK。
+默认开启减少小 IPC 消息合并等待，保留关闭开关用于复现；它不是实时调度保证。
+
+1 ms 事件阶段的线上间隔 P99 为软件抓包时间，不能当作 RPC/单向时延。
+
+| 路径 | 传输 | 关闭收到数 | 开启收到数 | 关闭间隔 P99 ms | 开启间隔 P99 ms |
+|---|---|---:|---:|---:|---:|
+| Python 逐条 | UDP | 3000 | 3000 | 1.861 | 1.910 |
+| 原生 sequence | UDP | 3001 | 2995 | 1.296 | 1.711 |
+| Python 逐条 | TCP | 3000 | 3000 | 1.880 | 1.843 |
+| 原生 sequence | TCP | 3001 | 2999 | 1.472 | 1.564 |
+
+开启时 10 ms 原生 UDP/TCP 收到 295/299 条，约 98.08/99.44 条每秒；其间隔 P99 为
+23.889/21.310 ms。仍未证明严格周期达标。原生 sequence 避开 Python 每 tick 发送，但客户端
+Python 仍逐条接收/回调；线上较小抖动不代表整个仿真链路没有 Python 成本。
+
+后续源名称修正的功能镜像为 `ipc-source-names-test`，与此对照镜像的 Python wheel 不同，
+原生二进制 SHA 相同。该修正只影响 ARXML 服务选取/目录元数据；本表仍严格引用上述同镜像
+对照，不将最终功能镜像冒充本次已测对象。

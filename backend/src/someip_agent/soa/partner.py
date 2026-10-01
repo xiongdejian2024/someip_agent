@@ -20,7 +20,7 @@ from .catalog import NativeCatalogRequest, build_native_bundle
 from .identity import prepare_identities, verify_identities
 from .info import PartnerKeyInfo as PartnerKeyInfo
 from .info import PartnerStartConfig as PartnerStartConfig
-from .ipc import member_messages
+from .ipc import configure_ipc_socket, member_messages
 from .naming import PartnerRegistry, member_key, members_config
 from .observations import EventObserver, cache_message
 from .operator import NativeOperationError, NativeRuntimeError, SOAOperator
@@ -247,7 +247,12 @@ class S2sBaseClass(WTIAssertions):
             callbacks = list(previous.callback)
             self._disconnect(key)
         conn = socket.create_connection(tuple(address), timeout=10)
-        conn.settimeout(None)
+        try:
+            configure_ipc_socket(conn)
+            conn.settimeout(None)
+        except Exception:
+            conn.close()
+            raise
         info = PartnerKeyInfo(
             alias,
             config["role"],

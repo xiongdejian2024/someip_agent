@@ -5,6 +5,8 @@
 
 int main(int argc, char **argv) {
     try {
+        // 非法实验配置在任何监听/协议栈启动前拒绝，不静默回退。
+        agent::ipc_tcp_no_delay();
         std::string bind="127.0.0.1", catalog, config, name="soa_partner";
         uint16_t port=16789;
         bool network=false;

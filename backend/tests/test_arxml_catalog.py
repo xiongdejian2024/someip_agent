@@ -350,6 +350,59 @@ def test_numbered_clients_keep_sat_names():
     assert bundle.members["VehicleStatus_1"]["definition"] == bundle.catalog["VehicleStatus_1"]
 
 
+@pytest.mark.parametrize("alias,role", [("VehicleStatus", "server"), ("VehicleStatus_1", "client")])
+def test_full_path_selection_keeps_source_service_name_not_path_or_sat_example(alias, role):
+    model = parse()
+    service = model.services[0]
+    body = NativeCatalogRequest.model_validate(
+        {"members": {alias: {"service": service.path, "role": role}}}
+    )
+    bundle = build_native_bundle(model, body, Settings(_env_file=None))
+    member = bundle.members[alias]
+    assert member["service"] == member["name"] == service.name
+    assert member_key(alias, member) == (
+        "VehicleStatus_server" if role == "server" else "VehicleStatus_client_1"
+    )
+    assert bundle.catalog[alias]["source"] == {
+        "service_name": service.name,
+        "service_path": service.path,
+        "deployment_path": service.deployment_path,
+    }
+    assert bundle.catalog[alias]["service_id"] == service.service_id
+    assert ("definition" in member) is (alias != service.name)
+
+
+def test_reference_example_service_cannot_replace_imported_arxml_service():
+    body = NativeCatalogRequest(members={"DoorService": {"role": "server"}})
+    with pytest.raises(CatalogBuildError, match="缺失或有歧义"):
+        build_native_bundle(parse(), body, Settings(_env_file=None))
+
+
+@pytest.mark.parametrize("alias,role", [("VehicleStatus", "server"), ("VehicleStatus_1", "client")])
+def test_source_name_selected_by_full_path_initializes_real_native(
+    tmp_path, native_runtime, alias, role
+):
+    model = parse()
+    service = model.services[0]
+    with S2sBaseClass.from_arxml(
+        model,
+        {alias: {"service": service.path, "role": role}},
+        directory=tmp_path / "runtime",
+        settings=Settings(_env_file=None, native_binary=native_runtime),
+        auto_restart=False,
+    ) as partner:
+        expected = "VehicleStatus_server" if role == "server" else "VehicleStatus_client_1"
+        assert list(partner.partner_infos) == [expected]
+        assert partner.partner_infos[expected].require_socket().fileno() >= 0
+        states = partner.sim_operator.send_request("running_service", print_result=False)
+        assert f"{alias}_{role}" in states
+        binding = json.loads((tmp_path / "runtime" / "model-binding.json").read_text())
+        assert binding["members"][alias]["service"] == service.name
+        assert binding["catalog"][alias]["source"]["service_name"] == service.name
+        process = partner.sim_operator.process
+    assert process.poll() == 0
+
+
 def test_catalog_api_is_explicit_and_does_not_start_processes(tmp_path):
     settings = Settings(_env_file=None, data_dir=tmp_path)
     with TestClient(create_app(settings)) as client:

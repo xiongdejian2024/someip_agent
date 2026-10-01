@@ -334,9 +334,19 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         } else if (function=="ping") {
             Json declared=Json::object();
             for(const auto &[name,id]:configured_applications_)declared[name]=id;
+            Json member_options=Json::object();
+            for(const auto &[key,member]:members_) {
+                Json options=Json::array();
+                for(const auto &weak:member->connections)
+                    if(auto connection=weak.lock();connection && connection->socket.is_open())
+                        options.push_back(connection->tcp_no_delay());
+                member_options[key]=options;
+            }
             result={{"runtime","vsomeip"},{"protocol",1},{"version","3.5.10"},
-                {"capabilities",Json::array({"member_application_identity_v1"})},
+                {"capabilities",Json::array({"member_application_identity_v1","ipc_tcp_no_delay_v1"})},
                 {"configured_applications",declared},
+                {"ipc_tcp_no_delay",conn->tcp_no_delay()},
+                {"member_ipc_tcp_no_delay",member_options},
                 {"application_count",applications_.size()},{"pending_requests",pending_.size()}};
         }
         else throw std::runtime_error("未知控制操作: "+function);

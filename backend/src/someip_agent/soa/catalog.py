@@ -203,7 +203,11 @@ def _definition(
         "minor_version": service.minor_version,
         "methods": methods,
         "events": events,
-        "source": {"service_path": service.path, "deployment_path": service.deployment_path},
+        "source": {
+            "service_name": service.name,
+            "service_path": service.path,
+            "deployment_path": service.deployment_path,
+        },
         "serialization_profile": "arxml-resolved-explicit-or-scalar",
     }
 
@@ -318,9 +322,10 @@ def build_native_bundle(
         service_configs[identity] = endpoint
         catalog[alias] = spec
         members[alias] = {
-            "service": selection,
+            # 完整路径只用于定位；业务服务名取自源 ARXML，不取 SAT 示例或内部别名。
+            "service": service.name,
             "role": member.role,
-            "name": member.name or selection,
+            "name": member.name or service.name,
             "instance_id": instance,
             "transport": "tcp" if member.transport == "tcp" else "udp",
             "status": member.status,
@@ -328,8 +333,8 @@ def build_native_bundle(
         }
         if member.application_name is not None:
             members[alias]["application_name"] = member.application_name
-        if selection != alias:
-            # 保留 SAT 的服务名、编号客户端键和实例命名；不同 alias 可绑定不同部署。
+        if service.name != alias:
+            # SAT 只定义调用形式；名称和部署来自选中的模型，不复制参考服务定义。
             members[alias]["definition"] = deepcopy(spec)
     name = request.application_name
     config = {

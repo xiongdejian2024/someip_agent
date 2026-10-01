@@ -12,6 +12,7 @@ import os
 import platform
 import resource
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -33,6 +34,7 @@ from soa_partner.src.Operator import SOAOperator
 from someip_agent.config import Settings
 from someip_agent.pcap.importer import PcapImporter
 from someip_agent.protocol.someip import decode_many
+from someip_agent.soa.ipc import ipc_tcp_no_delay
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
@@ -391,6 +393,46 @@ def run_profile(directory, spec, duration, rpc_count):
         errors,
         changed,
     ):
+        options = []
+        expected_option = ipc_tcp_no_delay()
+        for partner in (server, client):
+            pong = partner.sim_operator.send_request("ping", print_result=False)
+            if "ipc_tcp_no_delay_v1" not in pong.get("capabilities", []):
+                raise AssertionError("缺少原生 IPC 实际选项查询能力，不能开始开关对照")
+            python_control = bool(
+                partner.sim_operator.tcp_socket.getsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_NODELAY
+                )
+            )
+            python_members = {
+                key: bool(
+                    info.require_socket().getsockopt(
+                        socket.IPPROTO_TCP, socket.TCP_NODELAY
+                    )
+                )
+                for key, info in partner.partner_infos.items()
+            }
+            native_members = pong["member_ipc_tcp_no_delay"]
+            if (
+                python_control != expected_option
+                or pong["ipc_tcp_no_delay"] is not expected_option
+                or not python_members
+                or set(native_members) != set(python_members)
+                or any(value != expected_option for value in python_members.values())
+                or any(
+                    values != [expected_option] for values in native_members.values()
+                )
+            ):
+                raise AssertionError("IPC 两端实际 TCP_NODELAY 选项与实验开关不一致")
+            options.append(
+                {
+                    "python_control": python_control,
+                    "native_control": pong["ipc_tcp_no_delay"],
+                    "python_members": python_members,
+                    "native_members": native_members,
+                }
+            )
+        report["ipc_socket_options"] = options
         with capture(directory) as path:
             before, started = resources(processes), time.monotonic()
             samples = []
@@ -551,7 +593,15 @@ def main():
     parser.add_argument("--rpc-count", type=int, default=200)
     parser.add_argument("--native-only", action="store_true")
     parser.add_argument("--require-installed", action="store_true")
+    parser.add_argument(
+        "--ipc-tcp-no-delay",
+        choices=("0", "1"),
+        help="同一安装包 IPC TCP_NODELAY 开关对照；不改变线上 vsomeip TCP",
+    )
     args = parser.parse_args()
+    if args.ipc_tcp_no_delay is not None:
+        os.environ["SOMEIP_AGENT_IPC_TCP_NODELAY"] = args.ipc_tcp_no_delay
+    expected_option = ipc_tcp_no_delay()
     if (
         not math.isfinite(args.duration)
         or not 1 <= args.duration <= 30
@@ -583,6 +633,7 @@ def main():
             "module_path": str(module_path),
             "duration_seconds": args.duration,
             "rpc_count": args.rpc_count,
+            "ipc_tcp_no_delay": expected_option,
         },
         "profiles": [],
         "scope": "单次 Linux Docker/veth 软件时间观测；RPC 含 Python 调用/回调/IPC；原生序列含编码/定时器/vsomeip；不是纯 C++ 吞吐对照、HIL、线速或长稳承诺",

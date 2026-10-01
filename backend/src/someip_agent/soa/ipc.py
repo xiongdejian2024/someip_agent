@@ -3,12 +3,38 @@ from __future__ import annotations
 import asyncio
 import codecs
 import json
+import logging
+import os
 import socket
 import time
 from collections.abc import Iterator
 from typing import Any
 
 MAX_FRAME = 4 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
+def ipc_tcp_no_delay() -> bool:
+    value = os.environ.get("SOMEIP_AGENT_IPC_TCP_NODELAY", "1")
+    if value not in {"0", "1"}:
+        raise ValueError("SOMEIP_AGENT_IPC_TCP_NODELAY 只能为 0 或 1")
+    return value == "1"
+
+
+def configure_ipc_socket(conn: socket.socket) -> None:
+    """IPC 两端均配置标准 TCP 选项；实际值由 getsockopt 核对，不代表对端选项。"""
+    try:
+        expected = ipc_tcp_no_delay()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, int(expected))
+        actual = bool(conn.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
+        if actual != expected:
+            raise OSError("IPC TCP_NODELAY 实际选项与配置不一致")
+        logger.debug(
+            "IPC TCP 选项已配置", extra={"operation": "ipc.options", "tcp_no_delay": actual}
+        )
+    except Exception:
+        logger.exception("IPC TCP 选项配置失败", extra={"operation": "ipc.options"})
+        raise
 
 
 async def read_frame(reader: asyncio.StreamReader) -> dict[str, Any]:

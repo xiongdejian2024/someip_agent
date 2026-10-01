@@ -47,6 +47,8 @@ def test_generated_catalog_initializes_client_server_methods_events_fields(
                 allowed_destinations=[peer, "239.255.77.1"],
             )
             member = {
+                # 路径只负责选择；业务调用名须保留源 ARXML 的 SHORT-NAME。
+                "service": model.services[0].path,
                 "role": role,
                 "transport": transport,
                 "peer_host": peer,
@@ -55,7 +57,7 @@ def test_generated_catalog_initializes_client_server_methods_events_fields(
             }
             members = {"VehicleStatus": member}
             if role == "client":
-                members["VehicleStatus_1"] = {**member, "service": "VehicleStatus"}
+                members["VehicleStatus_1"] = dict(member)
             request = NativeCatalogRequest.model_validate(
                 {
                     "application_name": name,
@@ -65,6 +67,12 @@ def test_generated_catalog_initializes_client_server_methods_events_fields(
                 }
             )
             bundle = build_native_bundle(model, request, settings)
+            assert all(
+                cfg["service"] == "VehicleStatus" for cfg in bundle.members.values()
+            )
+            assert all(
+                cfg["name"] == "VehicleStatus" for cfg in bundle.members.values()
+            )
             # 目录由被测代码生成，不能复制静态 catalog 让测试看似成功。
             directory = (
                 EVIDENCE / f"arxml-{transport}-{byte_order}-{role}-{time.time_ns()}"

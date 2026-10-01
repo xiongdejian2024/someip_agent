@@ -534,12 +534,65 @@ API 层所有任务、外部设备或远端节点均具有自动恢复能力。�
 等待者不覆盖更新的状态。恢复初始化时使用原生已确认的订阅集合，不重新订阅已取消的事件。
 未知事件使整次变更失败，不先应用列表中的其他事件。周期启停/更新和成员生命周期串行。
 
-`heartbeat` 保留在四参数配置中；原始参考只说明它用于厂商通道阻塞检测，没有足够证据确认
-二进制内部语义或单位，因此目前不模拟厂商心跳消息，也不将进程 poll 检查冒充完整心跳支持。
+`heartbeat` 保留在四参数配置中。SAT `test_bootes/test_Safety/test_Block.py` 的 1200/2400
+在测试标题中与 1.2/2.4 秒周期明确对应，参数单位为毫秒；但参考目录没有 Bootes 安全心跳报文布局。
+用户于 2026-10-01 明确要求不实现 Bootes，因此厂商安全心跳不属于实现/验收范围；保留参数
+形式不代表发送该心跳。控制 socket 的独立活性探测和故障恢复仍保留，不冒充网络安全心跳。
 连续进程退出与暂停但未退出分别验收：隔离 Linux veth 下真实 SIGSTOP client/server，覆盖
 UDP/TCP、配置/订阅/周期恢复、在途请求失败且不重放及关闭不复活。独立抓包要求暂停中排队的
 SetPosition(123) 不出现在网络上，恢复前后的 57/99 则必须有实际请求和响应；人为插入重放副本
 必须使审计失败。此检测不等于 SAT 厂商 heartbeat 的全部语义。
+
+控制/成员 IPC 默认在 Python 与原生两端设置 `TCP_NODELAY`，不修改 vsomeip 的线上
+SOME/IP TCP socket。`SOMEIP_AGENT_IPC_TCP_NODELAY=0` 可用于关闭对照，`1` 或未设置为
+开启；其他值在启动前拒绝。现有 SAT 控制长度头、成员 JSON 文档流和二进制启动参数保持
+不变。新运行时服务模式 ping 的 `ipc_tcp_no_delay_v1` 能力返回该控制连接及各成员已连接 socket
+的实际选项，不以环境变量冒充观测。旧运行时默认字典仍兼容，不强制它提供此诊断能力。
+Python 开关覆盖 SOAOperator 控制/活性探测与 S2s 成员连接；异步监控仍采用 asyncio 的
+默认 TCP 设置，不属于此次开关对照的已测连接。
+
+服务名称只来自导入的 ARXML：完整路径用于无歧义选择，生成的成员 `service` 和缺省
+实例显示名采用源 SHORT-NAME，目录 `source` 同时记录名称、完整路径和部署路径。
+SAT/soa_partner 只参考初始化/调用形式，测试夹具服务不是生产服务目录。用户指定的
+`/Users/xiongdejian/project/vatms_project/comm/src/comm/config` 含多个车型和版本，尚未
+指定目标 ARXML/矩阵时不自动合并、挑最新或以 SAT 示例服务替代；comm 对齐仍待明确源文件。
+
+### 指定 comm 配置的只读名称核对
+
+项目已有导入 `N_Platform_SOMEIP_ServiceTable-V0_TLS_V6.12.0.arxml`，SHA 为
+`b90a911d695721e53a92c9860d56a5068f75e9dc030967d43e95c554ab38f40c`。本轮显式核对候选
+H47A/V_6_12_0 的 service_define.json 与 communication_define.json：ARXML 的 131 个
+已部署服务在两份矩阵中全部同 ID、同名。矩阵有 137 个服务定义和 3978 条通信行；其额外
+服务不冒充已导入 ARXML。service_define SHA 为
+`27eb998ec6face576771dce8e550440a941354d7cef03cb0055be5e2f9b8616f`，communication_define
+SHA 为 `d2ca56b8fc5186a9f20a4b6c5d8309eaf2a7b21ea9051ab8fcb4108bb4d4442b`。
+
+证据位于 build/comm-name-evidence/names.json，完整解析异常堆栈位于 parse.log。934 个
+参数/字段投影记录存在 wire_schema 错误（重复引用可重复计数，不是 934 个独立类型）。
+名称审计的 verified 仅用于名称/Service ID；runtime_verified 明确为 false。尚不能据此
+宣称这些实际车型服务全部可初始化/发包，也没有把车辆 IP、端口或 VLAN 自动用于虚拟网。
+其他矩阵版本存在缺失或改名；将哪个版本作为项目激活源仍需用户确认。
+
+布局门禁不等于源文件完全没有序列化配置。只读 XML 核对发现 1 个
+SOMEIP-TRANSFORMATION-DESCRIPTION（ALIGNMENT=64、明确大端），1 个 DATA-TRANSFORMATION、
+2271 个 SOMEIP-TRANSFORMATION-I-SIGNAL-PROPS（样本 SESSION-HANDLING-SR=ACTIVE）；AP
+服务元素映射与 AP-SOMEIP-TRANSFORMATION-PROPS 均为 0。当前 resolver 仅覆盖 AP 元素
+映射，未把该 I-SIGNAL 引用链、对齐和 session 属性落实为业务布局；需后续明确解析与黄金字节
+验收，不能套用已有 8-bit 对齐/无 session 的 AP 夹具规则或删除门禁。
+
+复现时显式指定三份源文件和新证据路径，不自动扫描/合并不同车型：
+
+```bash
+mkdir -p build/comm-name-new-evidence
+.venv/bin/python native/tests/audit_service_names.py \
+  --arxml data/imports/b90a911d695721e53a92c9860d56a5068f75e9dc030967d43e95c554ab38f40c/N_Platform_SOMEIP_ServiceTable-V0_TLS_V6.12.0.arxml \
+  --service-define /Users/xiongdejian/project/vatms_project/comm/src/comm/config/comm_matrix/H47A/V_6_12_0/service_define.json \
+  --communication-define /Users/xiongdejian/project/vatms_project/comm/src/comm/config/comm_matrix/H47A/V_6_12_0/communication_define.json \
+  --output build/comm-name-new-evidence/names.json --log-file build/comm-name-new-evidence/parse.log
+```
+
+工具复用现有 lxml/ArxmlParser 与标准 JSON，不启动二进制/连接 socket/修改源模型。名称、
+ID、同 ID 不同名称、通信配置不一致、未部署、空模型与布尔 ID 的 8 项正反向回归已纳入 CI。
 
 WTI 虚拟网测试用空列表事件做有界的订阅准备探针：服务可用之后必须收到实际通知，才能开始
 一次性的业务断言。不能以固定 sleep 代替 SD 订阅确认，也不把准备探针计入业务黄金向量。
