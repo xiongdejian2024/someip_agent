@@ -5,6 +5,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -67,16 +68,21 @@ async def agent_chat_stream(
             yield f"event: error\ndata: {json.dumps({'message': detail}, ensure_ascii=False)}\n\n"
             yield 'event: done\ndata: {"status":"error"}\n\n'
         finally:
-            if pending is not None:
-                pending.cancel()
-                results = await asyncio.gather(pending, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, Exception) and not isinstance(result, StopAsyncIteration):
-                        logger.error(
-                            "取消智能体事件读取时异常",
-                            exc_info=(type(result), result, result.__traceback__),
-                        )
-            await stream.aclose()
+            # Starlette 的取消作用域会在每次 await 再次取消；保护有界的进程清理，
+            # 否则 SIGTERM 已发出，但 wait/kill 和运行时会话登记可能无法完成。
+            with anyio.CancelScope(shield=True):
+                if pending is not None:
+                    pending.cancel()
+                    results = await asyncio.gather(pending, return_exceptions=True)
+                    for result in results:
+                        if isinstance(result, Exception) and not isinstance(
+                            result, StopAsyncIteration
+                        ):
+                            logger.error(
+                                "取消智能体事件读取时异常",
+                                exc_info=(type(result), result, result.__traceback__),
+                            )
+                await stream.aclose()
 
     return StreamingResponse(
         events(),

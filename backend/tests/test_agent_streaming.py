@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pi_gateway import PausedResponse, completion, gateway
+from starlette.requests import Request
 
 from someip_agent.agent.service import (
     AgentService,
@@ -15,11 +16,13 @@ from someip_agent.agent.service import (
     LlmConfigurationService,
     LlmGatewayError,
 )
+from someip_agent.api.agent import agent_chat_stream
 from someip_agent.config import Settings
 from someip_agent.domain.models import AgentChatRequest
 from someip_agent.main import create_app
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.simulator import SimulationManager
+from someip_agent.state import ApplicationState
 
 
 def chunk(delta: dict[str, Any], finish_reason: str | None = None) -> bytes:
@@ -75,6 +78,40 @@ async def test_cancel_while_pi_gateway_is_stalled_cleans_process(tmp_path):
             await pending
         await stream.aclose()
         assert subject.runtime_view()["active_sessions"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+async def test_http_disconnect_cleans_pi_under_starlette_cancel_scope(tmp_path, spec_version):
+    upstream = PausedResponse([chunk({"content": "断连前文本"}), completion("不应等待的尾段")])
+    with gateway([upstream]) as (url, _, _):
+        state = ApplicationState(
+            Settings(_env_file=None, data_dir=tmp_path, llm_base_url=url, llm_api_key="test-key")
+        )
+        disconnect = asyncio.Event()
+        delivered = []
+
+        async def receive():
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            body = message.get("body", b"")
+            if "断连前文本".encode() in body:
+                delivered.append(body)
+                disconnect.set()
+
+        scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+        response = await agent_chat_stream(
+            AgentChatRequest(message="断连测试"), Request(scope, receive=receive), state
+        )
+        try:
+            await asyncio.wait_for(response(scope, receive, send), 5)
+            assert delivered
+            assert not upstream.completed.is_set()
+            assert state.agent.runtime_view()["active_sessions"] == 0
+        finally:
+            await state.shutdown()
 
 
 @pytest.mark.asyncio
