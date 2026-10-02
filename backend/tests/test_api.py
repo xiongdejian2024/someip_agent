@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from someip_agent.config import Settings
 from someip_agent.main import create_app
+from someip_agent.version import __version__
 
 FIXTURE = Path(__file__).parent / "fixtures" / "vehicle_service.arxml"
 
@@ -13,7 +14,7 @@ def test_health_and_arxml_import(tmp_path) -> None:
     with TestClient(app) as client:
         health = client.get("/api/v1/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.1.0"
+        assert health.json()["version"] == __version__
 
         with FIXTURE.open("rb") as handle:
             response = client.post(

@@ -76,9 +76,27 @@ GitHub的latest和附件下载可能重定向到版本页/CDN。升级器复用�
 依据：[GitHub附件链接](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)、
 [HTTPX发送前hook](https://www.python-httpx.org/advanced/event-hooks/)。
 
-正式签名密钥生成及保存到仓库Actions Secrets的授权仍待确认，未创建密钥或Secret。
-私钥不进入源码/安装包/聊天；没有正式信任根时不发布未签名清单或使用临时测试密钥。
+2026-10-02用户已授权生成正式签名密钥、保存本地并完成GitHub发布。
+私钥保存在仓库外的受限本地目录，并同步到`SOMEIP_AGENT_UPDATE_SIGNING_KEY` Actions Secret。
+私钥不进入源码/安装包/聊天；Linux x86_64发行入口自0.1.1内置正式公钥及上述清单地址，
+显式环境变量（包括空值）仍优先。开发启动保持默认禁用，未验收架构不自动启用。
 车型源冲突按用户要求保留不解决，正式发布说明需列明未完成的车型互操作验收。
+
+正式发布使用`.github/workflows/release.yml`手动入口，提供当前main提交已成功的CI run ID。
+流水线严格核对CI工作流路径、push事件、main分支与当前提交SHA，只下载独立基线ZIP，
+检查ZIP完整性与版本、签名私钥对应公钥，再创建草稿、逐字节核对已上传附件后公开。
+失败草稿保留供检查，不自动覆盖既有标签或附件；发布令牌创建标签不会重复触发CI。
+源码提交/签名准备不等于Release已公开，实际地址须发布后单独检查。
+
+0.1.0开发版需在启动前配置这两个公开变量，或首次直接安装0.1.1发行版：
+
+```bash
+export SOMEIP_AGENT_UPDATE_MANIFEST_URL=https://github.com/xiongdejian2024/someip_agent/releases/latest/download/manifest-linux-x86_64.json
+export SOMEIP_AGENT_UPDATE_PUBLIC_KEY=EpEe8jb6SNIDMvMcxEwmcZw5I9ZMLtJeUb6RNA/OVfY=
+```
+
+本地私钥应离线备份并保持600权限；不要上传聊天或提交源码。
+丢失私钥无法再签出当前客户端认可的升级，轮换公钥需先发布旧信任根认可的迁移版本。
 
 本轮隔离Linux源码升级回归位于`build/github-release-redirect-linux-source-evidence`：
 44项通过、零失败/错误/跳过，包括直连与HTTPS跳转的真实脚本进程升级/回滚。
@@ -112,8 +130,9 @@ macOS首次本地检查40通过/4失败（健康等待和进程退出超时）�
 
 `native/tests/run_linux_update.sh` 使用容器回环 HTTPS、临时证书和临时签名密钥，容器
 `--network none`；不访问公网更新源、不升级用户当前安装目录。
-第二版本 0.1.1 仅在证据目录的源码副本中真实编译，四份源码版本一致；仓库仍保持 0.1.0，
-测试版不发布。源脚本基线与真实 PyInstaller 主程序/升级器分别验收，不把前者当发行包。
+升级夹具在证据目录的源码副本中构建仓库版本加一的测试版本，四份源码版本一致，
+测试版不发布。此前0.1.0→0.1.1测试记录仍只属于当时夹具，不是本次正式0.1.1制品。
+源脚本基线与真实 PyInstaller 主程序/升级器分别验收，不把前者当发行包。
 
 测试覆盖发行包缺省安装根目录/升级器发现、权限及外置暂存门禁、HTTPS 签名升级、重启版本、旧版备份、网页
 随包提供、随包原生发生器启动，以及删除新包 Python 运行库后的真实启动失败与旧版回滚。

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "someip-agent-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "企业级 SOME/IP 仿真、监控与智能体后端"
 readme = "README.md"
 requires-python = ">=3.10"

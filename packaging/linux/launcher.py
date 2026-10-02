@@ -13,6 +13,10 @@ os.environ.setdefault(
     "SOMEIP_AGENT_NATIVE_BINARY", str(bundle / "native" / "soa_partner")
 )
 
+from someip_agent.update.release_defaults import configure_linux_release_updates
+
+configure_linux_release_updates()
+
 from someip_agent.main import run
 
 if __name__ == "__main__":

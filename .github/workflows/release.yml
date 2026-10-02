@@ -1,0 +1,94 @@
+name: 签名发布 Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "当前 main 提交已成功的 CI run ID（仅使用独立基线制品）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: linux-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+    steps:
+      - name: 验证 CI 来源、提交和成功结论
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$CI_RUN_ID" --jq '.' |
+            jq -e --arg sha "$GITHUB_SHA" '
+              .status == "completed" and .conclusion == "success" and
+              .event == "push" and .head_branch == "main" and
+              .head_sha == $sha and .path == ".github/workflows/ci.yml"'
+      - name: 检出已验收提交
+        uses: actions/checkout@v4
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装项目既有签名依赖
+        run: python -m pip install 'cryptography>=43,<47'
+      - name: 下载独立基线发行包并校验版本
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/check_version.py
+          gh run download "$CI_RUN_ID" --name linux-release-x86_64 --dir release-assets
+          version="$(tr -d '\r\n' < VERSION)"
+          artifact="release-assets/someip-agent-${version}-linux-x86_64.zip"
+          test -f "$artifact"
+          unzip -t "$artifact"
+          test "$(unzip -p "$artifact" VERSION)" = "$version"
+          test -f "docs/releases/${version}.md"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: 正式签名与信任根一致性检查
+        env:
+          SIGNING_KEY: ${{ secrets.SOMEIP_AGENT_UPDATE_SIGNING_KEY }}
+          PYTHONPATH: backend/src:scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$SIGNING_KEY"
+          signing_path="$RUNNER_TEMP/someip-release-signing.pem"
+          trap 'rm -f "$signing_path"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$signing_path"
+          unset SIGNING_KEY
+          python -c 'import sys; from pathlib import Path; from create_update_manifest import load_private_key, public_key_base64; from someip_agent.update.release_defaults import RELEASE_PUBLIC_KEY; assert public_key_base64(load_private_key(Path(sys.argv[1]))) == RELEASE_PUBLIC_KEY, "签名私钥与客户端信任根不一致"' "$signing_path"
+          python scripts/create_update_manifest.py \
+            --artifact "release-assets/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip" \
+            --download-url "https://github.com/$GH_REPO/releases/download/v${RELEASE_VERSION}/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip" \
+            --private-key "$signing_path" \
+            --output release-assets/manifest-linux-x86_64.json \
+            --release-notes "$(<"docs/releases/${RELEASE_VERSION}.md")"
+          (cd release-assets && sha256sum "someip-agent-${RELEASE_VERSION}-linux-x86_64.zip") > release-assets/SHA256SUMS
+      - name: 创建草稿并核对上传内容
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          gh release create "$tag" release-assets/* --draft --target "$GITHUB_SHA" \
+            --title "SOME/IP Agent ${RELEASE_VERSION}（Linux x86_64）" \
+            --notes-file "docs/releases/${RELEASE_VERSION}.md"
+          gh release download "$tag" --dir verified-assets
+          cmp release-assets/manifest-linux-x86_64.json verified-assets/manifest-linux-x86_64.json
+          cmp release-assets/SHA256SUMS verified-assets/SHA256SUMS
+          cmp "release-assets/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip" \
+            "verified-assets/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip"
+      - name: 发布已核验草稿
+        run: gh release edit "v${RELEASE_VERSION}" --draft=false --latest
