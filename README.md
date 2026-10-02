@@ -63,7 +63,8 @@ IPv4 分片已接入成熟重组库，但不代表支持所有 IP 流量。当�
 
 ## 本地开发
 
-要求 Python 3.10+、Node.js 20+。推荐 Python 3.12 与 Node.js 22 LTS。
+源码开发要求 Python 3.10+、Node.js 22.19.0+。推荐 Python 3.12。
+Linux 完整发行包将内置 Node 与 Pi 核心，最终用户不需要安装插件或 Skills。
 `make install` 会自动创建项目内的 `.venv`，后续后端命令固定使用该虚拟环境，避免系统
 Python 与项目依赖混用。
 
@@ -109,6 +110,11 @@ Docker 模式适合 ARXML/PCAP/页面联调。实时抓包、组播、VLAN、硬
 网卡能力，不能假定普通 Docker Desktop 网络与车载以太网测试网等价。
 
 ## 智能体模型配置
+
+智能体使用内置 Pi Agent Core 执行模型/工具循环；同步与 SSE 使用同一条链路。
+未配置模型密钥时仍提供明确标注的本地确定性证据，不冒充 Pi 模型推理。
+源码安装执行 `make install`（含 `make install-agent`）；不会读取本机 Pi CLI、插件或 Skills。
+控制台操作目录和调用方式见 [Pi 与控制台接口](docs/pi-agent.md)。
 
 默认网关地址为：
 

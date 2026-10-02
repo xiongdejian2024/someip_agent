@@ -49,6 +49,10 @@ def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
         raise ValueError("构建环境安装包版本与仓库不一致，请先安装当前后端")
     if not native.is_file() or not (root / "frontend/dist/index.html").is_file():
         raise FileNotFoundError("缺少原生二进制或已构建前端")
+    pi_root = Path("/opt/someip-pi")
+    node = Path(shutil.which("node") or "")
+    if not node.is_file() or not (pi_root / "runtime.mjs").is_file():
+        raise FileNotFoundError("缺少已锁定的内置 Pi 运行时或 Node")
     native_version = subprocess.check_output(
         [str(native), "--version"], text=True
     ).strip()
@@ -98,6 +102,10 @@ def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
         "pytest",
         "--add-binary",
         f"{native}:native",
+        "--add-binary",
+        f"{node}:pi",
+        "--add-data",
+        f"{pi_root / 'runtime.mjs'}:pi",
     ]
     for plugin in plugins:
         command += ["--add-binary", f"{plugin}:."]
@@ -132,6 +140,7 @@ def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
     archive_sdk(Path("/opt/vsomeip"), notices / "vsomeip-source.zip")
     shutil.copy2(root / "native/CMakeLists.txt", notices / "native-CMakeLists.txt")
     shutil.copy2(Path("/opt/libtins/LICENSE"), notices / "libtins-LICENSE")
+    shutil.copytree(pi_root, notices / "pi")
     provenance = {
         "version": version,
         "platform": platform.platform(),
@@ -144,6 +153,9 @@ def build(root: Path, output: Path, native: Path, library_dir: Path) -> Path:
         "updater_sha256": digest(release / "someip-agent-updater"),
         "vsomeip": "3.5.10",
         "libtins": "4.6",
+        "pi_agent_core": "1.0.0",
+        "node": subprocess.check_output([str(node), "--version"], text=True).strip(),
+        "pi_runtime_sha256": digest(pi_root / "runtime.mjs"),
     }
     (release / "build-info.json").write_text(
         json.dumps(provenance, ensure_ascii=False, indent=2),

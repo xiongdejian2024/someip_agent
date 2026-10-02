@@ -3,6 +3,8 @@
 data
 build
 frontend/node_modules
+agent-runtime/node_modules
+agent-runtime/dist
 .mypy_cache
 .ruff_cache
 **/__pycache__

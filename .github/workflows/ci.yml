@@ -127,6 +127,13 @@ jobs:
       - name: 安装后端开发依赖
         run: python -m pip install -e './backend[dev]'
 
+      - name: 配置并构建内置 Pi 核心（不加载插件或 Skills）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+      - name: 构建并锁定 Pi 依赖
+        run: make install-agent
+
       - name: 静态检查
         run: >-
           python -m ruff check backend/src backend/tests

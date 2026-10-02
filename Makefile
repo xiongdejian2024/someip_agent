@@ -48,7 +48,11 @@ help:
 $(VENV_PYTHON):
 	$(PYTHON) -m venv $(VENV)
 
-install: install-backend install-frontend
+install: install-backend install-frontend install-agent
+
+install-agent:
+	$(NPM) --prefix agent-runtime ci --no-audit --no-fund
+	$(NPM) --prefix agent-runtime run build
 
 install-backend: $(VENV_PYTHON)
 	$(VENV_PYTHON) -m pip install -e './backend[dev]'
@@ -71,7 +75,7 @@ typecheck:
 build-frontend:
 	$(NPM) --prefix frontend run build
 
-ci: check-version lint test typecheck build-frontend
+ci: install-agent check-version lint test typecheck build-frontend
 
 dev-backend: $(VENV_PYTHON)
 	SOMEIP_AGENT_HOST=127.0.0.1 SOMEIP_AGENT_PORT=8765 $(VENV_PYTHON) -m uvicorn someip_agent.main:app --host 127.0.0.1 --port 8765 --reload --app-dir backend/src

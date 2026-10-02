@@ -1,5 +1,14 @@
 ARG NATIVE_BASE=debian:bookworm-slim
 ARG NATIVE_SDK=upstream
+ARG PI_NODE_IMAGE=node:22.19.0-bookworm-slim
+FROM ${PI_NODE_IMAGE} AS pi-build
+WORKDIR /opt/pi-source
+COPY agent-runtime/package.json agent-runtime/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY agent-runtime/build.mjs agent-runtime/pi-LICENSE ./
+COPY agent-runtime/src ./src
+RUN npm run build
+
 FROM ${NATIVE_BASE} AS upstream
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates libboost-system-dev libboost-thread-dev \
@@ -14,6 +23,12 @@ RUN git clone --depth 1 --branch ${VSOMEIP_TAG} https://github.com/COVESA/vsomei
     && cmake --build vsomeip-build --target install -j1 && ldconfig
 # 默认使用上游阶段；已有同提交 SDK 可显式传入以便离线复用，桥接阶段仍核验源码提交。
 FROM ${NATIVE_SDK} AS build
+COPY --from=pi-build /usr/local/bin/node /usr/local/bin/node
+COPY --from=pi-build /usr/local/LICENSE /opt/someip-pi/node-LICENSE
+COPY --from=pi-build /opt/pi-source/dist/runtime.mjs /opt/someip-pi/runtime.mjs
+COPY --from=pi-build /opt/pi-source/package-lock.json /opt/someip-pi/package-lock.json
+COPY --from=pi-build /opt/pi-source/dist/third-party-notices.json /opt/someip-pi/third-party-notices.json
+ENV SOMEIP_AGENT_PI_RUNTIME_PATH=/opt/someip-pi/runtime.mjs
 RUN test "$(git -C /opt/vsomeip rev-parse HEAD)" = c4e0db329da9b63f511f3c2456c040582daf9305 \
     && git -C /opt/vsomeip diff --exit-code HEAD -- interface implementation
 # 独立抓包依赖层：固定维护版本和局部 RFC 791 选项补丁，不静默改写原始报文。

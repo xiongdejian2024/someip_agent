@@ -1,6 +1,17 @@
 # syntax=docker/dockerfile:1.7
 
+FROM node:22.19.0-bookworm-slim AS pi-build
+WORKDIR /opt/pi-source
+COPY agent-runtime/package.json agent-runtime/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY agent-runtime/build.mjs agent-runtime/pi-LICENSE ./
+COPY agent-runtime/src ./src
+RUN npm run build
+
 FROM python:3.12-slim AS backend-dev
+COPY --from=pi-build /usr/local/bin/node /usr/local/bin/node
+COPY --from=pi-build /opt/pi-source/dist/runtime.mjs /opt/someip-pi/runtime.mjs
+ENV SOMEIP_AGENT_PI_RUNTIME_PATH=/opt/someip-pi/runtime.mjs
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -28,6 +39,9 @@ EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 FROM python:3.12-slim AS backend-runtime
+COPY --from=pi-build /usr/local/bin/node /usr/local/bin/node
+COPY --from=pi-build /opt/pi-source/dist/runtime.mjs /opt/someip-pi/runtime.mjs
+ENV SOMEIP_AGENT_PI_RUNTIME_PATH=/opt/someip-pi/runtime.mjs
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

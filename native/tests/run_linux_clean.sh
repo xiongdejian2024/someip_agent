@@ -40,7 +40,7 @@ if [ "$ready" != true ]; then
   exit 1
 fi
 docker exec "$linux_smoke_container" bash -c '
-  for linux_clean_tool in python python3 gcc g++ cmake; do
+  for linux_clean_tool in python python3 node npm pi gcc g++ cmake; do
     if command -v "$linux_clean_tool"; then exit 1; fi
   done
 '
@@ -51,6 +51,10 @@ docker exec "$linux_smoke_container" sha256sum /opt/someip-agent/_internal/nativ
 docker exec "$linux_smoke_container" cat /opt/someip-agent/build-info.json \
   > "$linux_smoke_evidence/build-info.json"
 request GET / > "$linux_smoke_evidence/index.http"
+docker cp scripts/test_pi_distribution.mjs "$linux_smoke_container:/tmp/test_pi_distribution.mjs"
+docker exec "$linux_smoke_container" /opt/someip-agent/_internal/pi/node \
+  /tmp/test_pi_distribution.mjs > "$linux_smoke_evidence/pi-result.json" \
+  2> "$linux_smoke_evidence/pi-errors.log"
 request POST /api/v1/simulation/start '{"service_id":4660,"method_id":32770,"transport":"internal"}' \
   > "$linux_smoke_evidence/start.http"
 request POST /api/v1/simulation/stop > "$linux_smoke_evidence/stop.http"
