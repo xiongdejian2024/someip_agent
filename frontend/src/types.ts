@@ -325,6 +325,7 @@ export interface AgentHistoryItem {
 }
 
 export interface AgentChatResponse {
+  runtime?: 'pi-agent-core' | 'local-evidence-engine'
   answer?: string
   message?: string
   content?: string

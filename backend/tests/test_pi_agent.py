@@ -157,6 +157,38 @@ def test_pi_schema_rejection_never_runs_mutation(tmp_path):
             assert response.status_code == 200
             assert "error" in response.json()["traces"][0]["result"]
             assert "cleared" not in json.dumps(payloads[1])
+            record = next(
+                item
+                for item in client.get("/api/v1/audit/events").json()
+                if item["action"] == "console.clear_monitor"
+            )
+            assert record["success"] is False
+
+
+def test_pi_never_loads_host_plugins_skills_or_node_options(tmp_path, monkeypatch):
+    marker = tmp_path / "host-plugin-ran"
+    plugin_dir = tmp_path / "untrusted-pi-directory"
+    plugin_dir.mkdir()
+    injection = (
+        f"import{{writeFileSync}}from'node:fs';writeFileSync({json.dumps(str(marker))},'bad')"
+    )
+    monkeypatch.setenv("NODE_OPTIONS", f"--import=data:text/javascript,{injection}")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(plugin_dir))
+    with gateway([completion("只执行应用内置 Pi 核心。")]) as (url, _, _):
+        with TestClient(
+            create_app(
+                Settings(
+                    _env_file=None,
+                    data_dir=tmp_path / "data",
+                    llm_base_url=url,
+                    llm_api_key="test-key",
+                )
+            )
+        ) as client:
+            response = client.post("/api/v1/agent/chat", json={"message": "测试"})
+            assert response.status_code == 200
+            assert response.json()["runtime"] == "pi-agent-core"
+    assert not marker.exists()
 
 
 def test_pi_round_limit_is_not_a_fake_success(tmp_path):

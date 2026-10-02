@@ -3,6 +3,9 @@ import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 
 const base = process.argv[2] || 'http://127.0.0.1:8765/api/v1';
+if (process.env.SOMEIP_AGENT_TEST_ISOLATED !== '1') {
+  throw new Error('发行验收会配置测试模型凭据，只能在明确隔离的测试实例运行');
+}
 const gateway = createServer(async (request, response) => {
   let input = '';
   for await (const chunk of request) input += chunk;
@@ -56,17 +59,20 @@ try {
   assert.ok(content.includes('"status": "complete"'));
   assert.ok(!content.includes('distribution-test-only-key'));
   const controller = new AbortController();
+  const cancelTimeout = setTimeout(() => controller.abort(), 15000);
   const cancellation = await fetch(base + '/agent/chat/stream', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message: '取消测试' }), signal: controller.signal,
   });
   const reader = cancellation.body.getReader();
+  const decoder = new TextDecoder();
   let partial = '';
   while (!partial.includes('第一段取消测试文本')) {
     const { done, value } = await reader.read();
     assert.equal(done, false);
-    partial += new TextDecoder().decode(value);
+    partial += decoder.decode(value, { stream: true });
   }
+  clearTimeout(cancelTimeout);
   controller.abort();
   let active = 1;
   for (let attempt = 0; attempt < 50 && active; attempt++) {

@@ -52,7 +52,8 @@ docker exec "$linux_smoke_container" cat /opt/someip-agent/build-info.json \
   > "$linux_smoke_evidence/build-info.json"
 request GET / > "$linux_smoke_evidence/index.http"
 docker cp scripts/test_pi_distribution.mjs "$linux_smoke_container:/tmp/test_pi_distribution.mjs"
-docker exec "$linux_smoke_container" /opt/someip-agent/_internal/pi/node \
+docker exec -e SOMEIP_AGENT_TEST_ISOLATED=1 "$linux_smoke_container" \
+  /opt/someip-agent/_internal/pi/node \
   /tmp/test_pi_distribution.mjs > "$linux_smoke_evidence/pi-result.json" \
   2> "$linux_smoke_evidence/pi-errors.log"
 request POST /api/v1/simulation/start '{"service_id":4660,"method_id":32770,"transport":"internal"}' \
