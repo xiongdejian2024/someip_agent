@@ -7,6 +7,28 @@
 
 ## 当前收尾结论（2026-10-02）
 
+### Pi 改造：0.1.2 待发布
+
+Pi 执行链路、无插件/Skills 的内置运行时、受控控制台 API、页面命令、生命周期和审计
+已分块开发提交并推送。旧自研模型循环已移除；具体接口和权限边界见 `docs/pi-agent.md`。
+四处产品版本和前端 lockfile 已统一为 0.1.2，不覆盖已有 0.1.1 Release。
+
+当前待发行基线为 `160f53793781dc2d1838b6db59c4e118251e65e7`，
+[CI 37012384581](https://github.com/xiongdejian2024/someip_agent/actions/runs/37012384581)
+仍在执行完整原生/虚拟网与发行验收，未签名或公开 0.1.2。
+本地独立 Linux 安装包后端 615 项通过、零跳过；升级与失败回滚 38 项通过。
+最新清理构建上下文的发行包复验在
+`build/pi-012-linux-update-clean-context` 与 `build/pi-012-linux-context-clean-evidence`：
+命令退出 0，干净容器无系统 Python/Node/npm/Pi/SDK，包内 Node 22.19.0 实际执行
+Pi 模型/工具循环与 HTTP 取消清理，原生 payload 解码和网页/发生器验收通过。
+这些本机 aarch64 制品只是隔离证据，不能代替待发布的 GitHub x86_64 基线 ZIP。
+
+真实浏览器另验证模型工具导航、控制台 API 页面命令消费者和未授权写拒绝，测试空间已关闭。
+仅使用本地模型网关夹具，不消耗企业模型配额，不将其结果当作所有模型兼容性证明。
+车型源冲突、Bootes、Windows 及新增 IPv6 仍不在本次改造范围。
+
+### 已完成的 0.1.1 正式签名发布
+
 本轮密钥生成、签名发布与正式按钮升级请求已完成：正式签名密钥保存在仓库外受限目录并同步Actions Secret，
 [v0.1.1](https://github.com/xiongdejian2024/someip_agent/releases/tag/v0.1.1)
 已公开。正式包来自成功CI36960055104的9fdaadf提交；公网产品验签、SHA-256、ZIP
