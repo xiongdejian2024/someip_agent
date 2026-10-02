@@ -4,6 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from someip_agent.agent.console import ConsoleControls, console_tools
 from someip_agent.agent.service import AgentService, LlmConfigurationService
 from someip_agent.arxml.parser import ArxmlParseError, ArxmlParser
 from someip_agent.config import Settings
@@ -36,13 +37,17 @@ class ApplicationState:
         self.update_service = UpdateService(settings)
         self._arxml_model = self._restore_arxml_model()
         self._model_lock = asyncio.Lock()
+        self.console = ConsoleControls()
         self.agent = AgentService(
             self.llm_configuration,
             self.monitor,
             self.simulator,
             self.services_as_dicts,
             decoder=self.signal_decoder,
+            settings=settings,
+            audit=self.audit.add,
         )
+        self.agent.register_console_tools(console_tools(self))
 
     async def set_arxml_model(self, model: ArxmlModel) -> None:
         async with self._model_lock:
@@ -144,6 +149,7 @@ class ApplicationState:
         return self.enrich_messages([message])[0]
 
     async def shutdown(self) -> None:
+        await self.agent.shutdown()
         await self.services.shutdown()
         await self.network.shutdown()
         await self.simulator.shutdown()

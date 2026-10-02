@@ -84,6 +84,9 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 }
 
 export const api = {
+  consoleCommands: (afterId?: number) => request<{
+    last_id: number; commands: Array<{ id: number; action: 'navigate'; page: import('../types').PageId }>
+  }>(`/console/commands${afterId === undefined ? '' : `?after_id=${afterId}`}`),
   health: () => request<HealthResponse>('/health', {}, 3500),
   services: async () => normalizeServices(await request<RawServiceDefinition[]>('/model/services')),
   serviceSessions: () => request<NativeServiceSession[]>('/services/sessions'),

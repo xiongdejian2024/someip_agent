@@ -54,6 +54,32 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (connectionState !== 'online') return
+    let stopped = false
+    let cursor: number | undefined
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      try {
+        const result = await api.consoleCommands(cursor)
+        if (stopped) return
+        for (const command of result.commands) {
+          if (command.action !== 'navigate' || !pages.includes(command.page)) continue
+          setPage(command.page)
+          window.location.hash = `/${command.page}`
+          logInfo('控制台接口页面命令已应用', { commandId: command.id, page: command.page })
+        }
+        cursor = result.last_id
+      } catch (error) {
+        if (!stopped) logError('控制台接口命令读取失败', error)
+      } finally {
+        if (!stopped) timer = setTimeout(() => { void poll() }, 1500)
+      }
+    }
+    void poll()
+    return () => { stopped = true; clearTimeout(timer) }
+  }, [connectionState])
+
+  useEffect(() => {
     if (connectionState === 'connecting') return
     if (connectionState === 'offline') {
       setServicesLoading(false)

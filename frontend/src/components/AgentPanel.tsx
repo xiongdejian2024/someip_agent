@@ -290,7 +290,7 @@ export function AgentPanel({ open, onClose, connectionState, modelConfigured, co
   return (
     <aside className={'agent-panel agent-stream-panel' + (open ? ' open' : '')} hidden={!open} aria-label="工作区诊断智能体">
       <div className="agent-header">
-        <div className="agent-title-wrap"><span className="agent-avatar"><Icon name="sparkles" size={18} /></span><div><strong>诊断智能体</strong><span>跟随工作区 · 流式 Markdown</span></div></div>
+        <div className="agent-title-wrap"><span className="agent-avatar"><Icon name="sparkles" size={18} /></span><div><strong>Pi 诊断智能体</strong><span>内置运行时 · 无需插件或 Skills</span></div></div>
         <div className="agent-header-actions"><button className="icon-button" disabled={sending} onClick={() => {
           setMessages([welcomeMessage()]); setInput(''); setAllowMutation(false); followRef.current = true; setFollowing(true)
           logInfo('创建新的智能体会话')
@@ -329,7 +329,7 @@ export function AgentPanel({ open, onClose, connectionState, modelConfigured, co
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
       }}><Icon name="arrowDown" size={14} />回到最新回答</button>}
       <div className="agent-suggestions" aria-label="当前页面快捷任务">{suggestions.map((item) => <button key={item.label} disabled={sending} title={item.prompt} onClick={() => fillComposer(item.prompt)}>{item.label}</button>)}</div>
-      <label className="agent-mutation-choice"><input type="checkbox" checked={allowMutation} disabled={sending || disconnected} onChange={(event) => setAllowMutation(event.target.checked)} />允许本次内部仿真启停</label>
+      <label className="agent-mutation-choice" title="授权本次启停、RPC/通知、回复和清空缓存；网络发送仍受白名单限制"><input type="checkbox" checked={allowMutation} disabled={sending || disconnected} onChange={(event) => setAllowMutation(event.target.checked)} />允许本次控制台写操作</label>
       <div className="agent-composer">
         <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
