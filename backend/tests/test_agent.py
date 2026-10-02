@@ -1,62 +1,45 @@
 from __future__ import annotations
 
-from typing import Any
-
-import httpx
 import pytest
+from fastapi.testclient import TestClient
+from pi_gateway import completion, gateway
 
-from someip_agent.agent.service import LlmConfigurationService, OpenAiCompatibleClient
+from someip_agent.agent.service import LlmConfigurationError, LlmConfigurationService
 from someip_agent.config import Settings
+from someip_agent.main import create_app
 
 
-@pytest.mark.asyncio
-async def test_openai_compatible_client_uses_configured_gateway(monkeypatch) -> None:
-    captured: dict[str, Any] = {}
-
-    class FakeAsyncClient:
-        def __init__(self, **kwargs: Any) -> None:
-            captured["client_options"] = kwargs
-
-        async def __aenter__(self) -> FakeAsyncClient:
-            return self
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
-        async def post(
-            self,
-            url: str,
-            *,
-            headers: dict[str, str],
-            json: dict[str, Any],
-        ) -> httpx.Response:
-            captured.update(url=url, headers=headers, payload=json)
-            return httpx.Response(
-                200,
-                request=httpx.Request("POST", url),
-                json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]},
+def test_pi_uses_configured_gateway_and_sampling(tmp_path):
+    with gateway([completion("OK")]) as (url, payloads, headers):
+        app = create_app(
+            Settings(
+                _env_file=None,
+                data_dir=tmp_path,
+                llm_base_url=url,
+                llm_api_key="test-only-key",
+                llm_model="deepseek-v4-flash",
+                llm_temperature=0.3,
             )
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-    configuration = LlmConfigurationService(
-        Settings(
-            _env_file=None,
-            llm_base_url="https://voyahgpt-gateway.voyah.cn/api/gateway/v1/",
-            llm_api_key="test-only-key",
-            llm_model="deepseek-v4-flash",
-            llm_temperature=0.3,
         )
-    )
+        with TestClient(app) as client:
+            response = client.post("/api/v1/agent/chat", json={"message": "ping"})
+            assert response.json()["answer"] == "OK"
+            assert response.json()["runtime"] == "pi-agent-core"
+        assert headers[0]["authorization"] == "Bearer test-only-key"
+        assert payloads[0]["model"] == "deepseek-v4-flash"
+        assert payloads[0]["temperature"] == 0.3
+        assert payloads[0]["stream"] is True
 
-    message = await OpenAiCompatibleClient(configuration).complete(
-        [{"role": "user", "content": "ping"}]
-    )
 
-    assert message["content"] == "OK"
-    assert captured["url"] == (
-        "https://voyahgpt-gateway.voyah.cn/api/gateway/v1/chat/completions"
-    )
-    assert captured["headers"]["Authorization"] == "Bearer test-only-key"
-    assert captured["payload"]["model"] == "deepseek-v4-flash"
-    assert captured["payload"]["temperature"] == 0.3
-    assert captured["payload"]["stream"] is False
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/v1",
+        "https://user:password@example.com/v1",
+        "https://example.com/v1?secret=1",
+        "https://example.com/v1#secret",
+    ],
+)
+def test_initial_gateway_config_does_not_bypass_validation(url):
+    with pytest.raises(LlmConfigurationError):
+        LlmConfigurationService(Settings(_env_file=None, llm_base_url=url))

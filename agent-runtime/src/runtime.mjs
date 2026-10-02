@@ -14,7 +14,9 @@ function emit(value) {
 }
 function fail(error) {
   console.error(redact(error?.stack || error));
-  void emit({ type: 'error', message: 'Pi 执行失败，请检查模型配置及服务端日志' }).finally(() => {
+  void emit({ type: 'error', message: 'Pi 执行失败，请检查模型配置及服务端日志' }).catch(error => {
+    console.error(redact(error?.stack || error));
+  }).finally(() => {
     input.close(); process.exitCode = 1;
   });
 }
@@ -50,7 +52,7 @@ async function run(request) {
       const result = await new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
         void emit({ type: 'tool_call', id, call_id: callId, name: tool.name, arguments: args })
-          .catch(reject);
+          .catch(error => { pending.delete(id); reject(error); });
       });
       return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
     },
@@ -65,6 +67,7 @@ async function run(request) {
   agent = new Agent({
     initialState: { model, systemPrompt: request.system_prompt, tools, thinkingLevel: 'off' },
     toolExecution: 'sequential', getApiKey: () => key,
+    afterToolCall: async ({ result }) => result.details?.error ? { isError: true } : undefined,
     // 网络重定向禁用；只访问 Python 已校验的网关。凭据不从环境/Skills/插件解析。
     streamFn: (selected, context, options) => streamSimple(selected, context, {
       ...options, apiKey: key, temperature: request.temperature,

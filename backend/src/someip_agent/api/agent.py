@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from someip_agent.agent.service import LlmConfigurationError, LlmGatewayError
-from someip_agent.agent.streaming import StreamProtocolError
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import AgentChatRequest, AgentChatResponse
 from someip_agent.state import ApplicationState
@@ -62,7 +61,7 @@ async def agent_chat_stream(
             logger.exception("智能体流式调用失败", extra={"operation": "agent.chat.stream"})
             detail = (
                 str(exc)
-                if isinstance(exc, (LlmConfigurationError, LlmGatewayError, StreamProtocolError))
+                if isinstance(exc, (LlmConfigurationError, LlmGatewayError))
                 else ("智能体处理失败，已收到的内容已保留，请检查后端日志后重试")
             )
             yield f"event: error\ndata: {json.dumps({'message': detail}, ensure_ascii=False)}\n\n"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -7,16 +8,11 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
 import keyring
 from pydantic import ValidationError
 
 from someip_agent.agent.evidence import EvidenceTools
 from someip_agent.agent.pi import PiRuntime, PiRuntimeError
-from someip_agent.agent.streaming import (
-    StreamProtocolError,
-    read_openai_events,
-)
 from someip_agent.config import SUPPORTED_MODELS, Settings
 from someip_agent.domain.models import (
     AgentChatRequest,
@@ -47,6 +43,7 @@ class LlmConfigurationService:
     """管理可公开配置；API Key 仅驻留内存/环境变量/操作系统凭据库。"""
 
     def __init__(self, settings: Settings) -> None:
+        self._validate_gateway(settings.llm_base_url)
         self._base_url = settings.llm_base_url.rstrip("/")
         self._model = settings.llm_model
         self._timeout = settings.llm_timeout_seconds
@@ -65,11 +62,7 @@ class LlmConfigurationService:
         )
 
     def update(self, update: LlmSettingsUpdate) -> LlmSettingsView:
-        parsed = urlparse(update.base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise LlmConfigurationError("base_url 必须是有效的 HTTP(S) 地址")
-        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise LlmConfigurationError("远程模型网关必须使用 HTTPS")
+        self._validate_gateway(update.base_url)
         if update.model not in SUPPORTED_MODELS:
             raise LlmConfigurationError(
                 f"不支持的模型 {update.model}，允许值: {', '.join(SUPPORTED_MODELS)}"
@@ -87,11 +80,18 @@ class LlmConfigurationService:
                     "系统凭据库写入失败，密钥仅保留到本进程退出",
                     extra={"operation": "llm.credentials.store"},
                 )
-        logger.info(
-            "模型配置已更新",
-            extra={"operation": "llm.settings.update"},
-        )
+        logger.info("模型配置已更新", extra={"operation": "llm.settings.update"})
         return self.view()
+
+    @staticmethod
+    def _validate_gateway(base_url: str) -> None:
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise LlmConfigurationError("base_url 必须是有效的 HTTP(S) 地址")
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise LlmConfigurationError("远程模型网关必须使用 HTTPS")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise LlmConfigurationError("网关地址不得包含凭据、查询参数或片段")
 
     def get_api_key(self) -> str:
         if self._api_key:
@@ -120,127 +120,6 @@ class LlmConfigurationService:
     @property
     def temperature(self) -> float:
         return self._temperature
-
-
-class OpenAiCompatibleClient:
-    """最小 OpenAI Chat Completions 兼容客户端，便于接入企业网关。"""
-
-    def __init__(self, configuration: LlmConfigurationService) -> None:
-        self._configuration = configuration
-
-    async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        api_key = self._configuration.get_api_key()
-        if not api_key:
-            raise LlmConfigurationError("尚未配置模型 API Key")
-        payload: dict[str, Any] = {
-            "model": self._configuration.model,
-            "messages": messages,
-            "temperature": self._configuration.temperature,
-            "stream": False,
-        }
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-        url = f"{self._configuration.base_url}/chat/completions"
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._configuration.timeout),
-                follow_redirects=False,
-            ) as client:
-                response = await client.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-            response.raise_for_status()
-            body = response.json()
-        except httpx.HTTPStatusError as exc:
-            logger.exception(
-                "模型网关返回错误状态",
-                extra={"operation": "llm.chat.completions"},
-            )
-            detail = exc.response.text[:500]
-            raise LlmGatewayError(
-                f"模型网关返回 HTTP {exc.response.status_code}: {detail}"
-            ) from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.exception(
-                "模型网关调用失败",
-                extra={"operation": "llm.chat.completions"},
-            )
-            raise LlmGatewayError(f"模型网关调用失败: {type(exc).__name__}: {exc}") from exc
-        try:
-            message = body["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LlmGatewayError("模型网关响应缺少 choices[0].message") from exc
-        if not isinstance(message, dict):
-            raise LlmGatewayError("模型网关 message 格式无效")
-        return message
-
-    async def test_connection(self) -> str:
-        message = await self.complete(
-            [
-                {"role": "system", "content": "只回复 OK。"},
-                {"role": "user", "content": "连接测试"},
-            ]
-        )
-        return str(message.get("content") or "OK")
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        api_key = self._configuration.get_api_key()
-        if not api_key:
-            raise LlmConfigurationError("尚未配置模型 API Key")
-        payload: dict[str, Any] = {
-            "model": self._configuration.model,
-            "messages": messages,
-            "temperature": self._configuration.temperature,
-            "stream": True,
-        }
-        if tools:
-            payload.update(tools=tools, tool_choice="auto")
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._configuration.timeout),
-                follow_redirects=False,
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self._configuration.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "Accept": "text/event-stream",
-                    },
-                    json=payload,
-                ) as response:
-                    response.raise_for_status()
-                    if "text/event-stream" not in response.headers.get("content-type", ""):
-                        raise LlmGatewayError("模型网关未返回 SSE 流，请确认该模型支持 stream=true")
-                    async for event in read_openai_events(response):
-                        yield event
-        except httpx.HTTPStatusError as exc:
-            raise LlmGatewayError(
-                f"模型网关返回 HTTP {exc.response.status_code}，请检查模型配置或网关日志"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise LlmGatewayError("模型网关响应超时，已收到的内容已保留，请重试") from exc
-        except httpx.HTTPError as exc:
-            raise LlmGatewayError("模型网关连接中断，已收到的内容已保留，请重试") from exc
-        except StreamProtocolError as exc:
-            raise LlmGatewayError(str(exc)) from exc
 
 
 ToolHandler = Callable[[dict[str, Any], bool], Awaitable[Any]]
@@ -346,6 +225,7 @@ class AgentService:
                         model=event["data"]["model"],
                         traces=event["data"]["traces"],
                         degraded=event["data"]["degraded"],
+                        runtime=event["data"]["runtime"],
                     )
         finally:
             await stream.aclose()
@@ -423,6 +303,8 @@ class AgentService:
             async for event in stream:
                 if event["event"] == "tool" and event["data"]["phase"] == "result":
                     data = event["data"]
+                    if data.get("rejected"):
+                        self._record_tool(data["name"], data["arguments"], data["result"])
                     traces.append(
                         AgentToolTrace(
                             tool=data["name"],
@@ -448,20 +330,6 @@ class AgentService:
         }
         logger.info("Pi 智能体回答完成", extra={"operation": "agent.pi.chat"})
 
-    @staticmethod
-    def _parse_arguments(raw: Any) -> dict[str, Any]:
-        if isinstance(raw, dict):
-            return raw
-        if not isinstance(raw, str) or not raw.strip():
-            return {}
-        try:
-            value = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise LlmGatewayError(f"模型生成了无效工具参数 JSON: {exc}") from exc
-        if not isinstance(value, dict):
-            raise LlmGatewayError("模型工具参数必须是 JSON 对象")
-        return value
-
     async def _execute_tool(
         self, name: str, arguments: dict[str, Any], allow_mutation: bool
     ) -> Any:
@@ -479,6 +347,15 @@ class AgentService:
             result = await tool.handler(arguments, allow_mutation)
             logger.info("智能体工具执行完成", extra={"operation": f"agent.tool.{name}"})
             return self._record_tool(name, arguments, result)
+        except asyncio.CancelledError:
+            logger.info(
+                "控制台操作被取消，保留未确认结果的审计",
+                extra={"operation": f"agent.tool.{name}.cancel"},
+            )
+            self._record_tool(
+                name, arguments, {"error": "执行已取消；请读取当前状态确认操作是否生效"}
+            )
+            raise
         except (ValidationError, ValueError, PermissionError) as exc:
             logger.exception(
                 "智能体工具参数或权限校验失败", extra={"operation": f"agent.tool.{name}"}
@@ -775,6 +652,7 @@ class AgentService:
         return AgentChatResponse(
             answer="\n".join(lines),
             model="local-evidence-engine",
+            runtime="local-evidence-engine",
             traces=traces,
             degraded=True,
         )

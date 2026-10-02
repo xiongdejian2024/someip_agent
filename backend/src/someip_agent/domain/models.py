@@ -387,6 +387,7 @@ class AgentChatResponse(BaseModel):
     model: str
     traces: list[AgentToolTrace] = Field(default_factory=list)
     degraded: bool = False
+    runtime: Literal["pi-agent-core", "local-evidence-engine"] = "pi-agent-core"
 
 
 class UpdateInfo(BaseModel):

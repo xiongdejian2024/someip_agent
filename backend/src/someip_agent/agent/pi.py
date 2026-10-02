@@ -27,6 +27,7 @@ class PiRuntime:
         self.settings = settings
         self._processes: set[asyncio.subprocess.Process] = set()
         self._slots = asyncio.Semaphore(4)
+        self._closed = False
 
     def paths(self) -> tuple[str, Path]:
         bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[4]))
@@ -43,7 +44,8 @@ class PiRuntime:
         return {
             "name": "pi-agent-core",
             "version": "1.0.0",
-            "ready": entry.is_file() and shutil.which(node) is not None,
+            "ready": not self._closed and entry.is_file() and shutil.which(node) is not None,
+            "minimum_node_version": "22.19.0",
             "plugins_enabled": False,
             "skills_enabled": False,
             "active_sessions": len(self._processes),
@@ -51,6 +53,7 @@ class PiRuntime:
         }
 
     async def shutdown(self) -> None:
+        self._closed = True
         await asyncio.gather(*(self._stop(process) for process in list(self._processes)))
 
     async def _stop(self, process: asyncio.subprocess.Process) -> None:
@@ -60,8 +63,11 @@ class PiRuntime:
                 await asyncio.wait_for(process.wait(), 2)
             except ProcessLookupError:
                 await process.wait()
-            except TimeoutError:
-                process.kill()
+            except (TimeoutError, asyncio.TimeoutError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    logger.info("Pi 会话进程已先行退出", extra={"operation": "agent.pi.stop"})
                 await process.wait()
         self._processes.discard(process)
 
@@ -84,7 +90,10 @@ class PiRuntime:
     ) -> AsyncGenerator[dict[str, Any], None]:
         node, entry = self.paths()
         if not self.view()["ready"]:
-            raise PiRuntimeError("Pi 内置运行时不可用；源码部署请先执行 make install-agent")
+            message = "Pi 内置运行时不可用；源码部署请先执行 make install-agent"
+            if getattr(sys, "_MEIPASS", None):
+                message = "Pi 内置运行时不可用，请重新安装完整发行包"
+            raise PiRuntimeError(message)
         key = payload["api_key"]
         encoded = (json.dumps({"type": "start", **payload}, ensure_ascii=False) + "\n").encode()
         if len(encoded) > MAX_LINE:
@@ -102,6 +111,8 @@ class PiRuntime:
 
             await bounded(self._slots.acquire())
             acquired = True
+            if self._closed:
+                raise PiRuntimeError("服务正在关闭，不接受新的 Pi 会话")
             # 不继承模型密钥或 Pi 插件配置。凭据只经过私有 stdin，不进 argv。
             environment = {
                 name: os.environ[name]
@@ -115,6 +126,8 @@ class PiRuntime:
                 )
                 if name in os.environ
             }
+            if getattr(sys, "_MEIPASS", None):
+                environment["LD_LIBRARY_PATH"] = str(Path(sys._MEIPASS))
             process = await bounded(
                 asyncio.create_subprocess_exec(
                     node,
@@ -171,7 +184,7 @@ class PiRuntime:
                     if len(reply) > MAX_LINE:
                         raise PiRuntimeError("工具结果超过桥接大小上限")
                     process.stdin.write(reply)
-                    await process.stdin.drain()
+                    await bounded(process.stdin.drain())
                     yield {
                         "event": "tool",
                         "data": {**data, "phase": "result", "result": result},
@@ -196,6 +209,7 @@ class PiRuntime:
                             "name": event.get("name"),
                             "arguments": {},
                             "result": event.get("result"),
+                            "rejected": True,
                         },
                     }
                 elif kind == "error":

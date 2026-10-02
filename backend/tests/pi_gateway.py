@@ -3,7 +3,15 @@
 import json
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+@dataclass
+class PausedResponse:
+    chunks: list[bytes]
+    release: threading.Event = field(default_factory=threading.Event)
+    completed: threading.Event = field(default_factory=threading.Event)
 
 
 @contextmanager
@@ -18,13 +26,24 @@ def gateway(responses, *, status=200, content_type="text/event-stream"):
             headers.append({key.lower(): value for key, value in self.headers.items()})
             assert self.path == "/v1/chat/completions"
             body = remaining.pop(0) if remaining else b""
+            chunks = (
+                body.chunks
+                if isinstance(body, PausedResponse)
+                else (body if isinstance(body, list) else [body])
+            )
             self.send_response(status)
             self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(sum(len(chunk) for chunk in chunks)))
             self.end_headers()
             try:
-                self.wfile.write(body)
-                self.wfile.flush()
+                for index, chunk in enumerate(chunks):
+                    if isinstance(body, PausedResponse) and index == len(chunks) - 1:
+                        if not body.release.wait(10):
+                            return
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                if isinstance(body, PausedResponse):
+                    body.completed.set()
             except (BrokenPipeError, ConnectionResetError):
                 # 取消测试预期关闭网关连接，不是产品异常吞掉堆栈。
                 return
@@ -38,6 +57,9 @@ def gateway(responses, *, status=200, content_type="text/event-stream"):
     try:
         yield f"http://127.0.0.1:{server.server_port}/v1", payloads, headers
     finally:
+        for response in responses:
+            if isinstance(response, PausedResponse):
+                response.release.set()
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
