@@ -54,6 +54,22 @@ jobs:
         run: make linux-update-test
       - name: 无 Python 和 SDK 的干净发行包验收
         run: make linux-clean-test
+      - name: 导出已验收的基线发行包（不发布测试升级夹具）
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="$(tr -d '\r\n' < VERSION)"
+          mkdir -p build/release-assets
+          release_container="$(docker create --network none someip-agent-linux:package)"
+          trap 'docker rm "$release_container" >/dev/null' EXIT
+          docker cp "${release_container}:/opt/linux-package/someip-agent-${release_version}-linux-x86_64.zip" build/release-assets/
+          sha256sum "build/release-assets/someip-agent-${release_version}-linux-x86_64.zip"
+      - name: 保存待签名的基线发行包（不是正式 Release）
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-x86_64
+          path: build/release-assets/*.zip
+          if-no-files-found: error
       - name: 保存发行包、完整堆栈与升级证据
         if: always()
         uses: actions/upload-artifact@v4

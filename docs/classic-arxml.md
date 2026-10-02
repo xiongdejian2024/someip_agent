@@ -62,7 +62,8 @@ Service/Event ID 核对 H47A/V_6_12_0：330 条通知声明对应 323 个唯一�
 冲突仍拒绝。报告保留两边原名，不通过删前缀/后缀生成别名，`runtime_verified=false`。
 例如 NaviService 的 Event 0x8011：ARXML 组 0x100B，comm 组 0x100D；
 INI_GNSS 的 Event 0x8003：ARXML 组 0x6C11，comm 组 0x0002。
-名称/Service ID 一致不能消除这些部署冲突，待用户确定一致版本或冲突处理依据。
+名称/Service ID 一致不能消除这些部署冲突。用户已明确要求先保留、不解决，不修改
+两份源或任意选边；未验证的车型运行能力仍保持可见，不作为本轮发布渠道选择的阻塞项。
 首次审计把合法重复声明误当冲突的失败日志保留在
 `build/classic-event-groups-source-evidence/parse.log`，后续报告没有覆盖它。
 

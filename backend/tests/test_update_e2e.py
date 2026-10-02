@@ -56,12 +56,20 @@ def wait_until(predicate, timeout=20):
 
 @pytest.mark.skipif(os.name == "nt", reason="真实 POSIX 进程链路；Windows 安装包另行验收")
 @pytest.mark.parametrize(
-    "release_kind",
-    ["script", "script-rollback", "linux", "linux-rollback"]
-    if os.environ.get("SOMEIP_AGENT_LINUX_RELEASE_DIR")
-    else ["script", "script-rollback"],
+    "release_kind,use_redirects",
+    [
+        pytest.param(kind, redirects, id=kind + ("-https-redirect" if redirects else ""))
+        for kind in (
+            ["script", "script-rollback", "linux", "linux-rollback"]
+            if os.environ.get("SOMEIP_AGENT_LINUX_RELEASE_DIR")
+            else ["script", "script-rollback"]
+        )
+        for redirects in [False, True]
+    ],
 )
-def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, release_kind: str):
+def test_signed_https_upgrade_api_restarts_into_new_release(
+    tmp_path: Path, release_kind: str, use_redirects: bool
+):
     ui_mode = os.environ.get("SOMEIP_AGENT_UPDATE_UI_TEST") == "1"
     packaged = release_kind.startswith("linux")
     failure = release_kind.endswith("rollback")
@@ -138,6 +146,13 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
 
     class ReleaseHandler(BaseHTTPRequestHandler):
         def do_GET(self):
+            redirect = {"/latest/manifest.json": "/manifest.json", "/release.zip": "/cdn.zip"}
+            if use_redirects and self.path in redirect:
+                self.send_response(302)
+                self.send_header("Location", redirect[self.path])
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             body = payloads[self.path]
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
@@ -171,6 +186,7 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
         }
     ).encode()
     payloads["/release.zip"] = archive.read_bytes()
+    payloads["/cdn.zip"] = payloads["/release.zip"]
     with socket.socket() as probe:
         probe.bind(
             ("127.0.0.1", int(os.environ.get("SOMEIP_AGENT_UPDATE_UI_PORT", "0")) if ui_mode else 0)
@@ -185,7 +201,8 @@ def test_signed_https_upgrade_api_restarts_into_new_release(tmp_path: Path, rele
         "SOMEIP_AGENT_HOST": "0.0.0.0" if ui_mode else "127.0.0.1",
         "SOMEIP_AGENT_LLM_API_KEY": "",
         "SOMEIP_AGENT_UPDATE_INSTALL_ROOT": str(root),
-        "SOMEIP_AGENT_UPDATE_MANIFEST_URL": base + "/manifest.json",
+        "SOMEIP_AGENT_UPDATE_MANIFEST_URL": base
+        + ("/latest/manifest.json" if use_redirects else "/manifest.json"),
         "SOMEIP_AGENT_UPDATE_PUBLIC_KEY": base64.b64encode(public_key).decode(),
     }
     if packaged:

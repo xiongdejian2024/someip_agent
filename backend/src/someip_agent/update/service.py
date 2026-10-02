@@ -68,11 +68,11 @@ class UpdateService:
             return UpdateInfo(current_version=__version__)
         self._validate_remote_url(self._settings.update_manifest_url)
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            async with self._download_client(timeout=20) as client:
                 response = await client.get(self._settings.update_manifest_url)
                 response.raise_for_status()
                 manifest = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, UpdateError) as exc:
             logger.exception("升级清单获取失败", extra={"operation": "update.check"})
             raise UpdateError(f"升级清单获取失败: {type(exc).__name__}: {exc}") from exc
         if not isinstance(manifest, dict):
@@ -115,7 +115,7 @@ class UpdateService:
         hasher = hashlib.sha256()
         downloaded = 0
         try:
-            async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+            async with self._download_client(timeout=120) as client:
                 async with client.stream("GET", info.download_url) as response:
                     response.raise_for_status()
                     with temporary.open("wb") as output:
@@ -283,5 +283,20 @@ class UpdateService:
     @staticmethod
     def _validate_remote_url(url: str) -> None:
         parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if parsed.scheme != "https" or not parsed.hostname:
             raise UpdateError("在线升级地址必须使用有效的 HTTPS URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise UpdateError("在线升级地址不能包含登录凭据")
+
+    async def _validate_download_request(self, request: httpx.Request) -> None:
+        # HTTPX 在每次发送前（包括重定向）调用 hook，降级请求不会触达网络。
+        self._validate_remote_url(str(request.url))
+
+    def _download_client(self, *, timeout: float) -> httpx.AsyncClient:
+        # GitHub latest -> 版本附件 -> CDN；继续验证 TLS、签名、大小与最终文件哈希。
+        return httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            max_redirects=5,
+            event_hooks={"request": [self._validate_download_request]},
+        )

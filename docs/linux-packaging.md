@@ -54,6 +54,46 @@ python scripts/create_update_manifest.py \
 私钥只属于受保护的发布环境，不提交、不放入客户端，不使用测试私钥作为正式发布信任根。
 正式 HTTPS 最新版地址及信任公钥未配置时，客户端明确无可用更新，不从未签名 GitHub 资产猜测。
 
+### 已选发布渠道：GitHub Releases
+
+用户已选择`https://github.com/xiongdejian2024/someip_agent/releases`。
+每个正式版本上传完整Linux ZIP和按架构命名的签名清单；提交源码或上传Actions测试
+制品不等于发布正式Release。以下只是拟定格式，当前尚未发布这些附件：
+
+- 最新清单：`https://github.com/xiongdejian2024/someip_agent/releases/latest/download/manifest-linux-x86_64.json`。
+- 清单中的ZIP地址：`https://github.com/xiongdejian2024/someip_agent/releases/download/v<version>/someip-agent-<version>-linux-x86_64.zip`。
+- aarch64使用独立同名架构清单/ZIP，不共用x86_64更新地址。客户端仍需配置可信公钥。
+
+CI仅在原生/安装包及升级/回滚、干净包验收通过后，从构建镜像导出仓库VERSION
+对应的基线ZIP，保存为独立`linux-release-x86_64`制品。不能从
+`linux-package-update-evidence`挑选第二版本测试ZIP发布；该证据还含测试信任根。
+这一步不创建标签、GitHub Release或签名密钥，正式发布仍须等待生产信任根配置。
+
+GitHub的latest和附件下载可能重定向到版本页/CDN。升级器复用既有HTTPX的重定向和
+异步request hook，每跳发送前验证HTTPS且不含登录凭据，最多5跳，保留TLS验证；
+不会跟随HTTP降级或无限循环。签名仍绑定清单中的原始版本ZIP地址，不绑定临时CDN
+地址；下载仍执行大小限制和最终SHA-256检查。
+依据：[GitHub附件链接](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)、
+[HTTPX发送前hook](https://www.python-httpx.org/advanced/event-hooks/)。
+
+正式签名密钥生成及保存到仓库Actions Secrets的授权仍待确认，未创建密钥或Secret。
+私钥不进入源码/安装包/聊天；没有正式信任根时不发布未签名清单或使用临时测试密钥。
+车型源冲突按用户要求保留不解决，正式发布说明需列明未完成的车型互操作验收。
+
+本轮隔离Linux源码升级回归位于`build/github-release-redirect-linux-source-evidence`：
+44项通过、零失败/错误/跳过，包括直连与HTTPS跳转的真实脚本进程升级/回滚。
+跨域CDN跳转、HTTP降级、凭据、循环、签名/哈希篡改和大小门禁由HTTPX
+MockTransport另外验收；不是公网GitHub下载或新安装包的真实浏览器点击证明。
+首次Linux检查未设置源码导入路径，实际导入镜像的旧安装模块，34通过/10失败；
+完整堆栈保留于`build/github-release-redirect-linux-evidence`，新证据不覆盖它。
+macOS首次本地检查40通过/4失败（健康等待和进程退出超时），JUnit保留于
+`build/github-release-redirect-evidence`，不计为当前Linux目标通过。
+完整原生后端源码回归另在`build/github-release-redirect-backend-ipv6-evidence`完成：
+587项通过、零失败/错误/跳过，3项既有依赖/测试警告。使用既有已验证原生镜像，
+显式挂载本轮后端源码，强制原生测试；不是本轮新编译Linux发行包验收。
+首轮缺少项目现有IPv6回环sysctl，585通过/2失败，完整日志保留在
+`build/github-release-redirect-backend-evidence`；重试启用既有回环配置，没有扩展IPv6功能。
+
 升级器在主程序退出前完成解压、VERSION、必需程序及权限检查；准备失败时原程序保持运行。
 准备成功后旧目录改名为 `.previous`，新目录原子换入，启动新程序并核对健康接口版本。
 新程序失败时恢复旧目录并验证旧版健康；失败现场保留，回滚健康失败不会报告升级成功。
