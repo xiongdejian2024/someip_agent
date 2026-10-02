@@ -37,7 +37,7 @@ def prepare(root: Path, output: Path, native: Path) -> Path:
         shutil.copytree(
             root / relative,
             source / relative,
-            ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"),
+            ignore=shutil.ignore_patterns(".venv", ".env", "__pycache__", "*.egg-info"),
         )
     shutil.copy2(root / "native/CMakeLists.txt", source / "native/CMakeLists.txt")
     (source / "VERSION").write_text(version + "\n", encoding="utf-8")
