@@ -1,5 +1,11 @@
 # Linux 发行包与在线升级
 
+当前正式最新版为 [0.1.2](https://github.com/xiongdejian2024/someip_agent/releases/tag/v0.1.2)，
+已内置 Node 22.19.0 和 Pi Agent Core 1.0.0，不需要另装 Pi CLI、插件或 Skills。
+发行基线 160f537 的 CI 37012384581 与签名准备 37023180116 成功；公开三份附件经
+重新下载逐字节核对及产品公网验签/完整 ZIP 哈希验证。详细交付证据见 `current-delivery-scope.md`。
+下文 0.1.1 和旧测试目录是历史过程，不表示当前最新版仍停留在 0.1.1。
+
 本阶段只验收 Linux；Windows 打包/调试按用户要求暂缓，保留手动 CI 入口。
 复用现有 PyInstaller 可选依赖，不增加自研打包器或修改 SOME/IP/SD 协议栈。
 
