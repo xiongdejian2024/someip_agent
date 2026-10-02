@@ -30,19 +30,33 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
-          gh api "repos/$GH_REPO/actions/runs/$CI_RUN_ID" --jq '.' |
-            jq -e --arg sha "$GITHUB_SHA" '
+          run_info="$(gh api "repos/$GH_REPO/actions/runs/$CI_RUN_ID")"
+          printf '%s' "$run_info" | jq -e '
               .status == "completed" and .conclusion == "success" and
               .event == "push" and .head_branch == "main" and
-              .head_sha == $sha and .path == ".github/workflows/ci.yml"'
+              .path == ".github/workflows/ci.yml"'
+          artifact_sha="$(printf '%s' "$run_info" | jq -r '.head_sha')"
+          [[ "$artifact_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "ARTIFACT_SHA=$artifact_sha" >> "$GITHUB_ENV"
       - name: 检出已验收提交
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 验证产品源码与已验收提交逐文件一致
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$ARTIFACT_SHA" "$GITHUB_SHA"
+          # 只允许发布器和本操作文档不同，不能复用包含任何产品/公钥/版本变更的旧CI。
+          git diff --exit-code "$ARTIFACT_SHA" "$GITHUB_SHA" -- . \
+            ':(exclude).github/workflows/release.yml' ':(exclude)docs/linux-packaging.md'
       - name: 配置 Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: 安装项目既有签名依赖
-        run: python -m pip install 'cryptography>=43,<47'
+        # update包入口导入HTTPX/Pydantic，复用后端已声明依赖，不新增临时运行环境。
+        run: python -m pip install './backend'
       - name: 下载独立基线发行包并校验版本
         shell: bash
         run: |
@@ -82,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${RELEASE_VERSION}"
-          gh release create "$tag" release-assets/* --draft --target "$GITHUB_SHA" \
+          gh release create "$tag" release-assets/* --draft --target "$ARTIFACT_SHA" \
             --title "SOME/IP Agent ${RELEASE_VERSION}（Linux x86_64）" \
             --notes-file "docs/releases/${RELEASE_VERSION}.md"
           gh release download "$tag" --dir verified-assets
