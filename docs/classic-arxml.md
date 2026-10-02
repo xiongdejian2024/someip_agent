@@ -115,6 +115,18 @@ AP 显式属性继续使用其明确长度宽度，不套 CP 默认规则。
 
 ## 已有证据
 
+2026-10-02 的零版本修复仅改变Classic服务版本读取：显式major=0保留为0，
+不能用`or 1`覆盖源值；缺省major=1/minor=0仍保持既有行为。新增6项解析回归。
+`build/classic-zero-version-evidence`包含本轮独立Linux专项108通过，以及源码后端
+599通过、无原生跳过的日志/JUnit；既有镜像的原生cpp文件SHA与当前源码逐一核对一致。
+这不是完整安装包重新验收，也没有更改公开v0.1.1附件或解除Classic运行门禁。
+源审计再次确认三份源SHA、131服务名称/ID、103布局错误及EventGroup差异与此前相同。
+
+CP4.4.0 Transformer表7.4的模型枚举为notification=1、request=2、requestNoReturn=3、
+response=4；真实源原文为0/1/2/3，须核对OEM编码说明，不能猜成线上SOME/IP类型字节。
+依据：[CP4.4.0 Transformer](https://www.autosar.org/fileadmin/standards/R18-10_R4.4.0_R1.5.0/CP/AUTOSAR_SWS_SOMEIPTransformer.pdf)。
+用户已延期的ARXML/comm冲突仍保留，不擅自选边。
+
 `backend/tests/test_arxml_classic.py` 验证完整链、同名接口隔离、多操作精确选择、call/return、
 数据方法的浏览投影、歧义路径隔离、错误引用/方向、模型 JSON 和原生配置门禁。
 

@@ -46,6 +46,27 @@ def test_full_paths_override_pdu_prefix_and_duplicate_interface_short_names():
     assert binding.direction == "data"
 
 
+@pytest.mark.parametrize("major", ["0", "0x00", "1", "0xfe"])
+def test_classic_explicit_major_version_is_preserved_including_zero(major):
+    tree = root()
+    node(tree, "SERVER-SERVICE-MAJOR-VERSION").text = major
+    service = parse(tree).services[0]
+    assert service.major_version == int(major, 0)
+    assert service.name == "BodyService" and service.service_id == 0x1234
+    # 修正源版本并非解除尚未验收的 Classic 运行门禁。
+    assert service.deployment_errors
+
+
+@pytest.mark.parametrize("missing", ["SERVER-SERVICE-MAJOR-VERSION", "SD-SERVER-CONFIG"])
+def test_classic_absent_version_retains_existing_default(missing):
+    tree = root()
+    element = node(tree, missing)
+    element.getparent().remove(element)
+    service = parse(tree).services[0]
+    assert service.major_version == 1 and service.minor_version == 0
+    assert service.deployment_errors
+
+
 def test_rpc_uses_target_operation_not_first_operation_and_keeps_both_directions():
     service = parse(root()).services[0]
     assert len(service.methods) == 1

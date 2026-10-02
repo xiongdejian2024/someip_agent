@@ -301,22 +301,23 @@ class ArxmlParser:
             service = services.get(name)
             if service is None:
                 server_config = _first_child(instance, "SD-SERVER-CONFIG")
+                major_version = (
+                    _parse_int(_first_text(server_config, "SERVER-SERVICE-MAJOR-VERSION"))
+                    if server_config is not None
+                    else None
+                )
+                minor_version = (
+                    _parse_int(_first_text(server_config, "SERVER-SERVICE-MINOR-VERSION"))
+                    if server_config is not None
+                    else None
+                )
                 service = ServiceDefinition(
                     name=name,
                     path=_element_path(instance),
                     service_id=service_id,
-                    major_version=(
-                        _parse_int(_first_text(server_config, "SERVER-SERVICE-MAJOR-VERSION"))
-                        if server_config is not None
-                        else None
-                    )
-                    or 1,
-                    minor_version=(
-                        _parse_int(_first_text(server_config, "SERVER-SERVICE-MINOR-VERSION"))
-                        if server_config is not None
-                        else None
-                    )
-                    or 0,
+                    # 显式 0 是源部署值，不能用 truthy 默认值改变接口版本。
+                    major_version=1 if major_version is None else major_version,
+                    minor_version=0 if minor_version is None else minor_version,
                 )
                 services[name] = service
                 services_by_id[service_id].append(service)
