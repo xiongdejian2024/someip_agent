@@ -1,4 +1,4 @@
-name: 签名发布 Linux
+name: 准备 Linux 签名发行包
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -47,9 +47,10 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor "$ARTIFACT_SHA" "$GITHUB_SHA"
-          # 只允许发布器和本操作文档不同，不能复用包含任何产品/公钥/版本变更的旧CI。
+          # 只允许发布器和两份交付文档不同，不能复用包含任何产品/公钥/版本变更的旧CI。
           git diff --exit-code "$ARTIFACT_SHA" "$GITHUB_SHA" -- . \
-            ':(exclude).github/workflows/release.yml' ':(exclude)docs/linux-packaging.md'
+            ':(exclude).github/workflows/release.yml' ':(exclude)docs/linux-packaging.md' \
+            ':(exclude)docs/current-delivery-scope.md'
       - name: 配置 Python
         uses: actions/setup-python@v5
         with:
@@ -91,18 +92,10 @@ jobs:
             --output release-assets/manifest-linux-x86_64.json \
             --release-notes "$(<"docs/releases/${RELEASE_VERSION}.md")"
           (cd release-assets && sha256sum "someip-agent-${RELEASE_VERSION}-linux-x86_64.zip") > release-assets/SHA256SUMS
-      - name: 创建草稿并核对上传内容
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="v${RELEASE_VERSION}"
-          gh release create "$tag" release-assets/* --draft --target "$ARTIFACT_SHA" \
-            --title "SOME/IP Agent ${RELEASE_VERSION}（Linux x86_64）" \
-            --notes-file "docs/releases/${RELEASE_VERSION}.md"
-          gh release download "$tag" --dir verified-assets
-          cmp release-assets/manifest-linux-x86_64.json verified-assets/manifest-linux-x86_64.json
-          cmp release-assets/SHA256SUMS verified-assets/SHA256SUMS
-          cmp "release-assets/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip" \
-            "verified-assets/someip-agent-${RELEASE_VERSION}-linux-x86_64.zip"
-      - name: 发布已核验草稿
-        run: gh release edit "v${RELEASE_VERSION}" --draft=false --latest
+      - name: 保存签名发行包（不是公开 Release）
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-linux-release-x86_64
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14

@@ -58,7 +58,7 @@ python scripts/create_update_manifest.py \
 
 用户已选择`https://github.com/xiongdejian2024/someip_agent/releases`。
 每个正式版本上传完整Linux ZIP和按架构命名的签名清单；提交源码或上传Actions测试
-制品不等于发布正式Release。以下只是拟定格式，当前尚未发布这些附件：
+制品不等于发布正式Release。0.1.1已按以下格式公开：
 
 - 最新清单：`https://github.com/xiongdejian2024/someip_agent/releases/latest/download/manifest-linux-x86_64.json`。
 - 清单中的ZIP地址：`https://github.com/xiongdejian2024/someip_agent/releases/download/v<version>/someip-agent-<version>-linux-x86_64.zip`。
@@ -67,7 +67,7 @@ python scripts/create_update_manifest.py \
 CI仅在原生/安装包及升级/回滚、干净包验收通过后，从构建镜像导出仓库VERSION
 对应的基线ZIP，保存为独立`linux-release-x86_64`制品。不能从
 `linux-package-update-evidence`挑选第二版本测试ZIP发布；该证据还含测试信任根。
-这一步不创建标签、GitHub Release或签名密钥，正式发布仍须等待生产信任根配置。
+这一步不创建标签、GitHub Release或签名密钥；正式信任根已配置，发布仍需单独操作。
 
 GitHub的latest和附件下载可能重定向到版本页/CDN。升级器复用既有HTTPX的重定向和
 异步request hook，每跳发送前验证HTTPS且不含登录凭据，最多5跳，保留TLS验证；
@@ -82,14 +82,19 @@ GitHub的latest和附件下载可能重定向到版本页/CDN。升级器复用�
 显式环境变量（包括空值）仍优先。开发启动保持默认禁用，未验收架构不自动启用。
 车型源冲突按用户要求保留不解决，正式发布说明需列明未完成的车型互操作验收。
 
-正式发布使用`.github/workflows/release.yml`手动入口，提供当前main提交已成功的CI run ID。
+签名准备使用`.github/workflows/release.yml`手动入口，提供main上已成功的CI run ID。
 流水线严格核对CI工作流路径、push事件、main分支及提交祖先关系，只下载独立基线ZIP。
-通常CI与发布器提交相同；仅发布工作流和本文档发生变化时，允许复用相同产品源码树的
-已验收CI：除这两个文件外，所有文件git diff必须完全一致，版本/公钥/构建脚本不能例外。
+通常CI与发布器提交相同；仅发布工作流、本文档和`docs/current-delivery-scope.md`发生变化时，
+允许复用相同产品源码树的已验收CI：除这三个文件外，所有文件git diff必须完全一致，
+版本/公钥/构建脚本不能例外。
 Release标签始终指向基线CI提交，而不是不同的发布器提交。
-检查ZIP完整性与版本、签名私钥对应公钥，再创建草稿、逐字节核对已上传附件后公开。
-失败草稿保留供检查，不自动覆盖既有标签或附件；发布令牌创建标签不会重复触发CI。
-源码提交/签名准备不等于Release已公开，实际地址须发布后单独检查。
+流程检查ZIP完整性与版本、签名私钥对应公钥，再保存`signed-linux-release-x86_64`
+Actions制品，不创建或公开Release。仓库默认GITHUB_TOKEN曾在创建Release时返回HTTP403；
+因此只保留contents:read/actions:read，不复制用户GitHub登录令牌到Actions Secrets。
+发布使用已授权的GitHub CLI登录：核对标签指向基线CI提交，创建草稿并上传三份附件，
+重新下载并与本地逐字节比较，然后公开并设为latest。失败草稿保留供检查，
+不覆盖既有标签或附件。源码提交/签名准备不等于Release已公开，实际地址须单独检查。
+0.1.1已通过此流程公开，公开下载的签名、SHA-256、ZIP完整性和版本均已核验。
 
 0.1.0开发版需在启动前配置这两个公开变量，或首次直接安装0.1.1发行版：
 
