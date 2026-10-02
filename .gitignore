@@ -14,6 +14,8 @@ dist/
 build/
 .build/
 frontend/node_modules/
+agent-runtime/node_modules/
+agent-runtime/dist/
 frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js

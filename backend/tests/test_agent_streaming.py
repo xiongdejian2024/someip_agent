@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pi_gateway import completion, gateway
 
 from someip_agent.agent.service import (
     AgentService,
@@ -132,7 +133,7 @@ async def test_fragmented_tool_calls_followup_and_mutation_guard(
                             "index": 0,
                             "id": "call_1",
                             "type": "function",
-                            "function": {"name": "stop_", "arguments": '{"simulation_'},
+                            "function": {"name": "stop_simulation", "arguments": '{"simulation_'},
                         }
                     ]
                 }
@@ -142,7 +143,7 @@ async def test_fragmented_tool_calls_followup_and_mutation_guard(
                     "tool_calls": [
                         {
                             "index": 0,
-                            "function": {"name": "simulation", "arguments": 'id":"demo-1"}'},
+                            "function": {"arguments": 'id":"demo-1"}'},
                         }
                     ]
                 },
@@ -158,25 +159,36 @@ async def test_fragmented_tool_calls_followup_and_mutation_guard(
             b"data: [DONE]\n\n",
         ]
     )
-    payloads = mock_gateway(monkeypatch, [first, second])
-    settings = Settings(_env_file=None, data_dir=tmp_path)
-    monitor = MonitorStore(100)
-    agent = AgentService(configuration(), monitor, SimulationManager(monitor, settings), lambda: [])
-    executions: list[dict[str, Any]] = []
-
-    async def stop_handler(arguments: dict[str, Any], _allow: bool) -> Any:
-        executions.append(arguments)
-        return {"stopped": arguments["simulation_id"]}
-
-    agent._tools["stop_simulation"] = AgentTool(
-        "stop_simulation", "停止仿真", {}, True, stop_handler
-    )
-    events = [
-        event
-        async for event in agent.chat_stream(
-            AgentChatRequest(message="停止演示仿真", allow_mutation=allow_mutation)
+    with gateway([b"".join(first.chunks), b"".join(second.chunks)]) as (url, payloads, _):
+        settings = Settings(_env_file=None, data_dir=tmp_path)
+        monitor = MonitorStore(100)
+        agent = AgentService(
+            LlmConfigurationService(
+                Settings(_env_file=None, llm_base_url=url, llm_api_key="test-stream-key")
+            ),
+            monitor,
+            SimulationManager(monitor, settings),
+            lambda: [],
         )
-    ]
+        executions: list[dict[str, Any]] = []
+
+        async def stop_handler(arguments: dict[str, Any], _allow: bool) -> Any:
+            executions.append(arguments)
+            return {"stopped": arguments["simulation_id"]}
+
+        agent._tools["stop_simulation"] = AgentTool(
+            "stop_simulation",
+            "停止仿真",
+            agent._tools["stop_simulation"].parameters,
+            True,
+            stop_handler,
+        )
+        events = [
+            event
+            async for event in agent.chat_stream(
+                AgentChatRequest(message="停止演示仿真", allow_mutation=allow_mutation)
+            )
+        ]
     assert len(payloads) == 2
     assert payloads[1]["messages"][2]["tool_calls"][0]["function"] == {
         "name": "stop_simulation",
@@ -282,17 +294,18 @@ def test_incomplete_completion_is_not_marked_successful(finish_reason: str) -> N
 
 @pytest.mark.asyncio
 async def test_closing_agent_stream_closes_gateway(monkeypatch, tmp_path) -> None:
-    upstream = ChunkStream([chunk({"content": "第一段"}), chunk({"content": "第二段"}, "stop")])
-    mock_gateway(monkeypatch, [upstream])
-    monitor = MonitorStore(100)
-    agent = AgentService(
-        configuration(),
-        monitor,
-        SimulationManager(monitor, Settings(_env_file=None, data_dir=tmp_path)),
-        lambda: [],
-    )
-    stream = agent.chat_stream(AgentChatRequest(message="检查"))
-    assert (await anext(stream))["event"] == "status"
-    assert (await anext(stream))["data"]["text"] == "第一段"
-    await stream.aclose()
-    assert upstream.closed
+    with gateway([completion("第一段")]) as (url, _, _):
+        monitor = MonitorStore(100)
+        agent = AgentService(
+            LlmConfigurationService(
+                Settings(_env_file=None, llm_base_url=url, llm_api_key="test-stream-key")
+            ),
+            monitor,
+            SimulationManager(monitor, Settings(_env_file=None, data_dir=tmp_path)),
+            lambda: [],
+        )
+        stream = agent.chat_stream(AgentChatRequest(message="检查"))
+        assert (await anext(stream))["event"] == "status"
+        assert (await anext(stream))["data"]["text"] == "第一段"
+        await stream.aclose()
+        assert agent._runtime.view()["active_sessions"] == 0

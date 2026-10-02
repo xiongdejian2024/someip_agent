@@ -380,11 +380,13 @@ async def test_context_history_are_user_data_and_read_real_schema(tmp_path) -> N
     subject = agent(tmp_path)
     captured: list[dict[str, Any]] = []
 
-    async def complete(messages, *, tools):
-        captured.extend(messages)
-        return {"role": "assistant", "content": "已基于当前工程证据核对。"}
+    async def stream(payload, _scope, _execute):
+        captured.append({"role": "system", "content": payload["system_prompt"]})
+        captured.extend(payload["history"])
+        captured.append({"role": "user", "content": payload["message"]})
+        yield {"event": "delta", "data": {"text": "已基于当前工程证据核对。"}}
 
-    subject._client.complete = complete
+    subject._runtime.stream = stream
     response = await subject.chat(
         AgentChatRequest.model_validate(
             {

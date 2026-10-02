@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     llm_model: str = SUPPORTED_MODELS[0]
     llm_timeout_seconds: float = 60.0
     llm_temperature: float = 0.1
+    pi_node_binary: str = "node"
+    pi_runtime_path: Path | None = None
 
     update_manifest_url: str = ""
     update_public_key: str = ""
