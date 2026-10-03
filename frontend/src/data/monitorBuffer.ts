@@ -52,10 +52,10 @@ export class MonitorBuffer {
   private readonly signals = new BoundedBuffer<WaveSample>(SAMPLE_CAPACITY)
   dirty = false
 
-  append(message: MonitorMessage) {
+  append(message: MonitorMessage, sampleTime?: number) {
     this.trace.push(message)
     const sample = messageSample(message)
-    if (sample) this.signals.push(sample)
+    if (sample) this.signals.push(sampleTime === undefined ? sample : { ...sample, time: sampleTime })
     this.dirty = true
   }
 

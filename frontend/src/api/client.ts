@@ -86,6 +86,11 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 }
 
 export const api = {
+  recordings: () => request<import('../workbench/RecordingPanel').RecordingView[]>('/recordings'),
+  startRecording: (config: { name: string; quota_bytes: number }) => request<import('../workbench/RecordingPanel').RecordingView>('/recordings', { method: 'POST', body: stringifyJson(config) }),
+  stopRecording: (id: string) => request<import('../workbench/RecordingPanel').RecordingView>(`/recordings/${encodeURIComponent(id)}/stop`, { method: 'POST' }, 40000),
+  recordingFrames: (id: string, parameters: Record<string, string>) => request<import('../workbench/replay').ReplayPage>(`/recordings/${encodeURIComponent(id)}/frames?${new URLSearchParams(parameters)}`, {}, 30000),
+  recordingExportUrl: (id: string) => `${API_PREFIX}/recordings/${encodeURIComponent(id)}/export`,
   projectModel: () => request<unknown | null>('/model'),
   projects: () => request<import('../workbench/projects').ProjectSummary[]>('/projects'),
   currentProject: () => request<import('../workbench/projects').ProjectView | null>('/projects/current'),

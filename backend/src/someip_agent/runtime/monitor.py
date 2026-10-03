@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter, deque
 from collections.abc import Iterable
+from time import monotonic_ns
 from uuid import uuid4
 
 from someip_agent.domain.models import MonitorMessage
@@ -24,6 +25,7 @@ class MonitorStore:
 
     async def publish(self, message: MonitorMessage) -> None:
         async with self._lock:
+            message.metadata["monitor_arrival_ns"] = monotonic_ns()
             self._published_total += 1
             if len(self._messages) == self._messages.maxlen:
                 self._history_evicted_total += 1
@@ -74,7 +76,8 @@ class MonitorStore:
             "cleared_total": self._cleared_total,
             "subscriber_discarded_total": self._subscriber_discarded_total,
             "current_subscriber_discarded": self._subscriber_discards.get(queue)
-            if queue is not None else None,
+            if queue is not None
+            else None,
             "active_subscribers": len(self._subscribers),
         }
 
@@ -109,6 +112,12 @@ class MonitorStore:
         return queue
 
     async def unsubscribe(self, queue: asyncio.Queue[MonitorMessage]) -> None:
+        await self.detach(queue)
+
+    async def detach(self, queue: asyncio.Queue[MonitorMessage]) -> dict[str, object]:
+        """原子切断新消息并保留该连接最终丢弃计数。"""
         async with self._lock:
+            statistics = self._statistics(queue)
             self._subscribers.discard(queue)
             self._subscriber_discards.pop(queue, None)
+            return statistics

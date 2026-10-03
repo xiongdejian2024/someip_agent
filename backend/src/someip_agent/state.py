@@ -20,6 +20,7 @@ from someip_agent.storage.arxml_repository import ArxmlModelRepository
 from someip_agent.storage.repository import AuditRepository
 from someip_agent.update.service import UpdateService
 from someip_agent.workbench.projects import ProjectConflict, ProjectRepository, ProjectView
+from someip_agent.workbench.recordings import RecordingManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class ApplicationState:
         settings.ensure_directories()
         self.settings = settings
         self.monitor = MonitorStore(settings.monitor_capacity)
+        self.recordings = RecordingManager(settings.data_dir / "recordings", self.monitor)
         self.signal_decoder = NativeSignalDecoder(settings)
         self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
         self.simulator = SimulationManager(self.monitor, settings)
@@ -187,6 +189,7 @@ class ApplicationState:
         await self.services.shutdown()
         await self.network.shutdown()
         await self.simulator.shutdown()
+        await self.recordings.shutdown()
         await asyncio.to_thread(self.signal_decoder.close)
 
     def imported_file_path(self, digest: str, source_name: str) -> Path:

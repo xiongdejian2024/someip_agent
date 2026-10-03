@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useProject } from '../workbench/projects'
+import { RecordingPanel } from '../workbench/RecordingPanel'
 import { api, describeApiError } from '../api/client'
 import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
@@ -208,6 +209,7 @@ export function MonitorPage({ messages, samples, streamState, source, onClear, s
 
   return (
     <div className="page monitor-page monitor-workbench">
+      <RecordingPanel />
       <section className="monitor-toolbar panel">
         <div className="capture-state">
           <span className={`capture-button ${!paused ? 'recording' : ''}`}><i /></span>
