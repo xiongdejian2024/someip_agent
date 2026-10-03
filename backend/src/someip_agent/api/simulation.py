@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import SimulationConfig, SimulationStatus
 from someip_agent.runtime.simulator import SimulationPermissionError
-from someip_agent.soa.operator import NativeRuntimeError
+from someip_agent.soa.operator import NativeOperationError, NativeRuntimeError
 from someip_agent.state import ApplicationState
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,9 @@ async def start_simulation(
     except SimulationPermissionError as exc:
         logger.exception("仿真启动被安全策略拒绝", extra={"operation": "simulation.start"})
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except NativeOperationError as exc:
+        logger.exception("原生发生器拒绝非法配置", extra={"operation": "simulation.start"})
+        raise HTTPException(422, str(exc)) from exc
     except NativeRuntimeError as exc:
         logger.exception("原生仿真运行时不可用", extra={"operation": "simulation.start"})
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc

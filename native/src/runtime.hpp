@@ -1,6 +1,7 @@
 #pragma once
 #include "application.hpp"
 #include "dispatch.hpp"
+#include "signal_source.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <map>
 #include <set>
@@ -33,7 +34,8 @@ struct Member {
     std::shared_ptr<boost::asio::steady_timer> timer;
     uint64_t count = 0;
     uint64_t generator_epoch = 0;
-    double last_value = 0;
+    Json last_value = 0;
+    std::unique_ptr<SignalSource> signal_source;
     std::shared_ptr<boost::asio::steady_timer> event_timer;
     uint64_t event_epoch = 0, event_count = 0;
     bool event_running = false;

@@ -414,17 +414,9 @@ class AgentService:
             if set(args) - set(SimulationConfig.model_fields):
                 raise ValueError("仿真配置包含未知字段")
             generator = args.get("generator", {})
-            if not isinstance(generator, dict) or set(generator) - {
-                "signal_name",
-                "kind",
-                "data_type",
-                "minimum",
-                "maximum",
-                "initial",
-                "period_seconds",
-                "sequence",
-            }:
-                raise ValueError("发生器配置格式无效或包含未知字段")
+            if not isinstance(generator, dict):
+                raise ValueError("发生器配置必须为字典")
+            # 字段白名单由 SignalGeneratorConfig(extra=forbid) 统一维护，种子也受同一契约校验。
             config = SimulationConfig.model_validate(args)
             self._evidence.validate_simulation(config)
             return (await self._simulator.start(config)).model_dump(mode="json")

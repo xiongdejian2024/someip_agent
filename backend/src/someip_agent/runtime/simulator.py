@@ -125,7 +125,7 @@ class SimulationManager:
                     continue
                 config = status.config
                 status.emitted_count = int(message["emitted_count"])
-                status.last_value = float(message["last_value"])
+                status.last_value = message["last_value"]
                 internal = config.transport == "internal"
                 await self._monitor.publish(
                     MonitorMessage(

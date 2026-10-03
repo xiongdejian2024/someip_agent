@@ -5,7 +5,16 @@ from enum import Enum, IntEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 class MessageType(IntEnum):
@@ -195,14 +204,16 @@ class GeneratorKind(str, Enum):
 
 
 class SignalGeneratorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     signal_name: str = "value"
     kind: GeneratorKind = GeneratorKind.SINE
     data_type: SignalDataType = SignalDataType.FLOAT32
-    minimum: float = 0.0
-    maximum: float = 100.0
-    initial: float = 0.0
+    minimum: StrictInt | StrictFloat = 0
+    maximum: StrictInt | StrictFloat = 100
+    initial: StrictInt | StrictFloat = 0
     period_seconds: float = Field(default=5.0, gt=0)
-    sequence: list[float] = Field(default_factory=list)
+    sequence: list[StrictInt | StrictFloat] = Field(default_factory=list, max_length=8192)
+    seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
 
     @field_validator("data_type")
     @classmethod
@@ -213,7 +224,7 @@ class SignalGeneratorConfig(BaseModel):
 
     @field_validator("maximum")
     @classmethod
-    def maximum_must_be_valid(cls, value: float, info: Any) -> float:
+    def maximum_must_be_valid(cls, value: int | float, info: Any) -> int | float:
         minimum = info.data.get("minimum")
         if minimum is not None and value < minimum:
             raise ValueError("maximum 必须大于或等于 minimum")
@@ -244,7 +255,7 @@ class SimulationStatus(BaseModel):
     running: bool
     started_at: datetime
     emitted_count: int = 0
-    last_value: float | None = None
+    last_value: int | float | bool | str | None = None
     last_error: str | None = None
 
 

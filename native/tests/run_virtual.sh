@@ -89,3 +89,6 @@ python -m pytest native/tests/test_audit_identity_recovery.py -v \
   --junitxml=build/virtual-evidence/identity-audit-junit.xml
 python -m pytest native/tests/test_service_names.py -v \
   --junitxml=build/virtual-evidence/service-names-junit.xml
+# 激励类型专项使用独立 catalog；旧黄金 PCAP 已封存，避免不同 payload schema 混流。
+python -m pytest native/tests/test_signal_sources_virtual.py -v \
+  --junitxml=build/virtual-evidence/signal-sources-junit.xml

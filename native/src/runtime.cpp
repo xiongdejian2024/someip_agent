@@ -74,6 +74,7 @@ void Runtime::stop_member(const std::string &key) {
     auto m=it->second;
     m->active=false;
     ++m->generator_epoch;
+    m->signal_source.reset();
     if (m->timer) m->timer->cancel();
     ++m->event_epoch;m->event_running=false;
     if(m->event_timer)m->event_timer->cancel();
@@ -323,10 +324,24 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         else if (function=="generator_start") {
             auto m=members_.at(args.at("member").get<std::string>());
             if (m->role!="server") throw std::runtime_error("周期发生器仅支持 server");
-            if (!m->apis.at(args.at("function").get<std::string>()).event)
+            const auto &api=m->apis.at(args.at("function").get<std::string>());
+            if (!api.event)
                 throw std::runtime_error("周期发生器需要 event 接口");
-            if (args.value("interval_ms",100)<1) throw std::runtime_error("周期必须 >= 1ms");
+            auto interval=number(args.value("interval_ms",Json(100)));
+            if (interval<1 || interval>60000) throw std::runtime_error("周期必须为 1 至 60000ms");
+            const auto &source_config=args.at("generator");
+            auto signal=source_config.value("signal_name","value");
+            if(api.input.value("type","")!="struct" || api.input.at("fields").size()!=1
+               || api.input.at("fields").at(0).at("name")!=signal)
+                throw std::runtime_error("旧标量发生器需要唯一匹配信号，完整事件请使用完整参数接口");
+            const auto &schema=api.input.at("fields").at(0);
+            if(source_config.contains("data_type") && source_config.at("data_type")!=schema.at("type"))
+                throw std::runtime_error("激励类型与冻结事件 schema 不符");
+            auto source=std::make_unique<SignalSource>(schema,source_config);
+            // 配置/完整序列先校验；非法更新不能取消原先正常运行的任务。
+            Codec::encode(api.input,Json{{signal,source->initial()}});
             if (m->timer) m->timer->cancel();
+            m->signal_source=std::move(source);
             m->timer=std::make_shared<boost::asio::steady_timer>(io_);m->count=0;
             auto epoch=++m->generator_epoch;
             // 配置只复制一次，异步 tick 共享不可变快照，不能借用控制请求的生命周期。
@@ -334,7 +349,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             auto now=std::chrono::steady_clock::now();generator(m,cfg,epoch,now,now);result=true;
         } else if (function=="generator_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
-            ++m->generator_epoch;if(m->timer)m->timer->cancel();result=true;
+            ++m->generator_epoch;if(m->timer)m->timer->cancel();m->signal_source.reset();result=true;
         } else if (function=="ping") {
             Json declared=Json::object();
             for(const auto &[name,id]:configured_applications_)declared[name]=id;
@@ -546,23 +561,11 @@ void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cf
                         std::chrono::steady_clock::time_point deadline) {
     if(!m->active || m->generator_epoch!=epoch)return;
     double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
-    const auto &g=cfg->at("generator");std::string kind=g.value("kind","constant");
-    double lo=g.value("minimum",0.0),hi=g.value("maximum",100.0),period=g.value("period_seconds",5.0);
-    if(period<=0)throw std::runtime_error("信号周期必须为正数");
-    double value=g.value("initial",0.0);
-    if(kind=="sine")value=(lo+hi)/2+(hi-lo)/2*std::sin(2*3.141592653589793*elapsed/period);
-    else if(kind=="ramp")value=lo+(hi-lo)*std::fmod(elapsed,period)/period;
-    else if(kind=="sequence" && g.contains("sequence") && !g.at("sequence").empty())value=g.at("sequence")[m->count%g.at("sequence").size()];
-    else if(kind=="random") {static std::mt19937 rng(0);value=std::uniform_real_distribution<double>(lo,hi)(rng);}
-    else if(kind!="constant" && kind!="sequence")throw std::runtime_error("未知发生器类型");
+    const auto &g=cfg->at("generator");
     auto &api=m->apis.at(cfg->at("function").get<std::string>());
-    std::string signal=g.value("signal_name","value"),type=g.value("data_type","float32");
-    Json scalar=value;
-    if(type=="boolean")scalar=value!=0;
-    else if(type.rfind("int",0)==0 || type.rfind("uint",0)==0)scalar=static_cast<int64_t>(value);
-    else if(type=="string")scalar=std::to_string(value);
-    else if(type=="bytes")scalar=hex(Bytes{static_cast<uint8_t>(std::clamp(value,0.0,255.0))});
-    m->last_value=value;++m->count;
+    std::string signal=g.value("signal_name","value");
+    auto scalar=m->signal_source->value(elapsed,m->count);
+    m->last_value=scalar;++m->count;
     notify(m,api,Codec::encode(api.input,Json{{signal,scalar}}));
     auto interval=std::chrono::milliseconds(cfg->value("interval_ms",100));
     deadline+=interval;

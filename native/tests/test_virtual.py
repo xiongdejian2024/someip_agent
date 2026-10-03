@@ -21,20 +21,38 @@ EVIDENCE = ROOT.parents[1] / "build" / "virtual-evidence"
 
 @pytest.fixture(params=["udp", "tcp"])
 def partners(request):
-    transport = request.param
+    options = (
+        request.param
+        if isinstance(request.param, dict)
+        else {"transport": request.param}
+    )
+    transport = options["transport"]
     processes = []
     handles = []
     objects = []
     try:
+        catalog_path = ROOT / "catalog.json"
+        if "signal_type" in options:
+            catalog = json.loads(catalog_path.read_text())
+            catalog["DoorService"]["events"]["UpdateSampleEvent"]["schema"]["fields"][
+                0
+            ]["type"] = options["signal_type"]
+            catalog_path = (
+                EVIDENCE / f"signal-source-{options['signal_type']}-{transport}.json"
+            )
+            catalog_path.write_text(json.dumps(catalog))
         for node, address in (("server", "10.77.0.1"), ("client", "10.77.0.2")):
             config = json.loads((ROOT / f"{node}.json").read_text())
             for service in config.get("services", []):
                 service.pop("unreliable" if transport == "tcp" else "reliable", None)
                 for event in service.get("events", []):
                     event["is_reliable"] = transport == "tcp"
-            config_path = EVIDENCE / f"{node}-{transport}-config.json"
+            stem = f"{node}-{transport}"
+            if "signal_type" in options:
+                stem = f"source-{options['signal_type']}-{stem}"
+            config_path = EVIDENCE / f"{stem}-config.json"
             config_path.write_text(json.dumps(config))
-            log = (EVIDENCE / f"{node}-{transport}.log").open("ab")
+            log = (EVIDENCE / f"{stem}.log").open("ab")
             handles.append(log)
             process = subprocess.Popen(
                 [
@@ -51,7 +69,7 @@ def partners(request):
                     "--bind",
                     address,
                     "--catalog",
-                    str(ROOT / "catalog.json"),
+                    str(catalog_path),
                     "--config",
                     str(config_path),
                 ],

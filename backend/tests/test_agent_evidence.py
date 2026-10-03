@@ -359,6 +359,16 @@ async def test_only_explicit_task_can_be_stopped_and_valid_internal_can_start(
 ) -> None:
     subject = agent(tmp_path)
     plan = await invoke(subject, "prepare_simulation", service_id=0x1234, method_id=0x8001)
+    assert plan["simulation_config"]["generator"]["seed"] == 0
+    invalid = {
+        **plan["simulation_config"],
+        "generator": {
+            **plan["simulation_config"]["generator"],
+            "unknown": "not_allowed",
+        },
+    }
+    assert "error" in await subject._execute_tool("start_simulation", invalid, True)
+    assert subject._simulator.list() == []
     started = await subject._execute_tool("start_simulation", plan["simulation_config"], True)
     try:
         assert started["running"]

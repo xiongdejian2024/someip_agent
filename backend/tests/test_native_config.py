@@ -62,3 +62,21 @@ def test_missing_native_binary_is_explicit_service_unavailable(tmp_path):
         assert response.status_code == 503
         assert "未找到" in response.json()["detail"]
         assert client.get("/api/v1/simulation").json() == []
+
+
+def test_native_rejected_generator_is_bad_input_not_unavailable(
+    tmp_path, native_runtime, monkeypatch
+):
+    monkeypatch.setattr("someip_agent.agent.service.keyring.get_password", lambda *_: None)
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/simulation/start",
+            json={
+                "service_id": 0x1234,
+                "method_id": 0x8001,
+                "generator": {"kind": "sequence", "data_type": "uint8", "sequence": [1, 999]},
+            },
+        )
+        assert response.status_code == 422 and "超限" in response.json()["detail"]
+        assert client.get("/api/v1/simulation").json() == []
