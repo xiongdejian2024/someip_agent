@@ -11,7 +11,7 @@ from collections.abc import Callable
 from statistics import mean
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 from someip_agent.domain.models import (
     GeneratorKind,
@@ -82,12 +82,14 @@ class SimulationPlan(Arguments):
     service_id: int = Field(ge=0, le=0xFFFF)
     method_id: int = Field(ge=0, le=0xFFFF)
     signal_name: str | None = Field(default=None, max_length=256)
-    kind: Literal["constant", "sine", "ramp"] = "constant"
+    kind: Literal["constant", "sine", "ramp", "step"] = "constant"
     initial: float | None = None
     minimum: float | None = None
     maximum: float | None = None
     interval_ms: int = Field(default=100, ge=10, le=60_000)
     period_seconds: float = Field(default=5, gt=0, le=86400)
+    step_at_ms: StrictInt | None = Field(default=None, ge=0, le=18446744073709551615)
+    step_value: StrictInt | StrictFloat | None = None
 
 
 def service_brief(service: dict[str, Any]) -> dict[str, Any]:
@@ -673,6 +675,8 @@ class EvidenceTools:
             raise ValueError("仿真信号名称/类型与当前 ARXML 不一致")
         low, high = self.safe_range(signal)
         numbers = [generator.initial, generator.minimum, generator.maximum, *generator.sequence]
+        if generator.step_value is not None:
+            numbers.append(generator.step_value)
         if len(generator.sequence) > 1000 or not math.isfinite(generator.period_seconds):
             raise ValueError("仿真序列或周期超出安全边界")
         if any(not math.isfinite(v) or v < low or v > high for v in numbers):
@@ -702,6 +706,8 @@ class EvidenceTools:
                 maximum=maximum,
                 initial=initial,
                 period_seconds=args.period_seconds,
+                step_at_ms=args.step_at_ms,
+                step_value=args.step_value,
             ),
         )
         self.validate_simulation(config)

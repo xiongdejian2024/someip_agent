@@ -41,6 +41,10 @@ int main() {
         EventStimulus scalar(Json{{"type","uint64"}},0,Json::array({Json{{"path",""},
             {"generator",Json{{"initial",UINT64_MAX}}}}}));
         require(hex(scalar.sample(0,0))=="ffffffffffffffff","根标量激励失败");
+        EventStimulus step(Json{{"type","uint64"}},0,Json::array({Json{{"path",""},
+            {"generator",Json{{"kind","step"},{"initial",UINT64_MAX},{"step_at_ms",29},{"step_value",UINT64_MAX-1}}}}}));
+        require(hex(step.sample_ms(28,0))=="ffffffffffffffff" && hex(step.sample_ms(29,1))=="fffffffffffffffe",
+            "完整事件阶跃未使用精确毫秒时间");
         Json random_config={{"kind","random"},{"minimum",0ULL},{"maximum",UINT64_MAX},{"seed",19}};
         SignalSource reference(Json{{"type","uint64"}},random_config);
         EventStimulus random_event(Json{{"type","uint64"}},0,Json::array({Json{{"path",""},{"generator",random_config}}}));

@@ -7,10 +7,11 @@ namespace agent {
 // 业务激励源，不实现协议或定时器；编码复用 Codec，随机复用标准库。
 // 常量/序列/整数随机始终保留 JSON 整数，不经过 double 中间值。
 class SignalSource {
-    Json schema_, initial_, minimum_, maximum_;
+    Json schema_, initial_, minimum_, maximum_, step_value_;
     std::vector<Json> sequence_;
     std::string type_, kind_;
     double period_;
+    uint64_t step_at_ms_ = 0;
     std::mt19937_64 random_;
 
     bool integer_type() const { return type_.rfind("int",0)==0 || type_.rfind("uint",0)==0; }
@@ -24,6 +25,11 @@ class SignalSource {
     static uint64_t seed(const Json &value) {
         if(!value.is_number_integer() || (!value.is_number_unsigned() && value.get<int64_t>()<0))
             throw std::runtime_error("激励种子必须为 uint64 整数");
+        return value.get<uint64_t>();
+    }
+    static uint64_t step_time(const Json &value) {
+        if(!value.is_number_integer() || (!value.is_number_unsigned() && value.get<int64_t>()<0))
+            throw std::runtime_error("阶跃时刻必须为 uint64 整型毫秒");
         return value.get<uint64_t>();
     }
     Json normalize(Json value,bool wave=false) const {
@@ -55,12 +61,20 @@ public:
         type_(schema_.value("type","")),kind_(config.value("kind","constant")),
         period_(finite_number(config.value("period_seconds",Json(5)))),
         random_(seed(config.value("seed",Json(0)))) {
-        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp")
+        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp" && kind_!="step")
             throw std::runtime_error("未知激励源类型");
         if(type_=="struct" || type_=="array" || type_.empty())
             throw std::runtime_error("单个激励源必须绑定明确标量类型");
         if(period_<=0)throw std::runtime_error("激励周期必须为正数");
         initial_=normalize(config.value("initial",Json(0)));
+        if(kind_=="step") {
+            if(!config.contains("step_at_ms") || !config.contains("step_value") || config.at("step_value").is_null())
+                throw std::runtime_error("阶跃源必须提供 step_at_ms 与 step_value");
+            step_at_ms_=step_time(config.at("step_at_ms"));
+            step_value_=normalize(config.at("step_value")); // 全部状态在替换任务前校验。
+        } else if((config.contains("step_at_ms") && !config.at("step_at_ms").is_null()) ||
+                  (config.contains("step_value") && !config.at("step_value").is_null()))
+            throw std::runtime_error("非阶跃源不能包含阶跃参数");
         if(kind_=="sequence") {
             const auto &values=config.value("sequence",Json::array());
             if(!values.is_array() || values.size()>8192)
@@ -95,8 +109,13 @@ public:
         }
     }
     const Json &initial() const { return initial_; }
+    Json value_ms(uint64_t elapsed_ms,uint64_t index) {
+        if(kind_=="step")return elapsed_ms>=step_at_ms_?step_value_:initial_;
+        return value(elapsed_ms/1000.0,index);
+    }
     Json value(double elapsed,uint64_t index) {
         if(!std::isfinite(elapsed) || elapsed<0)throw std::runtime_error("激励时间必须为非负有限值");
+        if(kind_=="step")throw std::runtime_error("阶跃源须使用精确整型毫秒接口");
         if(kind_=="constant" || (kind_=="sequence" && sequence_.empty()))return initial_;
         if(kind_=="sequence")return sequence_[index%sequence_.size()];
         if(kind_=="random") {

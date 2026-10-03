@@ -18,6 +18,7 @@ from someip_agent.domain.models import (
     MonitorMessage,
     ServiceDefinition,
     SignalDefinition,
+    SimulationConfig,
 )
 from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.protocol.sd import SdEntry, SdPayload
@@ -76,6 +77,88 @@ def agent(tmp_path: Any, services: list[ServiceDefinition] | None = None) -> Age
 
 async def invoke(subject: AgentService, name: str, **arguments: Any) -> Any:
     return await subject._execute_tool(name, arguments, False)
+
+
+@pytest.mark.parametrize("value,allowed", [(0, True), (100, True), (-1, False), (101, False)])
+def test_step_after_value_respects_arxml_safety_range(tmp_path, value, allowed) -> None:
+    subject = agent(tmp_path)
+    config = SimulationConfig.model_validate(
+        {
+            "service_id": 0x1234,
+            "method_id": 0x8001,
+            "instance_id": 2,
+            "interface_version": 2,
+            "transport": "internal",
+            "generator": {
+                "signal_name": "转速",
+                "kind": "step",
+                "data_type": "uint16",
+                "minimum": 0,
+                "maximum": 100,
+                "initial": 0,
+                "step_at_ms": 29,
+                "step_value": value,
+            },
+        }
+    )
+    if allowed:
+        subject._evidence.validate_simulation(config)
+    else:
+        with pytest.raises(ValueError, match="安全范围"):
+            subject._evidence.validate_simulation(config)
+
+
+@pytest.mark.asyncio
+async def test_prepare_step_is_read_only_and_preserves_exact_time(tmp_path) -> None:
+    subject = agent(tmp_path)
+    result = await invoke(
+        subject,
+        "prepare_simulation",
+        service_id=0x1234,
+        method_id=0x8001,
+        kind="step",
+        step_at_ms=18446744073709551615,
+        step_value=100,
+    )
+    assert result["status"] == "prepared"
+    generator = result["simulation_config"]["generator"]
+    assert generator["step_at_ms"] == 18446744073709551615
+    assert generator["step_value"] == 100
+    denied = await subject._execute_tool("start_simulation", result["simulation_config"], False)
+    assert "error" in denied
+    assert subject._simulator.list() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"step_value": 101},
+        {"step_value": -1},
+        {"step_at_ms": -1},
+        {"step_at_ms": True},
+        {"step_at_ms": 29.0},
+        {"step_value": None},
+        {"step_at_ms": None},
+        {"kind": "constant"},
+    ],
+)
+async def test_invalid_step_plan_does_not_start_simulation(tmp_path, overrides) -> None:
+    subject = agent(tmp_path)
+    result = await invoke(
+        subject,
+        "prepare_simulation",
+        **{
+            "service_id": 0x1234,
+            "method_id": 0x8001,
+            "kind": "step",
+            "step_at_ms": 29,
+            "step_value": 100,
+            **overrides,
+        },
+    )
+    assert "error" in result
+    assert subject._simulator.list() == []
 
 
 def test_history_and_context_are_bounded_and_do_not_accept_system_role() -> None:

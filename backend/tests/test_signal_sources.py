@@ -29,6 +29,26 @@ def test_generator_json_preserves_integer_values_and_seed():
     assert type(raw["seed"]) is int and raw["seed"] == 18446744073709551615
 
 
+def test_scalar_step_configuration_keeps_exact_time_and_values():
+    config = SignalGeneratorConfig(
+        kind="step",
+        data_type="uint64",
+        initial=18446744073709551615,
+        step_at_ms=18446744073709551615,
+        step_value=18446744073709551614,
+    )
+    encoded = json.loads(config.model_dump_json())
+    assert type(encoded["step_at_ms"]) is int and encoded["step_at_ms"] == 18446744073709551615
+    assert type(encoded["step_value"]) is int and encoded["step_value"] == 18446744073709551614
+    for arguments in (
+        {"kind": "step", "step_at_ms": 1},
+        {"kind": "step", "step_at_ms": True, "step_value": 1},
+        {"kind": "constant", "step_value": 1},
+    ):
+        with pytest.raises(ValidationError):
+            SignalGeneratorConfig.model_validate(arguments)
+
+
 @pytest.mark.parametrize(
     "values",
     [
@@ -105,6 +125,31 @@ async def test_native_constant_exact_integer_trace_and_payload(
     assert all(
         item.payload_hex == golden and not item.metadata["wire_verified"] for item in messages
     )
+
+
+@pytest.mark.asyncio
+async def test_native_scalar_step_uses_elapsed_clock_and_keeps_u64(tmp_path, native_runtime):
+    messages = await samples(
+        tmp_path,
+        native_runtime,
+        SignalGeneratorConfig(
+            kind="step",
+            data_type="uint64",
+            initial=18446744073709551615,
+            step_at_ms=29,
+            step_value=18446744073709551614,
+        ),
+    )
+    actual = [message.signal_values["value"] for message in messages]
+    assert actual[0] == 18446744073709551615 and actual[-1] == 18446744073709551614
+    after = False
+    for message, value in zip(messages, actual, strict=True):
+        if value == 18446744073709551614:
+            after = True
+            assert message.payload_hex == "fffffffffffffffe"
+        else:
+            assert not after and value == 18446744073709551615
+            assert message.payload_hex == "ffffffffffffffff"
 
 
 @pytest.mark.asyncio

@@ -56,3 +56,9 @@ export function validateGeneratorRange(dataType: GeneratorDataType, kind: string
     throw new Error('整数正弦/斜坡须在安全整数范围内；精确大整数请使用常量或服务模型的序列/随机源')
   }
 }
+
+export function validateGeneratorStep(dataType: GeneratorDataType, at: unknown, after: unknown, minimum: GeneratorNumber, maximum: GeneratorNumber): void {
+  validateGeneratorValue(at, 'uint64')
+  const value = validateGeneratorValue(after, dataType)
+  if (value < minimum || value > maximum) throw new Error('阶跃后值超出激励范围')
+}

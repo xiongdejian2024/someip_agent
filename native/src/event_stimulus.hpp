@@ -53,7 +53,7 @@ public:
             auto schema=schema_at(schema_,path);
             const auto &config=binding.at("generator");
             if(!config.is_object())throw std::runtime_error("激励源配置必须为字典");
-            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed"};
+            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed","step_at_ms","step_value"};
             for(const auto &[key,value]:config.items())if(!fields.count(key))
                 throw std::runtime_error("完整事件激励源包含未知字段");
             SignalSource source(schema,config);
@@ -61,10 +61,14 @@ public:
             bindings_.push_back({std::move(path),std::move(source)});
         }
         Codec::encode(schema_,arguments_); // 组合后的完整布局在替换旧任务前再次验证。
-        auto preview=*this;preview.sample(0,0); // 首样本预检使用源副本，不消耗正式随机流。
+        auto preview=*this;preview.sample_ms(0,0); // 首样本预检使用源副本，不消耗正式随机流。
     }
     Bytes sample(double elapsed,uint64_t index) {
         for(auto &binding:bindings_)arguments_.at(binding.path)=binding.source.value(elapsed,index);
+        return Codec::encode(schema_,arguments_);
+    }
+    Bytes sample_ms(uint64_t elapsed_ms,uint64_t index) {
+        for(auto &binding:bindings_)arguments_.at(binding.path)=binding.source.value_ms(elapsed_ms,index);
         return Codec::encode(schema_,arguments_);
     }
     size_t source_count() const { return bindings_.size(); }

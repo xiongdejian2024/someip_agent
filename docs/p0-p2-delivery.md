@@ -282,3 +282,46 @@ ego-browser 复用空间 9，以现有 vehicle_service.arxml 在内存派生 uin
 最终前端 typecheck/build、整数/工程/智能体流/适配器/监控缓存/回放回归与相关 ruff/diff
 检查通过；既有大 chunk 与 Starlette 弃用警告保留。最终构建重载后再次只读核对恢复字段和
 45 条原始通知全部正确，没有重复启动任务。正式 Release、签名密钥与用户 IPv6 草稿不动。
+
+### 小块 14：精确毫秒阶跃源与网页／智能体草案
+
+复用 SignalSource、EventStimulus、Codec 和现有调度器，新增 step 源，不增加 Python
+逐周期线程或协议实现。step_at_ms 严格为 uint64 整型毫秒，step_value 在替换任务前
+完成类型编码校验；时刻为 0 时首样本立即切换，达到阈值后的首次计划发送切换并保持。
+完整事件同一批源使用共享逻辑毫秒，不跨事件同步；旧标量使用 steady_clock 经过时间。
+29 ms 阈值与 10 ms 完整事件周期在逻辑 30 ms 的样本切换，不承诺硬实时。更新配置
+仍按既有语义重置逻辑时间；错误更新保持正常旧任务。int64/uint64 时刻和值不经浮点。
+
+网页新增精确时刻／阶跃后值编辑、配置保存和重载恢复；非阶跃配置拒绝非空阶跃字段。
+智能体 prepare_simulation 可生成同契约阶跃草案，准备不执行，启动继续要求明确写授权、
+当前 ARXML 身份及 internal 通道。调研发现安全范围检查遗漏 step_value；新增回归
+先复现两项失败（-1 和 101 未拒绝），补入共同安全范围后 13 项阶跃草案／边界通过。
+智能体既有 2^53 安全门禁不放宽，网页／原生直接入口仍无损支持 64 位完整类型范围。
+
+最终原生执行文件 SHA-256 为
+3d187221f03fbb317d0e1dcdd97fce5ae3784f20b1f7eac2085c1960a78db197。
+本候选 7 项 CTest 通过；完整后端 732 项通过，零失败／错误／跳过，3 项既有警告保留；
+JUnit 为 build/virtual-evidence/p2-step-final-candidate.xml。首次完整候选 719 项通过，
+但早于智能体门禁修复，因此不替代最终结果。原生／事件／工程／场景专项先有 50 项通过，
+包括大小端、0／29 ms、非法更新保留旧任务、实际场景封存输入、工程重启不自动运行。
+针对性证据为 build/virtual-evidence/p2-step-source-targeted.xml。
+
+独立 veth UDP／TCP 专项最终 20 项通过，包含旧类型源、完整动态事件、三种类型阶跃
+以及真实 ARXML 的大小端多信号阶跃与停止清理。运行前核对同一执行文件 SHA；证据为
+build/p2-step-final-vnet.QF8maC/p2-step-final-vnet.xml，零失败／错误／跳过。
+首次 20 项专项保留于 build/p2-step-vnet.a2AwOE，不覆盖旧结果。仅隔离 Docker 虚拟网，
+不接宿主车辆网络；专项不冒充最新整套虚拟网 PCAP 审计或独立安装包验收。
+
+ego-browser 空间 9 实际配置阶跃（初值 9007199254740993、29 ms、后值 uint64 最大值），
+明确启动／停止，运行 50c5deb0-eba2-4eae-bc94-69a74e6f00f5 的 8 条内部通知依次为
+0020000000000001 和 ffffffffffffffff，切换后不逆转，保留 wire_verified=false。
+保存工程 7db93169-d112-4e02-958c-3da400cc2638 修订 3，页面重载恢复三字段。
+最后重启隔离 QA 后只读核对修订与精确字段仍在，活动仿真／服务／监听均为 0，
+没有重复执行业务；内存监控历史随进程重启清空，不冒充持久记录。
+
+前端 typecheck/build、阶跃极值 HTTP／工程序列化、无损整数、工程 SSR、监控缓存和
+只读回放检查通过；相关 ruff、三模块 mypy 和 diff 检查通过。初次 lint 先于格式化
+遇 E501，格式化后通过；检查时误查不存在脚本和一次打印 JUnit 长行造成输出截断，
+后续只读提取 suite 摘要，测试结果以真实退出码和原 XML 为准。既有大 chunk、
+Starlette／Pydantic 和只读 pytest cache 警告保留。正式版本、Release、密钥和用户
+IPv6 草稿不改动；CSV、状态机、跨事件同步与整体验收继续后续小块。

@@ -581,11 +581,14 @@ void Runtime::receive(const std::string &application_name,std::shared_ptr<vsomei
 void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cfg,uint64_t epoch,std::chrono::steady_clock::time_point started,
                         std::chrono::steady_clock::time_point deadline) {
     if(!m->active || m->generator_epoch!=epoch)return;
-    double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+    auto elapsed_duration=std::chrono::steady_clock::now()-started;
+    double elapsed=std::chrono::duration<double>(elapsed_duration).count();
     const auto &g=cfg->at("generator");
     auto &api=m->apis.at(cfg->at("function").get<std::string>());
     std::string signal=g.value("signal_name","value");
-    auto scalar=m->signal_source->value(elapsed,m->count);
+    auto scalar=g.value("kind","constant")=="step"?
+        m->signal_source->value_ms(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_duration).count()),m->count):
+        m->signal_source->value(elapsed,m->count);
     m->last_value=scalar;++m->count;
     notify(m,api,Codec::encode(api.input,Json{{signal,scalar}}));
     auto interval=std::chrono::milliseconds(cfg->value("interval_ms",100));
@@ -605,7 +608,7 @@ void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cf
 void Runtime::event_cycle(std::shared_ptr<Member> m,uint64_t epoch,std::chrono::steady_clock::time_point deadline) {
     if(!m->active || !m->event_running || m->event_epoch!=epoch)return;
     try {
-        if(m->event_stimulus)m->event_payload=m->event_stimulus->sample(m->event_logical_ms/1000.0,m->event_sample_index);
+        if(m->event_stimulus)m->event_payload=m->event_stimulus->sample_ms(m->event_logical_ms,m->event_sample_index);
         notify(m,m->apis.at(m->event_function),m->event_payload,
             m->event_stimulus?&m->event_stimulus->arguments():&m->event_arguments);
         ++m->event_count;

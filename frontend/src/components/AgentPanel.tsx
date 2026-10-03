@@ -142,7 +142,7 @@ function simulationPlan(tool: ToolActivity): SimulationStartRequest | null {
     || typeof value.destination_host !== 'string'
     || !['service_id', 'instance_id', 'method_id', 'interface_version', 'interval_ms', 'destination_port'].every((key) => typeof value[key] === 'number' && Number.isFinite(value[key]))
     || typeof generator.signal_name !== 'string'
-    || !['constant', 'sine', 'ramp', 'random', 'sequence'].includes(String(generator.kind))
+    || !['constant', 'sine', 'ramp', 'random', 'sequence', 'step'].includes(String(generator.kind))
     || !['boolean', 'uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64', 'float32', 'float64'].includes(String(generator.data_type))
     || !['minimum', 'maximum', 'initial'].every(key => isGeneratorNumber(generator[key]))
     || typeof generator.period_seconds !== 'number' || !Number.isFinite(generator.period_seconds)

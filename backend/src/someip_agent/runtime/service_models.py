@@ -3,7 +3,16 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 from someip_agent.domain.models import GeneratorKind
 
@@ -68,6 +77,17 @@ class EventGeneratorConfig(BaseModel):
         default_factory=list, max_length=8192
     )
     seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
+    step_at_ms: StrictInt | None = Field(default=None, ge=0, le=18446744073709551615)
+    step_value: StrictInt | StrictFloat | StrictBool | StrictStr | None = None
+
+    @model_validator(mode="after")
+    def step_shape(self) -> "EventGeneratorConfig":
+        if self.kind == GeneratorKind.STEP:
+            if self.step_at_ms is None or self.step_value is None:
+                raise ValueError("阶跃源必须提供 step_at_ms 与 step_value")
+        elif self.step_at_ms is not None or self.step_value is not None:
+            raise ValueError("非阶跃源不能包含阶跃参数")
+        return self
 
 
 class EventSignalSource(BaseModel):

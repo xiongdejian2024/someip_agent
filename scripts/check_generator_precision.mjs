@@ -29,7 +29,7 @@ const output = await build({
 })
 const module = { exports: {} }
 new Function('require', 'module', 'exports', output.outputFiles[0].text)(require, module, module.exports)
-const { parseGeneratorValue, validateGeneratorValue, validateGeneratorRange, generatorMidpoint, generatorSliderSafe, parseJson, stringifyJson, api, input, page } = module.exports
+const { parseGeneratorValue, validateGeneratorValue, validateGeneratorRange, validateGeneratorStep, generatorMidpoint, generatorSliderSafe, parseJson, stringifyJson, api, input, page } = module.exports
 for (const [literal, type, expected] of [
   ['9007199254740993', 'uint64', 9007199254740993n],
   ['18446744073709551615', 'uint64', 18446744073709551615n],
@@ -55,6 +55,13 @@ assert.equal(generatorSliderSafe(0, 100, 9007199254740993n), false)
 validateGeneratorRange('uint64', 'constant', 0, 18446744073709551615n, 9007199254740993n)
 assert.throws(() => validateGeneratorRange('uint64', 'sine', 0, 18446744073709551615n, 42), /安全整数/)
 assert.throws(() => validateGeneratorRange('uint8', 'constant', 10, 20, 9), /范围/)
+validateGeneratorStep('uint64', 18446744073709551615n, 18446744073709551615n, 0, 18446744073709551615n)
+validateGeneratorStep('int64', 0, -9223372036854775808n, -9223372036854775808n, 9223372036854775807n)
+for (const at of [-1, 29.5, true, null, 18446744073709551616n]) {
+  assert.throws(() => validateGeneratorStep('uint8', at, 10, 0, 100))
+}
+assert.throws(() => validateGeneratorStep('uint8', 29, 101, 0, 100), /范围/)
+assert.throws(() => validateGeneratorStep('uint8', 29, 256, 0, 255), /类型范围/)
 assert.match(input, /type="text"/)
 assert.match(input, /value="18446744073709551615"/)
 assert.doesNotMatch(input, /type="number"|type="range"/)
@@ -80,6 +87,12 @@ try {
   const restored = parseJson(stringifyJson({ simulations:[command] })).simulations[0]
   assert.deepEqual(restored.generator, generator)
   assert.equal(typeof restored.service_id, 'number')
+  const stepCommand = { ...command, generator: { ...generator, kind:'step', step_at_ms:18446744073709551615n, step_value:18446744073709551615n } }
+  await api.startSimulation(stepCommand)
+  const stepSubmitted = parseJson(submitted)
+  assert.equal(stepSubmitted.generator.step_at_ms, 18446744073709551615n)
+  assert.equal(stepSubmitted.generator.step_value, 18446744073709551615n)
+  assert.deepEqual(parseJson(stringifyJson({simulations:[stepCommand]})).simulations[0], stepCommand)
 } finally {
   globalThis.fetch = originalFetch
   delete globalThis.window

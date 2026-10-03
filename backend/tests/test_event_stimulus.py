@@ -12,7 +12,7 @@ from test_service_cycles import create_session
 
 from someip_agent.config import Settings
 from someip_agent.main import create_app
-from someip_agent.runtime.service_models import ServiceCycleCommand
+from someip_agent.runtime.service_models import EventGeneratorConfig, ServiceCycleCommand
 from someip_agent.workbench.projects import CycleDraft, ProjectSave
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -44,6 +44,99 @@ def test_source_contract_preserves_u64_and_rejects_unknown_layout():
     ):
         with pytest.raises(ValidationError):
             ServiceCycleCommand(member="Provider_server", function="Event", sources=[invalid])
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"kind": "step", "step_value": 1},
+        {"kind": "step", "step_at_ms": 1},
+        {"kind": "step", "step_at_ms": True, "step_value": 1},
+        {"kind": "step", "step_at_ms": 1.0, "step_value": 1},
+        {"kind": "step", "step_at_ms": -1, "step_value": 1},
+        {"kind": "step", "step_at_ms": 18446744073709551616, "step_value": 1},
+        {"kind": "step", "step_at_ms": 1, "step_value": float("nan")},
+        {"kind": "constant", "step_value": 1},
+    ],
+)
+def test_step_contract_rejects_ambiguous_time_and_missing_values(config):
+    with pytest.raises(ValidationError):
+        EventGeneratorConfig.model_validate(config)
+
+
+@pytest.mark.parametrize("order,at", [("big", 29), ("little", 29), ("big", 0)])
+def test_step_event_shared_millisecond_clock_and_invalid_update(
+    tmp_path, native_runtime, order, at
+):
+    content = (FIXTURES / "composite_service.arxml").read_bytes()
+    if order == "little":
+        content = content.replace(b"MOST-SIGNIFICANT-BYTE-FIRST", b"MOST-SIGNIFICANT-BYTE-LAST")
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime))
+    with TestClient(app) as client:
+        session, keys = create_session(client, "EnvelopeService", content)
+        base = f"/api/v1/services/sessions/{session['id']}/cycles"
+        sources = [
+            {
+                "path": "/tag",
+                "generator": {"kind": "step", "initial": 9, "step_at_ms": at, "step_value": 10},
+            },
+            {
+                "path": "/nested/temperature",
+                "generator": {"kind": "step", "initial": -3, "step_at_ms": at, "step_value": 4},
+            },
+        ]
+        command = {
+            "member": keys["server"],
+            "function": "UpdateEnvelopeChangedEvent",
+            "args": VALUE,
+            "interval_ms": 10,
+            "sources": sources,
+        }
+        started = client.post(base + "/start", json=command)
+        assert started.status_code == 200, started.text
+        deadline = time.monotonic() + 3
+        received = []
+        while time.monotonic() < deadline:
+            received = [
+                message
+                for message in client.get("/api/v1/monitor/messages").json()
+                if message["metadata"]["member"] == keys["client"]
+            ]
+            if len(received) >= 6:
+                break
+            time.sleep(0.01)
+        assert len(received) >= 6
+        before = client.get(base).json()[0]["emitted_count"]
+        invalid = copy.deepcopy(sources)
+        invalid[0]["generator"]["step_value"] = 256
+        assert (
+            client.post(base + "/update", json={**command, "sources": invalid}).status_code == 422
+        )
+        time.sleep(0.03)
+        assert client.get(base).json()[0]["emitted_count"] > before
+        for index, message in enumerate(received[:6]):
+            phase = int(index * 10 >= at)
+            values = message["signal_values"]
+            assert values["/tag"] == [9, 10][phase]
+            assert values["/nested/temperature"] == [-3, 4][phase]
+            assert values["/samples/1"] == 0xABCD
+            if order == "big":
+                golden = [
+                    "001b0900041234abcd00020102000a000301020300030405060002fffd",
+                    "001b0a00041234abcd00020102000a0003010203000304050600020004",
+                ][phase]
+            else:
+                golden = [
+                    "1b000904003412cdab020001020a00030001020303000405060200fdff",
+                    "1b000a04003412cdab020001020a000300010203030004050602000400",
+                ][phase]
+            assert message["payload_hex"] == golden
+        stopped = client.post(base + "/stop", json={"member": keys["server"]})
+        assert stopped.status_code == 200 and stopped.json()["source_count"] == 0
+        count = stopped.json()["emitted_count"]
+        time.sleep(0.03)
+        assert client.get(base).json()[0]["emitted_count"] == count
+        assert client.post(f"/api/v1/services/sessions/{session['id']}/stop").status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -182,7 +275,20 @@ def test_root_scalar_source_uses_frozen_type(tmp_path, native_runtime):
             pytest.fail("根标量激励未经实际 float32 类型量化并交付")
 
 
-def test_dynamic_sources_project_restart_and_actual_scenario(tmp_path, native_runtime, monkeypatch):
+@pytest.mark.parametrize(
+    "generator,payload,expected",
+    [
+        (
+            {"kind": "sequence", "sequence": [0.1, 42.5], "seed": 123},
+            "3dcccccd",
+            0.10000000149011612,
+        ),
+        ({"kind": "step", "initial": 0.1, "step_at_ms": 29, "step_value": 42.5}, "422a0000", 42.5),
+    ],
+)
+def test_dynamic_sources_project_restart_and_actual_scenario(
+    tmp_path, native_runtime, monkeypatch, generator, payload, expected
+):
     monkeypatch.setattr("someip_agent.agent.service.keyring.get_password", lambda *_: None)
     settings = Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime)
     command = {
@@ -190,9 +296,7 @@ def test_dynamic_sources_project_restart_and_actual_scenario(tmp_path, native_ru
         "function": "UpdateSpeedChangedEvent",
         "args": 0,
         "interval_ms": 20,
-        "sources": [
-            {"path": "", "generator": {"kind": "sequence", "sequence": [0.1, 42.5], "seed": 123}}
-        ],
+        "sources": [{"path": "", "generator": generator}],
     }
     with TestClient(create_app(settings)) as client:
         state = client.app.state.container
@@ -214,13 +318,13 @@ def test_dynamic_sources_project_restart_and_actual_scenario(tmp_path, native_ru
                 {
                     "kind": "wait_message",
                     "session": "pair",
-                    "match": {"member": "Consumer_client", "payload_hex": "3dcccccd"},
+                    "match": {"member": "Consumer_client", "payload_hex": payload},
                     "save_as": "received",
                 },
                 {
                     "kind": "assert",
                     "path": ["received", "signal_values", ""],
-                    "expected": 0.10000000149011612,
+                    "expected": expected,
                 },
             ],
             cleanup=[
@@ -234,12 +338,16 @@ def test_dynamic_sources_project_restart_and_actual_scenario(tmp_path, native_ru
         result = wait_run(client, started.json()["id"])
         assert result["status"] == "passed" and result["cleanup_complete"], result
         assert result["steps"][2]["result"]["source_count"] == 1
+        inputs = client.get(f"/api/v1/scenarios/runs/{result['id']}/inputs")
+        assert inputs.status_code == 200, inputs.text
+        sealed = inputs.json()["definition"]["steps"][2]["command"]["sources"][0]["generator"]
+        assert all(sealed[key] == value for key, value in generator.items())
         assert not any(item["active"] for item in client.get("/api/v1/services/sessions").json())
     with TestClient(create_app(settings)) as restarted:
         restored = restarted.get("/api/v1/projects/current").json()
         assert restored["revision"] == 2
         source = restored["document"]["cycles"][0]["command"]["sources"][0]
-        assert source["generator"]["seed"] == 123 and source["generator"]["sequence"] == [0.1, 42.5]
+        assert all(source["generator"][key] == value for key, value in generator.items())
         assert restarted.get("/api/v1/services/sessions").json() == []
         history = restarted.get("/api/v1/scenarios/runs").json()
         assert len(history) == 1 and history[0]["status"] == "passed", "重启不自动重跑场景"

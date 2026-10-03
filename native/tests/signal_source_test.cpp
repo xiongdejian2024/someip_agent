@@ -50,6 +50,26 @@ int main() {
         require(rounded.value(0,0)==Json(0.10000000149011612),"float32 激励观测未反映实际编码量化");
         require(hex(Codec::encode(Json{{"type","float32"}},rounded.value(0,0)))=="3dcccccd",
             "float32 量化后黄金字节错误");
+        SignalSource step(u64,Json{{"kind","step"},{"initial",UINT64_MAX},{"step_at_ms",29},{"step_value",UINT64_MAX-1}});
+        require(step.value_ms(28,0)==UINT64_MAX && step.value_ms(29,1)==UINT64_MAX-1
+            && step.value_ms(100000,2)==UINT64_MAX-1,"阶跃边界/保持或整数精度错误");
+        SignalSource long_step(i64,Json{{"kind","step"},{"initial",INT64_MIN},{"step_at_ms",UINT64_MAX},{"step_value",INT64_MAX}});
+        require(long_step.value_ms(UINT64_MAX-1,0)==INT64_MIN && long_step.value_ms(UINT64_MAX,1)==INT64_MAX,
+            "64 位阶跃时刻经过浮点舍入");
+        SignalSource immediate(Json{{"type","float32"}},Json{{"kind","step"},{"step_at_ms",0},{"step_value",0.1}});
+        require(immediate.value_ms(0,0)==0.10000000149011612,"首样本阶跃未量化");
+        SignalSource text(Json{{"type","string"}},Json{{"kind","step"},{"initial","before"},{"step_at_ms",1},{"step_value","after"}});
+        require(text.value_ms(0,0)=="before" && text.value_ms(1,1)=="after","文本阶跃错误");
+        SignalSource flag(Json{{"type","boolean"}},Json{{"kind","step"},{"initial",false},{"step_at_ms",1},{"step_value",true}});
+        require(flag.value_ms(0,0)==false && flag.value_ms(1,1)==true,"布尔阶跃错误");
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",1}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_value",1}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",true},{"step_value",1}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",-1},{"step_value",1}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",29.0},{"step_value",1}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",1},{"step_value",256}});});
+        rejects([&]{SignalSource source(u8,Json{{"kind","constant"},{"step_at_ms",1}});});
+        rejects([&]{step.value(0.029,0);});
         rejects([&]{SignalSource source(u64,Json{{"initial",9007199254740992.0}});});
         rejects([&]{SignalSource source(u64,Json{{"initial",1.5}});});
         rejects([&]{SignalSource source(u64,Json{{"initial",-1}});});

@@ -131,13 +131,15 @@ export interface NativeEventCycle {
 export interface NativeEventSource {
   path: string
   generator: {
-    kind?: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence'
+    kind?: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step'
     initial?: number | bigint | boolean | string
     minimum?: number | bigint
     maximum?: number | bigint
     period_seconds?: number
     sequence?: Array<number | bigint | boolean | string>
     seed?: number | bigint
+    step_at_ms?: number | bigint | null
+    step_value?: number | bigint | boolean | string | null
   }
 }
 
@@ -290,7 +292,7 @@ export interface SimulationStartRequest {
   destination_port: number
   generator: {
     signal_name: string
-    kind: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence'
+    kind: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step'
     data_type: 'boolean' | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'int8' | 'int16' | 'int32' | 'int64' | 'float32' | 'float64'
     minimum: number | bigint
     maximum: number | bigint
@@ -298,6 +300,8 @@ export interface SimulationStartRequest {
     period_seconds: number
     sequence: Array<number | bigint>
     seed?: number | bigint
+    step_at_ms?: number | bigint | null
+    step_value?: number | bigint | null
   }
 }
 
