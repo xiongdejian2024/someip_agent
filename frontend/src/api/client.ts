@@ -8,6 +8,7 @@ import type {
   NativeServiceSession,
   NativeServiceCommand,
   NativeServiceRequestMessage,
+  NativeEventCycle,
   PcapImportResult,
   SimulationStartRequest,
   SimulationStatus,
@@ -99,6 +100,13 @@ export const api = {
   serviceCommand: (id: string, action: 'call' | 'notify' | 'respond', command: NativeServiceCommand) => request<{
     status: 'responded' | 'submitted'; result: unknown; observation: 'vsomeip_response' | 'native_submission'; wire_verified: false
   }>(`/services/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: stringifyJson(command) }, 40_000),
+  serviceCycles: (id: string) => request<NativeEventCycle[]>(`/services/sessions/${encodeURIComponent(id)}/cycles`),
+  configureServiceCycle: (id: string, action: 'start' | 'update', command: NativeServiceCommand & { interval_ms: number }) => request<NativeEventCycle>(
+    `/services/sessions/${encodeURIComponent(id)}/cycles/${action}`, { method: 'POST', body: stringifyJson(command) }, 40_000,
+  ),
+  stopServiceCycle: (id: string, member: string) => request<NativeEventCycle>(
+    `/services/sessions/${encodeURIComponent(id)}/cycles/stop`, { method: 'POST', body: stringifyJson({ member }) }, 40_000,
+  ),
   importArxml: async (file: File) => {
     const result = await uploadFile<{ services?: RawServiceDefinition[]; warnings?: string[] }>('/arxml/import', file)
     const services = normalizeServices(result.services ?? [])

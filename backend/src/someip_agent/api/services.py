@@ -13,6 +13,9 @@ from someip_agent.runtime.native_config import SimulationPermissionError
 from someip_agent.runtime.service_models import (
     ServiceCommand,
     ServiceCommandResult,
+    ServiceCycleCommand,
+    ServiceCycleStatus,
+    ServiceCycleStop,
     ServiceIncomingRequest,
     ServiceResponse,
     ServiceSessionView,
@@ -102,6 +105,58 @@ async def notify(
 ) -> ServiceCommandResult:
     return await _operation(
         state, "services.notify", identifier, lambda: state.services.notify(identifier, command)
+    )
+
+
+@router.get("/{identifier}/cycles", response_model=list[ServiceCycleStatus])
+async def cycles(
+    identifier: str, state: ApplicationState = Depends(get_state)
+) -> list[ServiceCycleStatus]:
+    # 状态轮询复用错误映射；不把查询变成写操作。
+    try:
+        return await state.services.cycles(identifier)
+    except Exception as exc:
+        logger.exception("读取周期状态失败", extra={"operation": "services.cycles"})
+        if isinstance(exc, ServiceSessionNotFound):
+            raise HTTPException(404, str(exc)) from exc
+        if isinstance(exc, (NativeRuntimeError, OSError)):
+            raise HTTPException(503, str(exc)) from exc
+        raise
+
+
+@router.post("/{identifier}/cycles/start", response_model=ServiceCycleStatus)
+async def start_cycle(
+    identifier: str, command: ServiceCycleCommand, state: ApplicationState = Depends(get_state)
+) -> ServiceCycleStatus:
+    return await _operation(
+        state,
+        "services.cycle.start",
+        identifier,
+        lambda: state.services.configure_cycle(identifier, command),
+    )
+
+
+@router.post("/{identifier}/cycles/update", response_model=ServiceCycleStatus)
+async def update_cycle(
+    identifier: str, command: ServiceCycleCommand, state: ApplicationState = Depends(get_state)
+) -> ServiceCycleStatus:
+    return await _operation(
+        state,
+        "services.cycle.update",
+        identifier,
+        lambda: state.services.configure_cycle(identifier, command, update=True),
+    )
+
+
+@router.post("/{identifier}/cycles/stop", response_model=ServiceCycleStatus)
+async def stop_cycle(
+    identifier: str, command: ServiceCycleStop, state: ApplicationState = Depends(get_state)
+) -> ServiceCycleStatus:
+    return await _operation(
+        state,
+        "services.cycle.stop",
+        identifier,
+        lambda: state.services.stop_cycle(identifier, command),
     )
 
 

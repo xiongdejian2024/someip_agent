@@ -53,6 +53,25 @@ class ServiceResponse(ServiceCommand):
     is_error: bool = False
 
 
+class ServiceCycleCommand(ServiceCommand):
+    interval_ms: int = Field(default=100, ge=1, le=60_000, strict=True)
+
+
+class ServiceCycleStop(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    member: str = Field(min_length=1, max_length=512)
+
+
+class ServiceCycleStatus(BaseModel):
+    member: str
+    function: str | None = None
+    interval_ms: int | None = None
+    running: bool
+    emitted_count: int = Field(ge=0)
+    observation: Literal["native_schedule"] = "native_schedule"
+    wire_verified: Literal[False] = False
+
+
 class ServiceCommandResult(BaseModel):
     status: Literal["responded", "submitted"]
     result: Any = None

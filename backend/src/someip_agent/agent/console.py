@@ -9,7 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from someip_agent.agent.service import AgentTool
 from someip_agent.domain.models import ListenerConfig
-from someip_agent.runtime.service_models import ServiceCommand, ServiceResponse
+from someip_agent.runtime.service_models import (
+    ServiceCommand,
+    ServiceCycleCommand,
+    ServiceCycleStop,
+    ServiceResponse,
+)
 from someip_agent.soa.catalog import NativeCatalogRequest
 
 if TYPE_CHECKING:
@@ -27,6 +32,14 @@ class SessionCommand(Identifier):
 
 class SessionResponse(Identifier):
     command: ServiceResponse
+
+
+class SessionCycleCommand(Identifier):
+    command: ServiceCycleCommand
+
+
+class SessionCycleStop(Identifier):
+    command: ServiceCycleStop
 
 
 class Navigation(BaseModel):
@@ -96,6 +109,28 @@ def console_tools(state: ApplicationState) -> list[AgentTool]:
 
         return handler
 
+    async def cycle_status(args: dict[str, Any], _allow: bool) -> Any:
+        request = Identifier.model_validate(args)
+        return [
+            item.model_dump(mode="json") for item in await state.services.cycles(request.identifier)
+        ]
+
+    def cycle_handler(action: str):
+        async def handler(args: dict[str, Any], _allow: bool) -> Any:
+            if action == "stop":
+                stop_request = SessionCycleStop.model_validate(args)
+                result = await state.services.stop_cycle(
+                    stop_request.identifier, stop_request.command
+                )
+            else:
+                request = SessionCycleCommand.model_validate(args)
+                result = await state.services.configure_cycle(
+                    request.identifier, request.command, update=action == "update"
+                )
+            return result.model_dump(mode="json")
+
+        return handler
+
     async def interfaces(args: dict[str, Any], _allow: bool) -> Any:
         if args:
             raise ValueError("list_network_interfaces 不接受参数")
@@ -128,6 +163,23 @@ def console_tools(state: ApplicationState) -> list[AgentTool]:
         ),
         AgentTool("clear_monitor", "清空监控缓存；属于写操作", empty, True, clear),
         AgentTool("list_service_sessions", "读取原生服务会话状态", empty, False, sessions),
+        AgentTool(
+            "get_service_cycles",
+            "读取真实服务的原生周期通知状态与计数",
+            Identifier.model_json_schema(),
+            False,
+            cycle_status,
+        ),
+        *[
+            AgentTool(
+                f"service_cycle_{action}",
+                f"{description}指定真实服务的完整事件周期通知；属于写操作，不猜测 ARXML 布局",
+                (SessionCycleStop if action == "stop" else SessionCycleCommand).model_json_schema(),
+                True,
+                cycle_handler(action),
+            )
+            for action, description in (("start", "启动"), ("update", "更新"), ("stop", "停止"))
+        ],
         AgentTool(
             "start_service_session",
             "按当前 ARXML 启动原生服务会话；网络发送仍需目的地址白名单和部署授权",

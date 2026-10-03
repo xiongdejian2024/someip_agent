@@ -116,6 +116,16 @@ export interface NativeServiceRequest {
   }>
 }
 
+export interface NativeEventCycle {
+  member: string
+  function: string | null
+  interval_ms: number | null
+  running: boolean
+  emitted_count: number
+  observation: 'native_schedule'
+  wire_verified: false
+}
+
 export interface NativeServiceSession {
   id: string
   runtime: 'vsomeip'

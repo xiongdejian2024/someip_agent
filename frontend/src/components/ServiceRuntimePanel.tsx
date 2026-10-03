@@ -4,7 +4,7 @@ import { parseJson, stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { byteOrderOverride, memberApplication, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
-import type { NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
+import type { NativeEventCycle, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
 import { Icon } from './Icon'
 import './ServiceRuntimePanel.css'
 
@@ -26,6 +26,8 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const [args, setArgs] = useState('{}')
   const [requestId, setRequestId] = useState('')
   const [timeout, setTimeout] = useState('5')
+  const [cycleMs, setCycleMs] = useState('100')
+  const [cycles, setCycles] = useState<NativeEventCycle[]>([])
   const [pending, setPending] = useState<NativeServiceRequestMessage[]>([])
   const [results, setResults] = useState<Array<{ id: string; member: string; functionName: string; text: string }>>([])
   const [operations, setOperations] = useState<ReadonlySet<string>>(new Set())
@@ -41,6 +43,28 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const busy = operations.has('control')
   const commandBusy = operations.has(commandKey)
   const requestsBusy = operations.has(`requests:${sessionId}`)
+  const cycleKey = `cycle:${sessionId}:${memberKey}`
+  const cycleBusy = operations.has(cycleKey)
+
+  useEffect(() => {
+    setCycles([])
+    if (!sessionId || !session?.running) return
+    let active = true
+    let polling = false
+    const refresh = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const data = await api.serviceCycles(sessionId)
+        if (active) setCycles(data)
+      } catch (cause) {
+        if (active) { logError('读取真实事件周期状态失败', cause); setError(describeApiError(cause)) }
+      } finally { polling = false }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 1500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [sessionId, session?.running])
 
   useEffect(() => { setInstance(''); setByteOrder('arxml') }, [selected?.id])
   useEffect(() => {
@@ -124,6 +148,17 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     if (action === 'respond') setPending(await api.serviceRequests(session.id))
   }, commandKey)
 
+  const configureCycle = (update: boolean) => run(update ? '更新真实事件周期激励' : '启动真实事件周期激励', async () => {
+    if (!session?.running || member?.role !== 'server' || action !== 'notify' || !effectiveFunction) throw new Error('请选择活动 server 和真实事件')
+    const interval = Number(cycleMs)
+    if (!Number.isInteger(interval) || interval < 1 || interval > 60000) throw new Error('事件周期必须为 1–60000 ms 的整数')
+    const result = await api.configureServiceCycle(session.id, update ? 'update' : 'start', {
+      member: member.key, function: effectiveFunction, args: parseJson(args), interval_ms: interval,
+    })
+    setCycles(await api.serviceCycles(session.id))
+    setNotice(`原生周期任务${result.running ? '运行中' : '已停止'}；完整事件参数按当前会话 ARXML 编码，不代表远端收到。`)
+  }, cycleKey)
+
   return <section className="panel service-runtime-panel">
     <div className="panel-header"><div><span className="panel-kicker">原生服务运行时</span><h3>client / server 初始化与调用</h3></div><Icon name="network" /></div>
     <p className="muted">Python 字典配置 → 二进制 → 控制/成员 socket → vsomeip。默认内部隔离，不同内部会话互不通信；可在同一会话加入测试对端，业务响应仍需人工填写。在线模式需后端发送开关、目标白名单和本机网卡地址。应用 ID 必须独立，0x1101 保留给默认仿真。</p>
@@ -158,6 +193,12 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       </div>
       <label>明确 JSON 参数（不会自动回显或猜测业务响应）<textarea rows={4} value={args} onChange={event => setArgs(event.target.value)} /></label>
       <div className="context-actions"><button className="button primary" disabled={busy || commandBusy || !session.running || !effectiveFunction || (action === 'respond' && !requestId)} onClick={() => void command()}><Icon name="send" />{commandBusy ? '等待原生回执…' : '执行所选操作'}</button><button className="button secondary" disabled={busy || requestsBusy || !session.running} onClick={() => void run('读取服务端请求', async () => { setPending(await api.serviceRequests(session.id)) }, `requests:${session.id}`)}>读取待响应请求</button></div>
+      {member?.role === 'server' && action === 'notify' && <section aria-label="真实事件周期激励">
+        <p>完整事件参数由原生定时器按 frozen ARXML 布局发送，保留源字节序和事件组；不为每个信号创建简化服务。当前每个 server 成员一个周期任务，其他事件需先停止或使用独立成员。</p>
+        <label>周期（ms）<input value={cycleMs} onChange={event => setCycleMs(event.target.value)} /></label>
+        <div className="context-actions"><button className="button primary" disabled={busy || cycleBusy || !session.running || !effectiveFunction} onClick={() => void configureCycle(false)}>启动完整事件周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running || !cycles.some(item => item.member === member.key && item.running)} onClick={() => void configureCycle(true)}>更新完整参数与周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running} onClick={() => void run('停止真实事件周期', async () => { await api.stopServiceCycle(session.id, member.key); setCycles(await api.serviceCycles(session.id)) }, cycleKey)}>停止所选成员周期</button></div>
+        {cycles.filter(item => item.member === member.key).map(item => <p key={item.member}>{item.function ?? '无活动事件'} · {item.running ? '原生调度运行中' : '已停止'} · {item.interval_ms ?? '—'} ms · 尝试通知 {item.emitted_count} 次（不是线上交付计数）</p>)}
+      </section>}
       {pending.map(item => <div className="service-runtime-request" key={`${item.member}-${item.request_id}-${item.received_at}`}><code>{item.member} · {item.function} · request_id {item.request_id} · {stringifyJson(item.args)}</code><button className="button ghost" disabled={!item.reply_allowed || busy} onClick={() => { setMemberKey(item.member); setFunctionName(item.function); setRequestId(String(item.request_id)); setAction('respond'); setArgs('{}') }}>{item.reply_allowed ? '选择此请求并填写响应' : '无响应方法'}</button></div>)}
     </div>}
     {!!results.length && <div className="service-runtime-results" aria-live="polite">{results.map(item => <div key={item.id}><code>{item.member} · {item.functionName}</code><p>{item.text}</p></div>)}</div>}

@@ -24,6 +24,9 @@ from .service_models import (
     NativeMemberView,
     ServiceCommand,
     ServiceCommandResult,
+    ServiceCycleCommand,
+    ServiceCycleStatus,
+    ServiceCycleStop,
     ServiceIncomingRequest,
     ServiceResponse,
     ServiceSessionView,
@@ -61,6 +64,7 @@ class ServiceSessionManager:
         self._sessions: dict[str, ServiceSession] = {}
         self._history: deque[ServiceSessionView] = deque(maxlen=64)
         self._lifecycle = asyncio.Lock()
+        self._cycle_control = asyncio.Lock()
 
     async def start(self, model: ArxmlModel, request: NativeCatalogRequest) -> ServiceSessionView:
         bundle = build_native_bundle(model, request, self.settings)
@@ -260,6 +264,65 @@ class ServiceSessionManager:
             command.timeout,
         )
         return ServiceCommandResult(status="submitted", observation="native_submission")
+
+    @staticmethod
+    def _cycle_member(session: ServiceSession, member: str) -> None:
+        for alias, config in session.bundle.members.items():
+            if member_key(alias, config) == member and config["role"] == "server":
+                return
+        raise ValueError("周期任务必须属于当前会话的 server 成员")
+
+    async def cycles(self, identifier: str) -> list[ServiceCycleStatus]:
+        session = self._session(identifier)
+        result = []
+        for alias, config in session.bundle.members.items():
+            if config["role"] == "server":
+                status = await asyncio.to_thread(
+                    session.partner.event_cycle_status, member_key(alias, config)
+                )
+                result.append(ServiceCycleStatus.model_validate(status))
+        return result
+
+    async def configure_cycle(
+        self, identifier: str, command: ServiceCycleCommand, *, update: bool = False
+    ) -> ServiceCycleStatus:
+        async with self._cycle_control:
+            return await self._configure_cycle(identifier, command, update=update)
+
+    async def _configure_cycle(
+        self, identifier: str, command: ServiceCycleCommand, *, update: bool
+    ) -> ServiceCycleStatus:
+        session = self._session(identifier)
+        self._api(session, command, role="server", event=True)
+        current = await asyncio.to_thread(session.partner.event_cycle_status, command.member)
+        if current["running"] and current["function"] != command.function:
+            raise ServiceSessionConflict("此成员已有其他事件周期任务，请先停止，不能隐式覆盖")
+        if update and not current["running"]:
+            raise ServiceSessionConflict("周期任务已停止，不能更新")
+        callback = (
+            session.partner.send_event_notify_thread_update
+            if update
+            else session.partner.send_event_notify_thread_start
+        )
+        # 完整参数由原生 Codec 按 frozen ARXML catalog 校验并编码，不建立单信号替代布局。
+        await asyncio.to_thread(
+            callback, command.member, command.function, command.args, command.interval_ms / 1000
+        )
+        return ServiceCycleStatus.model_validate(
+            await asyncio.to_thread(session.partner.event_cycle_status, command.member)
+        )
+
+    async def stop_cycle(self, identifier: str, command: ServiceCycleStop) -> ServiceCycleStatus:
+        async with self._cycle_control:
+            return await self._stop_cycle(identifier, command)
+
+    async def _stop_cycle(self, identifier: str, command: ServiceCycleStop) -> ServiceCycleStatus:
+        session = self._session(identifier)
+        self._cycle_member(session, command.member)
+        await asyncio.to_thread(session.partner.send_event_notify_thread_stop, command.member)
+        return ServiceCycleStatus.model_validate(
+            await asyncio.to_thread(session.partner.event_cycle_status, command.member)
+        )
 
     def requests(self, identifier: str) -> list[ServiceIncomingRequest]:
         session = self._session(identifier)

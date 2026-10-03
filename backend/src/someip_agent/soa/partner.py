@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 from copy import deepcopy
+from decimal import Decimal
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
@@ -533,9 +534,10 @@ class S2sBaseClass(WTIAssertions):
 
     @staticmethod
     def _cycle_interval(seconds: float) -> int:
-        if not math.isfinite(seconds) or not 0.001 <= seconds <= 60:
+        if isinstance(seconds, bool) or not math.isfinite(seconds) or not 0.001 <= seconds <= 60:
             raise ValueError("周期通知间隔必须为 0.001 至 60 秒")
-        return math.ceil(seconds * 1000)
+        # 十进制毫秒不因二进制浮点的 29.000000000000004 被额外 ceil 成 30。
+        return math.ceil(Decimal(str(seconds)) * 1000)
 
     def send_event_notify_thread_start(
         self, partner_key: str, event_name: str, args: dict[str, Any], cycle_time: float = 1
@@ -592,6 +594,29 @@ class S2sBaseClass(WTIAssertions):
     ) -> None:
         with self._lifecycle:
             self._cycle_update_locked(partner_key, event_name, args, cycle_time)
+
+    def event_cycle_status(self, partner_key: str) -> dict[str, Any]:
+        """读取实际原生周期计数；这是调度/提交状态，不代表线上抓包或远端交付。"""
+        with self._lifecycle:
+            info = self.partner_infos[partner_key]
+            state = self.sim_operator.send_request("running_service", print_result=False)
+            native = (
+                state.get(self._native_member(partner_key)) if isinstance(state, dict) else None
+            )
+            if not isinstance(native, dict):
+                raise NativeRuntimeError("原生运行时缺少所选成员的周期事件状态")
+            running = native.get("event_cycle_running")
+            count = native.get("event_cycle_count")
+            if type(running) is not bool or type(count) is not int or count < 0:
+                raise NativeRuntimeError("原生运行时缺少可靠的周期事件状态")
+            config = info.cycle_config
+            return {
+                "member": self.partner_infos.canonical(partner_key),
+                "function": self._event_name(config["event_name"]) if config else None,
+                "interval_ms": self._cycle_interval(config["cycle_time"]) if config else None,
+                "running": running,
+                "emitted_count": count,
+            }
 
     def _cycle_update_locked(
         self, partner_key: str, event_name: str, args: dict[str, Any], cycle_time: float | None

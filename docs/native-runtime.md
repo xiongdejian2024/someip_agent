@@ -658,3 +658,15 @@ WTI 虚拟网测试用空列表事件做有界的订阅准备探针：服务可�
 Linux 默认升级器与完整 ZIP 构建/验收见 [Linux 发行包](linux-packaging.md)。Windows 打包和调试
 按用户要求暂缓，CI 仅保留显式手动选项。Windows 原生构建、独立 updater 和 ZIP/EXE 打包已接入脚本；当前宿主无法证明 Windows 实机安装、
 DLL 加载及 Inno Setup 回滚成功，必须由 Windows 验收补证后才可发布。
+# 完整事件周期控制 API
+
+运行中的服务会话可用 `GET /api/services/sessions/{id}/cycles` 读取真实原生调度状态。
+`POST` 同路径下的 `cycles/start`、`cycles/update` 接收 `member`、`function`、完整 `args`、
+整数 `interval_ms`（1–60000）；`cycles/stop` 接收 `member`。事件必须属于冻结 catalog 的
+server 成员。当前一个成员最多一个周期事件，活动时不能隐式换成不同事件；停止会话会清理任务。
+更新参数先经完整原生 codec 验证，非法更新不会替换旧任务。
+
+返回的 `emitted_count` 是原生调度尝试次数，不是抓包、远端收到或交付成功次数；
+`observation=native_schedule`、`wire_verified=false` 明确这个边界。
+网页服务页和控制台 `get_service_cycles`、`service_cycle_start/update/stop` 复用同一控制面，
+控制台写操作必须显式允许 mutation。完整动态激励计划不是这个固定参数入口的能力。
