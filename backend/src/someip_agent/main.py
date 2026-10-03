@@ -108,6 +108,10 @@ app = create_app()
 
 
 def run() -> None:
+    if sys.argv[1:2] == ["scenario"]:
+        from someip_agent.scenario_cli import main
+
+        raise SystemExit(main(sys.argv[2:]))
     if settings.open_browser:
         browser_host = "127.0.0.1" if settings.host in {"0.0.0.0", "::"} else settings.host
         timer = threading.Timer(

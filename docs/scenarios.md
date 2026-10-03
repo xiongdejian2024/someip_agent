@@ -68,4 +68,21 @@ exists 要求路径实际存在。通知 submitted 只证明原生接受命令�
 进程异常退出后的 running 历史标 interrupted，不自动重新执行、不声称资源已清理。
 这是产品运行结果，不是开发 pytest 测试报告；AI 不参与最终判据。
 
-网页/CLI 和基线比较由后续小块接通；本 API 小块不宣称完整 P1/P2 已交付。
+## 无界面 CLI
+
+先启动工作台后端（不需要打开网页），再调用安装后的 `someip-agent-scenario`；Linux 完整
+发行包共用现有主程序入口 `./someip-agent scenario`，不要求另装系统 Python。
+源码可用 `.venv/bin/python -m someip_agent.main scenario`。参数与 API 使用同一工程快照。
+
+```bash
+someip-agent-scenario --server http://127.0.0.1:8765 \
+  --project 工程UUID --definition scenario.json \
+  --result result.json --junit result.xml --html result.html
+```
+
+退出码：0=passed 且清理完成，1=业务失败/取消/中断/清理未完成，2=客户端或报告导出错误，
+130=用户 Ctrl+C。客户端超时/读取失败/Ctrl+C 会取消已知的本次运行并等待清理；不重试
+启动 POST，响应不确定不能重复启动。报告独占创建、权限 0600，不覆盖已有证据。
+服务地址不接受内嵌凭据；默认只连接本机，真实网络权限仍由后端本机门禁决定。
+
+网页入口与基线比较由后续小块接通；整轮 P1/P2/安装包验收仍未完成。

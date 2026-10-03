@@ -36,6 +36,7 @@ packaging = ["pyinstaller>=6.11,<7"]
 
 [project.scripts]
 someip-agent = "someip_agent.main:run"
+someip-agent-scenario = "someip_agent.scenario_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/someip_agent", "src/soa_partner"]
