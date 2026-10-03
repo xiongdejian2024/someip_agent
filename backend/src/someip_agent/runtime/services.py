@@ -306,7 +306,12 @@ class ServiceSessionManager:
         )
         # 完整参数由原生 Codec 按 frozen ARXML catalog 校验并编码，不建立单信号替代布局。
         await asyncio.to_thread(
-            callback, command.member, command.function, command.args, command.interval_ms / 1000
+            callback,
+            command.member,
+            command.function,
+            command.args,
+            command.interval_ms / 1000,
+            sources=[source.model_dump(mode="json") for source in command.sources],
         )
         return ServiceCycleStatus.model_validate(
             await asyncio.to_thread(session.partner.event_cycle_status, command.member)
@@ -414,6 +419,7 @@ class ServiceSessionManager:
                         return_code=trace["return_code"],
                         payload_hex=trace["payload_hex"],
                         payload_size=len(trace["payload_hex"]) // 2,
+                        signal_values=trace.get("signal_values", {}),
                         metadata={
                             "runtime": "vsomeip",
                             "observation": "vsomeip_api",
@@ -427,6 +433,7 @@ class ServiceSessionManager:
                             "member": trace["member"],
                             "application_name": trace.get("application_name"),
                             "application_id": trace.get("application_id"),
+                            "signal_values_truncated": trace.get("signal_values_truncated", False),
                         },
                     )
                 )

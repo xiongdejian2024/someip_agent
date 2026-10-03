@@ -77,6 +77,7 @@ void Runtime::stop_member(const std::string &key) {
     m->signal_source.reset();
     if (m->timer) m->timer->cancel();
     ++m->event_epoch;m->event_running=false;
+    m->event_stimulus.reset();
     if(m->event_timer)m->event_timer->cancel();
     if (m->role=="server") {
         m->application->stop_offer_service(m->service,m->instance,m->major,m->minor);
@@ -285,23 +286,35 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             for (auto &[key,m]:members_) result[key]={{"state",m->state},{"role",m->role},
                 {"application_name",m->application->get_name()},{"application_id",m->application->get_client()},
                 {"emitted_count",m->count},{"last_value",m->last_value},
-                {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count}};
+                {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count},
+                {"event_source_count",m->event_stimulus?m->event_stimulus->source_count():0},
+                {"event_logical_seconds",m->event_logical_ms/1000.0}};
         } else if (function=="monitor") { monitors_.push_back(conn);result=true; }
         else if(function=="event_cycle_start" || function=="event_cycle_update") {
             auto m=members_.at(args.at("member").get<std::string>());
             auto name=args.at("function").get<std::string>();
             const auto &api=m->apis.at(name);
             if(m->role!="server" || !api.event)throw std::runtime_error("周期通知需要 server event");
+            if(m->signal_source)throw std::runtime_error("旧标量发生器仍在运行，请先明确停止");
             if(function=="event_cycle_update" && !m->event_running)
                 throw std::runtime_error("周期通知已停止，不能更新");
+            if(m->event_running && m->event_function!=name)
+                throw std::runtime_error("此成员已有其他事件周期，不能隐式覆盖");
             auto interval=args.contains("interval_ms")?number(args.at("interval_ms")):m->event_interval.count();
             if(interval<1 || interval>60000)throw std::runtime_error("周期通知间隔必须为 1 至 60000ms");
             // 先验证并编码新 payload，失败不得破坏正在运行的旧周期任务。
             auto payload=Codec::encode(api.input,unpack_json(args.at("args")));
+            auto decoded=Codec::decode(api.input,payload);
+            auto sources=args.value("sources",Json::array());
+            if(!sources.is_array())throw std::runtime_error("事件激励绑定必须为数组");
+            std::unique_ptr<EventStimulus> stimulus;
+            if(!sources.empty())stimulus=std::make_unique<EventStimulus>(api.input,decoded,sources);
             ++m->event_epoch;
             if(m->event_timer)m->event_timer->cancel();
             m->event_timer=std::make_shared<boost::asio::steady_timer>(io_);
             m->event_function=name;m->event_payload=std::move(payload);
+            m->event_arguments=std::move(decoded);
+            m->event_stimulus=std::move(stimulus);m->event_logical_ms=0;m->event_sample_index=0;
             m->event_interval=std::chrono::milliseconds(interval);m->event_running=true;
             auto now=std::chrono::steady_clock::now();
             if(function=="event_cycle_start") {m->event_count=0;event_cycle(m,m->event_epoch,now);}
@@ -317,6 +330,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         } else if(function=="event_cycle_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
             ++m->event_epoch;m->event_running=false;
+            m->event_stimulus.reset();
             if(m->event_timer)m->event_timer->cancel();
             result=true;
             std::cout<<Json{{"operation",function},{"member",m->key},{"message","原生周期通知已停止"}}.dump()<<std::endl;
@@ -324,6 +338,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         else if (function=="generator_start") {
             auto m=members_.at(args.at("member").get<std::string>());
             if (m->role!="server") throw std::runtime_error("周期发生器仅支持 server");
+            if(m->event_running)throw std::runtime_error("完整事件周期仍在运行，请先明确停止");
             const auto &api=m->apis.at(args.at("function").get<std::string>());
             if (!api.event)
                 throw std::runtime_error("周期发生器需要 event 接口");
@@ -377,7 +392,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
     }
 }
 void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payload,const std::string &direction,
-                    uint8_t type,uint16_t client,uint16_t session,uint8_t code) {
+                    uint8_t type,uint16_t client,uint16_t session,uint8_t code,const Json *decoded) {
     // 没有实际监控连接时不构造大型 trace；业务交付仍包含原始 payload_hex。
     monitors_.erase(std::remove_if(monitors_.begin(),monitors_.end(),[](const auto &weak){
         auto connection=weak.lock();return !connection || !connection->socket.is_open();
@@ -391,12 +406,18 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
         {"last_value",m->last_value},{"observation","vsomeip_api"},
         {"native_monotonic_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()}};
+    if(api.event) {
+        bool truncated=false;
+        message["signal_values"]=decoded?event_signal_values(*decoded,truncated):
+            event_signal_values(Codec::decode(api.input,payload),truncated);
+        message["signal_values_truncated"]=truncated;
+    }
     for (auto &weak:monitors_) if(auto conn=weak.lock())conn->send(message);
 }
-void Runtime::notify(std::shared_ptr<Member> m,const Api &api,const Bytes &data) {
+void Runtime::notify(std::shared_ptr<Member> m,const Api &api,const Bytes &data,const Json *decoded) {
     auto payload=vsomeip::runtime::get()->create_payload();payload->set_data(data);
     m->application->notify(m->service,m->instance,api.id,payload,true);
-    trace(m,api,data,"tx",2);
+    trace(m,api,data,"tx",2,0,0,0,decoded);
 }
 void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_ptr<Connection> conn) {
     const std::string function=request.value("function","");
@@ -551,7 +572,7 @@ void Runtime::receive(const std::string &application_name,std::shared_ptr<vsomei
                     m->field_values[name]=delivery;
                 }
                 m->emit(delivery);
-                trace(m,api,data,"rx",type,message->get_client(),message->get_session());
+                trace(m,api,data,"rx",type,message->get_client(),message->get_session(),0,&args);
                 break;
             }
         }
@@ -584,8 +605,14 @@ void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cf
 void Runtime::event_cycle(std::shared_ptr<Member> m,uint64_t epoch,std::chrono::steady_clock::time_point deadline) {
     if(!m->active || !m->event_running || m->event_epoch!=epoch)return;
     try {
-        notify(m,m->apis.at(m->event_function),m->event_payload);
+        if(m->event_stimulus)m->event_payload=m->event_stimulus->sample(m->event_logical_ms/1000.0,m->event_sample_index);
+        notify(m,m->apis.at(m->event_function),m->event_payload,
+            m->event_stimulus?&m->event_stimulus->arguments():&m->event_arguments);
         ++m->event_count;
+        ++m->event_sample_index;
+        if(m->event_logical_ms>UINT64_MAX-static_cast<uint64_t>(m->event_interval.count()))
+            throw std::runtime_error("事件逻辑时间超出运行预算");
+        m->event_logical_ms+=m->event_interval.count();
         deadline+=m->event_interval;
         if(deadline<std::chrono::steady_clock::now())deadline=std::chrono::steady_clock::now()+m->event_interval;
         m->event_timer->expires_at(deadline);

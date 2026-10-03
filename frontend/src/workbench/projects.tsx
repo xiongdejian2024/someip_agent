@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { api, describeApiError } from '../api/client'
 import { parseJson, stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
-import type { NativeServiceCommand, NativeServiceRequest, NetworkListenerConfig, PageId, SimulationStartRequest } from '../types'
+import type { NativeCycleCommand, NativeServiceRequest, NetworkListenerConfig, PageId, SimulationStartRequest } from '../types'
 
 export interface ProjectDocument {
   format: 'someip-agent-project'
@@ -13,7 +13,7 @@ export interface ProjectDocument {
   services: Record<string, NativeServiceRequest>
   listeners: NetworkListenerConfig[]
   simulations: SimulationStartRequest[]
-  cycles: Array<{ service_profile: string; command: NativeServiceCommand & { interval_ms: number } }>
+  cycles: Array<{ service_profile: string; command: NativeCycleCommand }>
   workspace: { page: PageId; service_paths: string[]; waves: Array<{ service_id: number; method_id: number; signal_name: string }> }
 }
 export interface ProjectView { id: string; revision: number; updated_at: string; document: ProjectDocument }

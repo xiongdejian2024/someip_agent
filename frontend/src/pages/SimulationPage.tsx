@@ -528,7 +528,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
             {!pageSignals.length && <div className="sim-empty"><Icon name="activity" size={24} /><strong>{tableView === 'workset' ? '工作集为空' : '没有可用的数值信号'}</strong><span>{tableView === 'workset' ? '在服务信号表中勾选需要仿真的信号。' : '选择其他服务，或查看下方解析说明。'}</span></div>}
           </div>
           <div className="sim-pane-footer"><span>{visibleSignals.length ? currentSignalPage * SIGNAL_PAGE_SIZE + 1 : 0}–{Math.min((currentSignalPage + 1) * SIGNAL_PAGE_SIZE, visibleSignals.length)} / {visibleSignals.length}</span><Pager page={currentSignalPage} maxPage={maxSignalPage} onChange={setSignalPage} label="信号" /></div>
-          {tableView === 'catalog' && (serviceWarnings.length > 0 || !!activeService?.methods.length) && <details className="sim-limitations"><summary>仿真支持说明{serviceWarnings.length ? ' · ' + serviceWarnings.length + ' 项暂不可用' : ''}</summary><div><p>当前发布数值型单信号 Event / Field Notifier。Method 请求和复合 payload 尚不支持。</p>{serviceWarnings.map((warning, index) => <p key={index}>{warning.message}</p>)}</div></details>}
+          {tableView === 'catalog' && (serviceWarnings.length > 0 || !!activeService?.methods.length) && <details className="sim-limitations"><summary>仿真支持说明{serviceWarnings.length ? ' · ' + serviceWarnings.length + ' 项暂不可用' : ''}</summary><div><p>本页工作集使用数值型单信号 Event / Field Notifier。完整多信号/复合事件请使用“服务模型”的完整事件周期与路径激励入口；Method 请求使用服务调用或自动场景。</p>{serviceWarnings.map((warning, index) => <p key={index}>{warning.message}</p>)}</div></details>}
         </section>
 
         <aside className="panel sim-properties-pane">

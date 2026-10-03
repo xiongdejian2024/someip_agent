@@ -2,6 +2,7 @@
 #include "application.hpp"
 #include "dispatch.hpp"
 #include "signal_source.hpp"
+#include "event_stimulus.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <map>
 #include <set>
@@ -41,6 +42,9 @@ struct Member {
     bool event_running = false;
     std::string event_function;
     Bytes event_payload;
+    Json event_arguments;
+    std::unique_ptr<EventStimulus> event_stimulus;
+    uint64_t event_logical_ms = 0, event_sample_index = 0;
     std::chrono::milliseconds event_interval{1000};
     void emit(const Json &message);
 };
@@ -70,12 +74,12 @@ class Runtime {
     void receive(const std::string &,std::shared_ptr<vsomeip::message>);
     void subscribe(std::shared_ptr<Member>, const std::string &, bool);
     bool has_other_event_consumer(const std::shared_ptr<Member> &, uint16_t) const;
-    void notify(std::shared_ptr<Member>, const Api &, const Bytes &);
+    void notify(std::shared_ptr<Member>, const Api &, const Bytes &, const Json * = nullptr);
     void generator(std::shared_ptr<Member>, std::shared_ptr<const Json>, uint64_t, std::chrono::steady_clock::time_point,
                    std::chrono::steady_clock::time_point);
     void event_cycle(std::shared_ptr<Member>, uint64_t, std::chrono::steady_clock::time_point);
     void trace(std::shared_ptr<Member>, const Api &, const Bytes &, const std::string &,
-               uint8_t, uint16_t=0, uint16_t=0, uint8_t=0);
+               uint8_t, uint16_t=0, uint16_t=0, uint8_t=0, const Json * = nullptr);
 public:
     Runtime(boost::asio::io_context &, Json, Json, std::string, std::string);
     ~Runtime();

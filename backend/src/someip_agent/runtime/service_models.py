@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+
+from someip_agent.domain.models import GeneratorKind
 
 
 class NativeMemberView(BaseModel):
@@ -53,8 +55,30 @@ class ServiceResponse(ServiceCommand):
     is_error: bool = False
 
 
+class EventGeneratorConfig(BaseModel):
+    """类型从冻结事件路径推导；不让调用者另造 data_type 或布局。"""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    kind: GeneratorKind = GeneratorKind.CONSTANT
+    initial: StrictInt | StrictFloat | StrictBool | StrictStr = 0
+    minimum: StrictInt | StrictFloat = 0
+    maximum: StrictInt | StrictFloat = 100
+    period_seconds: float = Field(default=5, gt=0, allow_inf_nan=False)
+    sequence: list[StrictInt | StrictFloat | StrictBool | StrictStr] = Field(
+        default_factory=list, max_length=8192
+    )
+    seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
+
+
+class EventSignalSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(max_length=512)
+    generator: EventGeneratorConfig
+
+
 class ServiceCycleCommand(ServiceCommand):
     interval_ms: int = Field(default=100, ge=1, le=60_000, strict=True)
+    sources: list[EventSignalSource] = Field(default_factory=list, max_length=128)
 
 
 class ServiceCycleStop(BaseModel):
@@ -68,6 +92,8 @@ class ServiceCycleStatus(BaseModel):
     interval_ms: int | None = None
     running: bool
     emitted_count: int = Field(ge=0)
+    source_count: int = Field(default=0, ge=0, le=128)
+    logical_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
     observation: Literal["native_schedule"] = "native_schedule"
     wire_verified: Literal[False] = False
 

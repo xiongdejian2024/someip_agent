@@ -62,10 +62,33 @@ def test_source_exact_value_actual_veth_receive_and_stop(
             assert type(actual) is float and actual == 0.10000000149011612
         else:
             assert type(actual) is int and actual == value
+        with pytest.raises(RuntimeError, match="旧标量发生器仍在运行"):
+            server.send_event_notify_thread_start(
+                "DoorService_server", "Sample", {"value": value}, 0.02
+            )
         server.sim_operator.send_request(
             "generator_stop", {"member": "DoorService_server"}
         )
         view = server.sim_operator.send_request("running_service")["DoorService_server"]
         assert view["last_value"] == actual and view["emitted_count"] >= 1
+        server.send_event_notify_thread_start(
+            "DoorService_server", "Sample", {"value": value}, 0.02
+        )
+        try:
+            with pytest.raises(RuntimeError, match="完整事件周期仍在运行"):
+                server.sim_operator.send_request(
+                    "generator_start",
+                    {
+                        "member": "DoorService_server",
+                        "function": "UpdateSampleEvent",
+                        "generator": {
+                            "kind": "constant",
+                            "initial": value,
+                            "data_type": data_type,
+                        },
+                    },
+                )
+        finally:
+            server.send_event_notify_thread_stop("DoorService_server")
     finally:
         client.unregister_callback("DoorService_client", receive)

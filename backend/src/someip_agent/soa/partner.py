@@ -388,7 +388,11 @@ class S2sBaseClass(WTIAssertions):
             for key, cycle in cycles.items():
                 assert cycle is not None
                 self.send_event_notify_thread_start(
-                    key, cycle["event_name"], cycle["args"], cycle["cycle_time"]
+                    key,
+                    cycle["event_name"],
+                    cycle["args"],
+                    cycle["cycle_time"],
+                    sources=cycle.get("sources", []),
                 )
 
     def _send(self, key: str, message: dict[str, Any]) -> None:
@@ -540,13 +544,24 @@ class S2sBaseClass(WTIAssertions):
         return math.ceil(Decimal(str(seconds)) * 1000)
 
     def send_event_notify_thread_start(
-        self, partner_key: str, event_name: str, args: dict[str, Any], cycle_time: float = 1
+        self,
+        partner_key: str,
+        event_name: str,
+        args: Any,
+        cycle_time: float = 1,
+        *,
+        sources: list[dict[str, Any]] | None = None,
     ) -> None:
         with self._lifecycle:
-            self._cycle_start_locked(partner_key, event_name, args, cycle_time)
+            self._cycle_start_locked(partner_key, event_name, args, cycle_time, sources)
 
     def _cycle_start_locked(
-        self, partner_key: str, event_name: str, args: dict[str, Any], cycle_time: float
+        self,
+        partner_key: str,
+        event_name: str,
+        args: Any,
+        cycle_time: float,
+        sources: list[dict[str, Any]] | None = None,
     ) -> None:
         interval = self._cycle_interval(cycle_time)
         self.sim_operator.send_request(
@@ -556,6 +571,7 @@ class S2sBaseClass(WTIAssertions):
                 "function": self._event_name(event_name),
                 "args": args,
                 "interval_ms": interval,
+                "sources": [] if sources is None else sources,
             },
         )
         info = self.partner_infos[partner_key]
@@ -565,6 +581,7 @@ class S2sBaseClass(WTIAssertions):
             "event_name": event_name,
             "args": deepcopy(args),
             "cycle_time": interval / 1000,
+            "sources": deepcopy([] if sources is None else sources),
         }
         logger.info(
             "原生周期事件已启动",
@@ -589,11 +606,13 @@ class S2sBaseClass(WTIAssertions):
         self,
         partner_key: str,
         event_name: str,
-        args: dict[str, Any],
+        args: Any,
         cycle_time: float | None = None,
+        *,
+        sources: list[dict[str, Any]] | None = None,
     ) -> None:
         with self._lifecycle:
-            self._cycle_update_locked(partner_key, event_name, args, cycle_time)
+            self._cycle_update_locked(partner_key, event_name, args, cycle_time, sources)
 
     def event_cycle_status(self, partner_key: str) -> dict[str, Any]:
         """读取实际原生周期计数；这是调度/提交状态，不代表线上抓包或远端交付。"""
@@ -616,10 +635,17 @@ class S2sBaseClass(WTIAssertions):
                 "interval_ms": self._cycle_interval(config["cycle_time"]) if config else None,
                 "running": running,
                 "emitted_count": count,
+                "source_count": native.get("event_source_count", 0),
+                "logical_seconds": native.get("event_logical_seconds", 0),
             }
 
     def _cycle_update_locked(
-        self, partner_key: str, event_name: str, args: dict[str, Any], cycle_time: float | None
+        self,
+        partner_key: str,
+        event_name: str,
+        args: Any,
+        cycle_time: float | None,
+        sources: list[dict[str, Any]] | None = None,
     ) -> None:
         info = self.partner_infos[partner_key]
         if info.start_event:
@@ -632,6 +658,7 @@ class S2sBaseClass(WTIAssertions):
                 "function": self._event_name(event_name),
                 "args": args,
                 "interval_ms": interval,
+                "sources": [] if sources is None else sources,
             },
         )
         info.cycle_time = interval / 1000
@@ -639,6 +666,7 @@ class S2sBaseClass(WTIAssertions):
             "event_name": event_name,
             "args": deepcopy(args),
             "cycle_time": interval / 1000,
+            "sources": deepcopy([] if sources is None else sources),
         }
         logger.info(
             "原生周期事件已更新",

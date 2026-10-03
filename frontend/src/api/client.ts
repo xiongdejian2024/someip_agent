@@ -9,6 +9,7 @@ import type {
   NativeServiceCommand,
   NativeServiceRequestMessage,
   NativeEventCycle,
+  NativeCycleCommand,
   PcapImportResult,
   SimulationStartRequest,
   SimulationStatus,
@@ -126,7 +127,7 @@ export const api = {
     status: 'responded' | 'submitted'; result: unknown; observation: 'vsomeip_response' | 'native_submission'; wire_verified: false
   }>(`/services/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: stringifyJson(command) }, 40_000),
   serviceCycles: (id: string) => request<NativeEventCycle[]>(`/services/sessions/${encodeURIComponent(id)}/cycles`),
-  configureServiceCycle: (id: string, action: 'start' | 'update', command: NativeServiceCommand & { interval_ms: number }) => request<NativeEventCycle>(
+  configureServiceCycle: (id: string, action: 'start' | 'update', command: NativeCycleCommand) => request<NativeEventCycle>(
     `/services/sessions/${encodeURIComponent(id)}/cycles/${action}`, { method: 'POST', body: stringifyJson(command) }, 40_000,
   ),
   stopServiceCycle: (id: string, member: string) => request<NativeEventCycle>(

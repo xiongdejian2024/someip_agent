@@ -4,7 +4,7 @@ import { parseJson, stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { byteOrderOverride, memberApplication, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
-import type { NativeEventCycle, NativeServiceRequest, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
+import type { NativeCycleCommand, NativeEventCycle, NativeServiceRequest, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
 import { useProject } from '../workbench/projects'
 import { Icon } from './Icon'
 import './ServiceRuntimePanel.css'
@@ -32,6 +32,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const [requestId, setRequestId] = useState('')
   const [timeout, setTimeout] = useState('5')
   const [cycleMs, setCycleMs] = useState(String(savedCycle?.command.interval_ms ?? 100))
+  const [sources, setSources] = useState(stringifyJson(savedCycle?.command.sources ?? [], 2))
   const [cycles, setCycles] = useState<NativeEventCycle[]>([])
   const [pending, setPending] = useState<NativeServiceRequestMessage[]>([])
   const [results, setResults] = useState<Array<{ id: string; member: string; functionName: string; text: string }>>([])
@@ -165,8 +166,11 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     if (!session?.running || member?.role !== 'server' || action !== 'notify' || !effectiveFunction) throw new Error('请选择活动 server 和真实事件')
     const interval = Number(cycleMs)
     if (!Number.isInteger(interval) || interval < 1 || interval > 60000) throw new Error('事件周期必须为 1–60000 ms 的整数')
-    const command = {
+    const bindings = parseJson(sources)
+    if (!Array.isArray(bindings)) throw new Error('激励绑定必须是 JSON 数组')
+    const command: NativeCycleCommand = {
       member: member.key, function: effectiveFunction, args: parseJson(args), interval_ms: interval,
+      sources: bindings,
     }
     const result = await api.configureServiceCycle(session.id, update ? 'update' : 'start', command)
     const binding = Object.entries(project?.document.services ?? {}).find(([, request]) => request.application_name === session.application_name && request.application_id === session.application_id)?.[0]
@@ -218,8 +222,10 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       {member?.role === 'server' && action === 'notify' && <section aria-label="真实事件周期激励">
         <p>完整事件参数由原生定时器按 frozen ARXML 布局发送，保留源字节序和事件组；不为每个信号创建简化服务。当前每个 server 成员一个周期任务，其他事件需先停止或使用独立成员。</p>
         <label>周期（ms）<input value={cycleMs} onChange={event => setCycleMs(event.target.value)} /></label>
+        <label>多信号激励绑定（JSON 数组）<textarea aria-label="多信号激励绑定" value={sources} onChange={event => setSources(event.target.value)} rows={7} spellCheck={false} /></label>
+        <p>空数组为固定参数。示例：{`[{"path":"/nested/temperature","generator":{"kind":"sequence","sequence":[-2,3],"seed":0}}]`}。路径遵循 JSON Pointer，数组下标从 0 开始；根标量用空路径。类型取冻结 ARXML，不填写 data_type；同一事件的所有源共享逻辑时间，负载迟到时放慢而不跳过样本，不承诺硬实时。</p>
         <div className="context-actions"><button className="button primary" disabled={busy || cycleBusy || !session.running || !effectiveFunction} onClick={() => void configureCycle(false)}>启动完整事件周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running || !cycles.some(item => item.member === member.key && item.running)} onClick={() => void configureCycle(true)}>更新完整参数与周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running} onClick={() => void run('停止真实事件周期', async () => { await api.stopServiceCycle(session.id, member.key); setCycles(await api.serviceCycles(session.id)) }, cycleKey)}>停止所选成员周期</button></div>
-        {cycles.filter(item => item.member === member.key).map(item => <p key={item.member}>{item.function ?? '无活动事件'} · {item.running ? '原生调度运行中' : '已停止'} · {item.interval_ms ?? '—'} ms · 尝试通知 {item.emitted_count} 次（不是线上交付计数）</p>)}
+        {cycles.filter(item => item.member === member.key).map(item => <p key={item.member}>{item.function ?? '无活动事件'} · {item.running ? '原生调度运行中' : '已停止'} · {item.interval_ms ?? '—'} ms · {item.source_count} 个激励源 · 下次逻辑时间 {item.logical_seconds} s · 尝试通知 {item.emitted_count} 次（不是线上交付计数）</p>)}
       </section>}
       {pending.map(item => <div className="service-runtime-request" key={`${item.member}-${item.request_id}-${item.received_at}`}><code>{item.member} · {item.function} · request_id {item.request_id} · {stringifyJson(item.args)}</code><button className="button ghost" disabled={!item.reply_allowed || busy} onClick={() => { setMemberKey(item.member); setFunctionName(item.function); setRequestId(String(item.request_id)); setAction('respond'); setArgs('{}') }}>{item.reply_allowed ? '选择此请求并填写响应' : '无响应方法'}</button></div>)}
     </div>}

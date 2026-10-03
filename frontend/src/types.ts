@@ -122,9 +122,26 @@ export interface NativeEventCycle {
   interval_ms: number | null
   running: boolean
   emitted_count: number
+  source_count: number
+  logical_seconds: number
   observation: 'native_schedule'
   wire_verified: false
 }
+
+export interface NativeEventSource {
+  path: string
+  generator: {
+    kind?: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence'
+    initial?: number | bigint | boolean | string
+    minimum?: number | bigint
+    maximum?: number | bigint
+    period_seconds?: number
+    sequence?: Array<number | bigint | boolean | string>
+    seed?: number | bigint
+  }
+}
+
+export type NativeCycleCommand = NativeServiceCommand & { interval_ms: number; sources?: NativeEventSource[] }
 
 export interface NativeServiceSession {
   id: string

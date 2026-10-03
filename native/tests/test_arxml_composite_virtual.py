@@ -44,6 +44,7 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
     alignment=8,
     vsa_bits=None,
     large_count=None,
+    stimulus_check=None,
 ):
     port = (
         (30530 if alignment == 8 else 30730 + 64 * (alignment == 64))
@@ -56,6 +57,12 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
         WORKSPACE / "backend/tests/fixtures/composite_service.arxml"
     ).read_bytes()
     value = deepcopy(VALUE)
+    if stimulus_check is not None:
+        # 动态专项使用独立端口与实际源 EventGroup=7，不混入原黄金 PCAP。
+        port = 31100 + (transport == "tcp") + 2 * (byte_order == "little")
+        content = content.replace(
+            b"<EVENT-GROUP-ID>1</EVENT-GROUP-ID>", b"<EVENT-GROUP-ID>7</EVENT-GROUP-ID>"
+        )
     if vsa_bits is not None:
         port = (
             30900
@@ -285,6 +292,8 @@ def test_arxml_nested_structure_fixed_and_bounded_arrays_over_veth(
                 if response["failtype"] != "FAILTYPE_SUCCESS":
                     break
             assert calls == expected_calls
+        if stimulus_check is not None:
+            stimulus_check(server, client, value, byte_order, bundle)
     except Exception:
         if large_count is not None:
             logger.exception("大数组复合业务失败")

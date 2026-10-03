@@ -2,8 +2,9 @@
 
 `native/src/signal_source.hpp` 是可复用的标量激励源，不实现协议或自己的调度线程。
 复用原生 Codec、nlohmann JSON、标准库随机源；当前先接入旧 generator_start 与产品
-simulation API。旧单信号、EventGroup=1 和 internal/UDP 边界仍在，不把它当完整 ARXML
-动态事件。完整多信号事件、CSV/阶跃/状态机、同步时钟和网页配置由后续小块继续接入。
+simulation API，并接入真实 ARXML 完整事件周期。旧单信号 API 的 EventGroup=1 和
+internal/UDP 边界仍在；完整事件请使用服务会话入口。CSV/阶跃/状态机、跨事件同步时钟、
+暂停/单步/倍率由后续小块继续接入。
 
 ## 整数与随机
 
@@ -38,3 +39,40 @@ simulation API。旧单信号、EventGroup=1 和 internal/UDP 边界仍在，不
 每次 start 都是明确写操作，真实网络仍受全局开关及白名单控制。原生配置拒绝返回 422，
 运行时缺失/断开返回 503，不混淆输入错误与不可用。智能体的发生器字段白名单复用同一个
 Pydantic extra=forbid 契约，新增 seed 不会绕过现有 mutation 门禁。
+
+## 完整 ARXML 动态事件
+
+服务页“完整事件周期”及 `/api/v1/services/sessions/{id}/cycles/start|update` 的完整参数
+请求可增加 `sources`。空数组保持固定载荷；完整目录、实例、字节序和 EventGroup 取该
+会话冻结的 ARXML，不读取当前全局模型重新猜布局。周期仍在 C++/Boost.Asio 运行，
+Python 只提交配置、读取状态和监控，不逐周期编码/发送。
+
+```json
+{
+  "member": "Provider_server", "function": "UpdateEnvelopeChangedEvent", "interval_ms": 20,
+  "args": {"tag": 7, "samples": [4660, 43981], "bytes": [1, 2],
+    "matrix": [[1, 2, 3], [4, 5, 6]], "nested": {"temperature": -2}},
+  "sources": [
+    {"path": "/tag", "generator": {"kind": "sequence", "sequence": [7, 8], "seed": 0}},
+    {"path": "/samples/1", "generator": {"kind": "sequence", "sequence": [43981, 2], "seed": 0}},
+    {"path": "/nested/temperature", "generator": {"kind": "sequence", "sequence": [-2, 3], "seed": 0}}
+  ]
+}
+```
+
+- 路径遵循 JSON Pointer（`~1` 转义 `/`，`~0` 转义 `~`）；空路径绑定根标量。
+  类型由冻结 schema 推导，不接收另造 data_type、字段或偏移。只绑定现有标量/数组元素，
+  不扩展数组或改变变长数组数量；VSA 仅允许已有 payload 元素，数量指示器保持真实值。
+- 最多 128 个源，路径最多 512 字节，禁止重复路径。完整模板、每个源的全序列、组合初值
+  与首样本在替换旧任务前验证；首样本预检使用副本，不消耗正式随机流。模板必须完整，
+  未绑定字段保持原值；组合编码仍受 Codec 帧预算控制，运行失败会停止任务并记录原生堆栈。
+- 同一个事件全部源共享样本序号与逻辑毫秒时间；从 t=0 开始，每次通知推进一个周期。
+  过载不跳过逻辑样本，实际发送可以变慢，不声称硬实时。启动/更新重新初始化源与逻辑时钟；
+  更新保留累计通知计数。每个 server 成员仍最多一个周期任务；不同事件、旧标量任务冲突
+  必须先明确停止，不隐式覆盖或自动停掉用户任务。
+- 固定参数载荷仅编码一次；动态载荷按完整事件编码。监控复用实际类型解码结果，按 JSON
+  Pointer 展示最多 128 个数值/布尔叶节点；超出报告 `signal_values_truncated`，原始报文不裁剪。
+  接收值来自该成员冻结目录，不能用当前新导入模型解释旧会话。产品监控仍明确
+  `wire_verified=false`；实际 veth 接收另有黄金原始字节测试，不把 API trace 当抓包。
+- 工程保存/恢复和场景的 `cycle_start` 复用该配置，包括序列与种子。恢复/载入不启动任务；
+  必须明确启动。旧 SAT start/update 调用兼容，新增 sources 为 keyword-only 可选参数。
