@@ -63,6 +63,8 @@ python3 native/tests/check_linux_payload_package.py "$linux_smoke_container" "$l
   > "$linux_smoke_evidence/payload-run.log" 2>&1
 docker cp "$linux_smoke_container:/var/lib/someip-agent/native-payload" \
   "$linux_smoke_evidence/native-payload"
+python3 native/tests/check_linux_workbench_package.py "$linux_smoke_container" "$linux_smoke_evidence/workbench" \
+  > "$linux_smoke_evidence/workbench-run.log" 2>&1
 python3 - "$linux_smoke_evidence" <<'PY'
 import json
 import logging
@@ -89,12 +91,15 @@ try:
     assert "vsomeip 3.5.10" in (root / "native-version.txt").read_text()
     payload_result = json.loads((root / "payload-result.json").read_text())
     assert payload_result["status"] == "verified"
+    workbench_result = json.loads((root / "workbench/result.json").read_text())
+    assert workbench_result["status"] == "verified" and workbench_result["frozen_cli"]
     (root / "result.json").write_text(json.dumps({
         "status": "verified", "python_installed": False, "network": "none",
         "version": health["version"], "native_started": True,
         "native_payload_decoded": True, "nested_json_preserved": True,
+        "frozen_scenario_cli": True, "frozen_evidence_verify": True,
     }, ensure_ascii=False), encoding="utf-8")
-    logger.info("无 Python/SDK 的发行包网页、发生器和原生信号解码均验证通过")
+    logger.info("无 Python/SDK 的发行包网页、发生器、原生解码与冻结场景／证据 CLI 均验证通过")
 except Exception:
     logger.exception("干净 Linux 发行包验收失败")
     raise

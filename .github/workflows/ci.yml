@@ -151,9 +151,10 @@ jobs:
           native/tests/test_performance_metrics.py
           native/tests/audit_service_names.py native/tests/test_service_names.py
           native/tests/check_linux_payload_package.py
+          native/tests/check_linux_workbench_package.py native/tests/test_clean_package_client.py
 
       - name: 统计与源服务名称审计回归
-        run: python -m pytest native/tests/test_performance_metrics.py native/tests/test_service_names.py
+        run: python -m pytest native/tests/test_performance_metrics.py native/tests/test_service_names.py native/tests/test_clean_package_client.py
 
       - name: 执行后端测试
         run: python -m pytest backend/tests --cov=someip_agent --cov-report=term-missing

@@ -1,11 +1,12 @@
 # SOME/IP Agent
 
 面向车载以太网研发与测试的企业级 SOME/IP 工作台。项目采用前后端分离架构：后端负责
-ARXML 建模、SOME/IP / SOME/IP-SD 编解码、PCAP 导入、信号仿真与智能体编排；前端负责
+ARXML 建模、原生 SOME/IP 数据面控制、PCAP 导入、信号仿真与智能体编排；前端负责
 服务浏览、实时监控、波形展示、仿真控制和模型配置。
 
-> 当前版本是 `0.1.0` 的可运行 MVP，不宣称与 CANoe 功能等价。已经落地与规划中的能力
-> 在[路线图](docs/roadmap.md)中分别标记，避免把设计目标误认为已交付能力。
+> 当前产品版本为 `0.1.2`，不宣称与 CANoe 功能等价。main 分支包含本轮 P0–P2 新增功能，
+> 尚未为本轮发布新 Release；正式附件不等于最新 main。逐块验证与整体验收状态见
+> [P0–P2 交付记录](docs/p0-p2-delivery.md)，未来能力见[路线图](docs/roadmap.md)。
 
 ## 核心能力
 
@@ -15,6 +16,10 @@ ARXML 建模、SOME/IP / SOME/IP-SD 编解码、PCAP 导入、信号仿真与智
 - 原生 UDP/TCP/IPv4 组播端口监听，vsomeip 解码 SOME/IP 并汇入统一监控流（不是网卡被动抓包）；
 - 基于 WebSocket 的有界监控数据流、Trace 分页/冻结/详情和可选信号的 ECharts 分轨波形；
 - vsomeip 原生信号仿真与服务发现，Python 通过控制 socket 管理二进制，周期生成和编码不再由 Python 执行；
+- 工程配置保存／加载、搜索预览、修订备份／恢复与无损导入导出，加载不自动运行，见[工程管理](docs/projects.md)；
+- 声明式参数化场景、精确断言、自有资源清理、产品 CLI、JUnit／HTML、持久历史与基线比较，见[自动场景](docs/scenarios.md)；
+- 有界连续记录、原始证据 ZIP、只读时间轴回放与波形联动，见[记录回放](docs/recordings.md)；
+- 完整事件原生 CSV／阶跃／随机／序列／状态机激励，以及多事件公共时钟的暂停／恢复／单步／倍率，见[公共时钟](docs/stimulus-sync.md)；
 - OpenAI 兼容模型配置、SSE 流式智能体、Markdown/表格/代码块显示与停止生成；
 - 根版本、Python 包版本、前端版本与源码版本的语义版本一致性校验；
 - Docker 开发环境和 PyInstaller Linux 完整 ZIP 发行包；Windows 打包/调试暂缓，保留手动流水线；
@@ -38,7 +43,7 @@ FastAPI 应用层 ── 智能体编排 ── OpenAI 兼容网关
 
 详细设计、安全边界和数据流见[架构文档](docs/architecture.md)。
 
-原生迁移正在进行，不代表整个底层已经验收完成：默认仿真、端口监听和 Ethernet 被动抓包已切换。
+原生数据面已接通，不能据此宣称全部车型或长期负载验收完成：默认仿真、端口监听和 Ethernet 被动抓包已切换。
 ARXML 基础类型及明确 AP 序列化部署的嵌套结构、定长/有界变长数组已接通原生目录和 Python 字典初始化；服务页面已接通启停/调用/人工响应；
 页面字节序默认遵循 ARXML，显式覆盖与源布局冲突时拒绝。复合字段及二维数组已在长度前缀 0/1/2/4 字节、UDP/TCP 和两种字节序的受限模型矩阵中验证。
 原生 Codec 已支持变长非末尾的 32/64-bit 绝对位置对齐；Classic I-SIGNAL 显式 payload

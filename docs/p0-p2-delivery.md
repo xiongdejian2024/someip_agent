@@ -619,3 +619,31 @@ scrollWidth=382/952/1492，无整页横向溢出。未启用在线网络或模�
 再进入服务页。保存按钮指针被 sticky header 遮挡，已检查状态后键盘激活保存且回显修订 2；
 补工程控件 scroll-margin-top，不能把该键盘验收算成指针通过。截图通道超时仍为限制。
 整轮完整远程 CI、干净发行包／冻结 CLI 与全套原生虚拟网验收继续，不发布新 Release。
+
+### 小块 23（2026-10-04）：独立发行包冻结场景／证据 CLI 验收门禁
+
+发现原干净包脚本只检查网页、发生器、Pi 与解码，未运行新增产品 CLI。抽出已有标准库
+HTTP 传输 PackageClient，保留旧标量／嵌套黄金解码测试；新增工作台验收脚本并接入
+linux-clean-test、CI 静态检查与三个纯标准库／夹具测试。宿主只传 ARXML 和场景 JSON，
+不向运行镜像注入产品源码、系统 Python 或 SDK。README 修正旧 0.1.0 说明为当前版本
+0.1.2，明确 main 新增功能不等于已发布 Release，补充工程／场景／记录／同步文档入口。
+
+以 HEAD 1fd97dd 的 git archive 加本次构建 dist 建立干净上下文
+build/p0p2-installed-context.WMt3cs，排除用户 untracked IPv6 草稿。本地原生镜像
+someip-agent-vsomeip:p0p2-final-1fd97dd 全新编译 CTest 8/8 通过，随后生成完整独立包与
+无 Python/SDK 运行镜像。测试 evidence 在 build/p0p2-final-clean.9TgPp0/evidence，
+run_linux_clean.sh 最终退出 0；旧网页／原生发生器／Pi 模型工具循环／黄金解码仍通过。
+
+包内实际 someip-agent scenario 执行两组倍率的七帧 CSV/FSM 公共时钟，消费者接收
+422a0000／41c40000／09／0a，冻结输入保留最大 uint64 种子；成功退出 0，故意业务断言
+失败退出 1，两者资源均清理且证据完整。冻结客户端超时退出 2，已准备的同步运行实际
+cancelled／cleanup_complete；最终活动服务／仿真／监听均为 0。JSON／JUnit／HTML／ZIP
+输出各为 0600；包内 evidence-verify 两份完整证据均退出 0，改动 ZIP 附件后退出 2。
+纯传输／夹具 3 项及相关 ruff、shell 语法、diff 检查通过，不把替身测试当冻结执行证据。
+
+本地 aarch64 包 ZIP SHA-256 为
+5bea462c5f7077fdd698eb656bd8f93c48b450b53baa93f744dfe6c1fbf7a877，仅作本机隔离证据，
+不发布也不冒称 x86_64 制品。最初 Docker Hub Node 元数据 TLS 握手超时，换固定版本
+镜像源后成功；未重启仍活跃的构建。完整远程 CI 37138783052 的前端／普通后端已成功，
+原生虚拟网／独立安装及 x86_64 发行包还在运行；此 CI 基线为 1fd97dd，不能据此把新的
+验收脚本提交算作已跑过。最新提交全套 CI 和最终逐项审计仍待完成，不改正式密钥／Release。

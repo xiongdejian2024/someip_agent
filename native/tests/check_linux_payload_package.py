@@ -50,8 +50,24 @@ class ResponseSocket:
         return io.BytesIO(self.raw)
 
 
-def verify(container: str, root: Path, fixtures: Path) -> None:
-    def request(path: str, name: str, content: bytes | None = None) -> object:
+class PackageClient:
+    """复用标准库与 Docker stdin 访问隔离包，不向运行镜像安装客户端或源码。"""
+
+    def __init__(self, container: str, root: Path) -> None:
+        self.container = container
+        self.root = root
+
+    def request(
+        self,
+        path: str,
+        name: str,
+        content: bytes | None = None,
+        *,
+        json_body: object | None = None,
+    ) -> object:
+        if content is not None and json_body is not None:
+            raise ValueError("请求不能同时为文件上传与 JSON")
+        container, root = self.container, self.root
         boundary = "someip-agent-clean-package-golden"
         body = b""
         content_type = "application/json"
@@ -67,7 +83,11 @@ def verify(container: str, root: Path, fixtures: Path) -> None:
                 + f"\r\n--{boundary}--\r\n".encode()
             )
             (root / name).write_bytes(content)
-        method = "GET" if content is None else "POST"
+        if json_body is not None:
+            body = json.dumps(json_body, ensure_ascii=False, allow_nan=False).encode(
+                "utf-8"
+            )
+        method = "GET" if content is None and json_body is None else "POST"
         headers = (
             f"{method} {path} HTTP/1.0\r\nHost: localhost\r\n"
             f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\n\r\n"
@@ -97,6 +117,9 @@ def verify(container: str, root: Path, fixtures: Path) -> None:
             raise RuntimeError(f"发行包HTTP请求失败：{path} {response.status} {data!r}")
         return json.loads(data)
 
+
+def verify(container: str, root: Path, fixtures: Path) -> None:
+    request = PackageClient(container, root).request
     logger.info("步骤1/2：真实HTTP导入ARXML与标量黄金PCAP，核对有效帧及截断错误")
     model = request(
         "/api/v1/arxml/import",
