@@ -9,6 +9,7 @@ namespace agent {
 class SignalSource {
     Json schema_, initial_, minimum_, maximum_, step_value_;
     std::vector<Json> sequence_;
+    std::vector<std::pair<uint64_t,Json>> timeline_;
     std::string type_, kind_;
     double period_;
     uint64_t step_at_ms_ = 0;
@@ -27,12 +28,16 @@ class SignalSource {
             throw std::runtime_error("激励种子必须为 uint64 整数");
         return value.get<uint64_t>();
     }
-    static uint64_t step_time(const Json &value) {
+    static uint64_t exact_time(const Json &value) {
         if(!value.is_number_integer() || (!value.is_number_unsigned() && value.get<int64_t>()<0))
-            throw std::runtime_error("阶跃时刻必须为 uint64 整型毫秒");
+            throw std::runtime_error("激励时刻必须为 uint64 整型毫秒");
         return value.get<uint64_t>();
     }
     Json normalize(Json value,bool wave=false) const {
+        if(kind_=="csv" && ((integer_type() && !value.is_number_integer()) ||
+            (type_=="boolean" && !value.is_boolean()) ||
+            ((type_=="string" || type_=="bytes") && !value.is_string())))
+            throw std::runtime_error("CSV 单元格 JSON 类型与冻结标量类型不一致");
         if(integer_type()) {
             if(value.is_number_float()) {
                 auto number=finite_number(value);
@@ -61,16 +66,32 @@ public:
         type_(schema_.value("type","")),kind_(config.value("kind","constant")),
         period_(finite_number(config.value("period_seconds",Json(5)))),
         random_(seed(config.value("seed",Json(0)))) {
-        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp" && kind_!="step")
+        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp" && kind_!="step" && kind_!="csv")
             throw std::runtime_error("未知激励源类型");
         if(type_=="struct" || type_=="array" || type_.empty())
             throw std::runtime_error("单个激励源必须绑定明确标量类型");
         if(period_<=0)throw std::runtime_error("激励周期必须为正数");
-        initial_=normalize(config.value("initial",Json(0)));
+        if(kind_=="csv") {
+            const auto &points=config.at("timeline");
+            if(!points.is_array() || points.empty() || points.size()>8192)
+                throw std::runtime_error("CSV 时间轴必须有 1 至 8192 行");
+            for(const auto &point:points) {
+                if(!point.is_object() || point.size()!=2 || !point.contains("at_ms") || !point.contains("value"))
+                    throw std::runtime_error("CSV 时间点只允许 at_ms 与 value");
+                auto at=exact_time(point.at("at_ms"));
+                if((timeline_.empty() && at!=0) || (!timeline_.empty() && at<=timeline_.back().first))
+                    throw std::runtime_error("CSV 时间须从 0 开始严格递增");
+                timeline_.emplace_back(at,normalize(point.at("value")));
+            }
+            initial_=timeline_.front().second;
+        } else {
+            if(config.contains("timeline"))throw std::runtime_error("非 CSV 源不能包含时间轴");
+            initial_=normalize(config.value("initial",Json(0)));
+        }
         if(kind_=="step") {
             if(!config.contains("step_at_ms") || !config.contains("step_value") || config.at("step_value").is_null())
                 throw std::runtime_error("阶跃源必须提供 step_at_ms 与 step_value");
-            step_at_ms_=step_time(config.at("step_at_ms"));
+            step_at_ms_=exact_time(config.at("step_at_ms"));
             step_value_=normalize(config.at("step_value")); // 全部状态在替换任务前校验。
         } else if((config.contains("step_at_ms") && !config.at("step_at_ms").is_null()) ||
                   (config.contains("step_value") && !config.at("step_value").is_null()))
@@ -112,13 +133,19 @@ public:
         }
     }
     const Json &initial() const { return initial_; }
+    bool needs_millisecond_clock() const { return kind_=="step" || kind_=="csv"; }
     Json value_ms(uint64_t elapsed_ms,uint64_t index) {
         if(kind_=="step")return elapsed_ms>=step_at_ms_?step_value_:initial_;
+        if(kind_=="csv") {
+            auto next=std::upper_bound(timeline_.begin(),timeline_.end(),elapsed_ms,
+                [](uint64_t at,const auto &point){return at<point.first;});
+            return std::prev(next)->second;
+        }
         return value(elapsed_ms/1000.0,index);
     }
     Json value(double elapsed,uint64_t index) {
         if(!std::isfinite(elapsed) || elapsed<0)throw std::runtime_error("激励时间必须为非负有限值");
-        if(kind_=="step")throw std::runtime_error("阶跃源须使用精确整型毫秒接口");
+        if(needs_millisecond_clock())throw std::runtime_error("时间激励源须使用精确整型毫秒接口");
         if(kind_=="constant" || (kind_=="sequence" && sequence_.empty()))return initial_;
         if(kind_=="sequence")return sequence_[index%sequence_.size()];
         if(kind_=="random") {

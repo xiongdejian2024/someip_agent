@@ -7,6 +7,7 @@ import { protocolId } from '../agent/workspace'
 import type { NativeCycleCommand, NativeEventCycle, NativeServiceRequest, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
 import { useProject } from '../workbench/projects'
 import { Icon } from './Icon'
+import { CsvStimulusEditor } from './CsvStimulusEditor'
 import './ServiceRuntimePanel.css'
 
 export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefinition; demo: boolean }) {
@@ -33,6 +34,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const [timeout, setTimeout] = useState('5')
   const [cycleMs, setCycleMs] = useState(String(savedCycle?.command.interval_ms ?? 100))
   const [sources, setSources] = useState(stringifyJson(savedCycle?.command.sources ?? [], 2))
+  const [csvText, setCsvText] = useState(savedCycle?.command.csv_text ?? '')
   const [cycles, setCycles] = useState<NativeEventCycle[]>([])
   const [pending, setPending] = useState<NativeServiceRequestMessage[]>([])
   const [results, setResults] = useState<Array<{ id: string; member: string; functionName: string; text: string }>>([])
@@ -171,6 +173,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     const command: NativeCycleCommand = {
       member: member.key, function: effectiveFunction, args: parseJson(args), interval_ms: interval,
       sources: bindings,
+      ...(csvText ? { csv_text: csvText } : {}),
     }
     const result = await api.configureServiceCycle(session.id, update ? 'update' : 'start', command)
     const binding = Object.entries(project?.document.services ?? {}).find(([, request]) => request.application_name === session.application_name && request.application_id === session.application_id)?.[0]
@@ -223,6 +226,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
         <p>完整事件参数由原生定时器按 frozen ARXML 布局发送，保留源字节序和事件组；不为每个信号创建简化服务。当前每个 server 成员一个周期任务，其他事件需先停止或使用独立成员。</p>
         <label>周期（ms）<input value={cycleMs} onChange={event => setCycleMs(event.target.value)} /></label>
         <label>多信号激励绑定（JSON 数组）<textarea aria-label="多信号激励绑定" value={sources} onChange={event => setSources(event.target.value)} rows={7} spellCheck={false} /></label>
+        <CsvStimulusEditor value={csvText} onChange={setCsvText} disabled={busy || cycleBusy} />
         <p>空数组为固定参数。示例：{`[{"path":"/nested/temperature","generator":{"kind":"sequence","sequence":[-2,3],"seed":0}}]`}。路径遵循 JSON Pointer，数组下标从 0 开始；根标量用空路径。类型取冻结 ARXML，不填写 data_type；同一事件的所有源共享逻辑时间，负载迟到时放慢而不跳过样本，不承诺硬实时。</p>
         <p>阶跃示例：{`{"path":"/tag","generator":{"kind":"step","initial":7,"step_at_ms":29,"step_value":8}}`}。到共享逻辑时间 ≥ 29 ms 的首次发送切换并保持；时刻用精确整型毫秒，0 表示首样本即切换。单次更新会重新从逻辑时间 0 开始。</p>
         <div className="context-actions"><button className="button primary" disabled={busy || cycleBusy || !session.running || !effectiveFunction} onClick={() => void configureCycle(false)}>启动完整事件周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running || !cycles.some(item => item.member === member.key && item.running)} onClick={() => void configureCycle(true)}>更新完整参数与周期</button><button className="button secondary" disabled={busy || cycleBusy || !session.running} onClick={() => void run('停止真实事件周期', async () => { await api.stopServiceCycle(session.id, member.key); setCycles(await api.serviceCycles(session.id)) }, cycleKey)}>停止所选成员周期</button></div>

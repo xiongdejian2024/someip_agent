@@ -45,6 +45,19 @@ int main() {
             {"generator",Json{{"kind","step"},{"initial",UINT64_MAX},{"step_at_ms",29},{"step_value",UINT64_MAX-1}}}}}));
         require(hex(step.sample_ms(28,0))=="ffffffffffffffff" && hex(step.sample_ms(29,1))=="fffffffffffffffe",
             "完整事件阶跃未使用精确毫秒时间");
+        auto csv_config=[](Json first,Json second) {return Json{{"kind","csv"},{"timeline",Json::array({
+            Json{{"at_ms",0},{"value",first}},Json{{"at_ms",29},{"value",second}}})}};};
+        EventStimulus csv_event(schema,arguments,Json::array({
+            Json{{"path","/counter"},{"generator",csv_config(UINT64_MAX,UINT64_MAX-1)}},
+            Json{{"path","/samples/1"},{"generator",csv_config(2,3)}},
+            Json{{"path","/nested/a~1b~0"},{"generator",Json{{"initial",0.1}}}}
+        }));
+        require(hex(csv_event.sample_ms(28,2))=="ffffffffffffffff123400023dcccccd"
+            && hex(csv_event.sample_ms(29,3))=="feffffffffffffff123400033dcccccd",
+            "CSV 多列未共享完整事件毫秒时钟或改变冻结布局");
+        EventStimulus csv_scalar(Json{{"type","uint64"}},0,Json::array({
+            Json{{"path",""},{"generator",csv_config(UINT64_MAX,0ULL)}}}));
+        require(hex(csv_scalar.sample_ms(29,1))=="0000000000000000","CSV 根标量绑定失败");
         Json random_config={{"kind","random"},{"minimum",0ULL},{"maximum",UINT64_MAX},{"seed",19}};
         SignalSource reference(Json{{"type","uint64"}},random_config);
         EventStimulus random_event(Json{{"type","uint64"}},0,Json::array({Json{{"path",""},{"generator",random_config}}}));

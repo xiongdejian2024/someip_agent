@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from someip_agent.config import Settings
+from someip_agent.domain.csv_stimulus import compile_csv_stimulus
 from someip_agent.domain.models import ArxmlModel
 
 from .catalog import NativeCatalogRequest, build_native_bundle
@@ -393,6 +394,9 @@ class S2sBaseClass(WTIAssertions):
                     cycle["args"],
                     cycle["cycle_time"],
                     sources=cycle.get("sources", []),
+                    **(
+                        {"csv_text": cycle["csv_text"]} if cycle.get("csv_text") is not None else {}
+                    ),
                 )
 
     def _send(self, key: str, message: dict[str, Any]) -> None:
@@ -551,9 +555,29 @@ class S2sBaseClass(WTIAssertions):
         cycle_time: float = 1,
         *,
         sources: list[dict[str, Any]] | None = None,
+        csv_text: str | None = None,
     ) -> None:
         with self._lifecycle:
-            self._cycle_start_locked(partner_key, event_name, args, cycle_time, sources)
+            self._cycle_start_locked(partner_key, event_name, args, cycle_time, sources, csv_text)
+
+    @staticmethod
+    def _cycle_sources(
+        sources: list[dict[str, Any]] | None, csv_text: str | None
+    ) -> list[dict[str, Any]]:
+        bindings = deepcopy([] if sources is None else sources)
+        if not isinstance(bindings, list):
+            raise ValueError("事件激励绑定必须为数组")
+        bindings.extend(compile_csv_stimulus(csv_text))
+        if len(bindings) > 128:
+            raise ValueError("CSV 与其他激励合计最多 128 个路径")
+        paths: set[str] = set()
+        for binding in bindings:
+            if not isinstance(binding, dict) or not isinstance(binding.get("path"), str):
+                raise ValueError("每个事件激励必须提供字符串路径")
+            if binding["path"] in paths:
+                raise ValueError("CSV 与其他激励路径不能重复绑定")
+            paths.add(binding["path"])
+        return bindings
 
     def _cycle_start_locked(
         self,
@@ -562,8 +586,10 @@ class S2sBaseClass(WTIAssertions):
         args: Any,
         cycle_time: float,
         sources: list[dict[str, Any]] | None = None,
+        csv_text: str | None = None,
     ) -> None:
         interval = self._cycle_interval(cycle_time)
+        bindings = self._cycle_sources(sources, csv_text)
         self.sim_operator.send_request(
             "event_cycle_start",
             {
@@ -571,7 +597,7 @@ class S2sBaseClass(WTIAssertions):
                 "function": self._event_name(event_name),
                 "args": args,
                 "interval_ms": interval,
-                "sources": [] if sources is None else sources,
+                "sources": bindings,
             },
         )
         info = self.partner_infos[partner_key]
@@ -582,6 +608,7 @@ class S2sBaseClass(WTIAssertions):
             "args": deepcopy(args),
             "cycle_time": interval / 1000,
             "sources": deepcopy([] if sources is None else sources),
+            **({"csv_text": csv_text} if csv_text is not None else {}),
         }
         logger.info(
             "原生周期事件已启动",
@@ -610,9 +637,10 @@ class S2sBaseClass(WTIAssertions):
         cycle_time: float | None = None,
         *,
         sources: list[dict[str, Any]] | None = None,
+        csv_text: str | None = None,
     ) -> None:
         with self._lifecycle:
-            self._cycle_update_locked(partner_key, event_name, args, cycle_time, sources)
+            self._cycle_update_locked(partner_key, event_name, args, cycle_time, sources, csv_text)
 
     def event_cycle_status(self, partner_key: str) -> dict[str, Any]:
         """读取实际原生周期计数；这是调度/提交状态，不代表线上抓包或远端交付。"""
@@ -646,11 +674,13 @@ class S2sBaseClass(WTIAssertions):
         args: Any,
         cycle_time: float | None,
         sources: list[dict[str, Any]] | None = None,
+        csv_text: str | None = None,
     ) -> None:
         info = self.partner_infos[partner_key]
         if info.start_event:
             raise AttributeError(f"{partner_key} 周期任务已停止，无法使用 update")
         interval = self._cycle_interval(info.cycle_time if cycle_time is None else cycle_time)
+        bindings = self._cycle_sources(sources, csv_text)
         self.sim_operator.send_request(
             "event_cycle_update",
             {
@@ -658,7 +688,7 @@ class S2sBaseClass(WTIAssertions):
                 "function": self._event_name(event_name),
                 "args": args,
                 "interval_ms": interval,
-                "sources": [] if sources is None else sources,
+                "sources": bindings,
             },
         )
         info.cycle_time = interval / 1000
@@ -667,6 +697,7 @@ class S2sBaseClass(WTIAssertions):
             "args": deepcopy(args),
             "cycle_time": interval / 1000,
             "sources": deepcopy([] if sources is None else sources),
+            **({"csv_text": csv_text} if csv_text is not None else {}),
         }
         logger.info(
             "原生周期事件已更新",

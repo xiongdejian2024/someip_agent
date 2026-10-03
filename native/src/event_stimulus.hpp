@@ -53,7 +53,7 @@ public:
             auto schema=schema_at(schema_,path);
             const auto &config=binding.at("generator");
             if(!config.is_object())throw std::runtime_error("激励源配置必须为字典");
-            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed","step_at_ms","step_value"};
+            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed","step_at_ms","step_value","timeline"};
             for(const auto &[key,value]:config.items())if(!fields.count(key))
                 throw std::runtime_error("完整事件激励源包含未知字段");
             SignalSource source(schema,config);

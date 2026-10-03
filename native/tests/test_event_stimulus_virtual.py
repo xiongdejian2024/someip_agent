@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from test_arxml_composite_virtual import (
@@ -179,3 +180,76 @@ def assert_step_receive(server, client, value, order, bundle):
 @pytest.mark.parametrize("order", ["big", "little"])
 def test_full_arxml_step_at_29ms_actual_udp_tcp_and_cleanup(transport, order):
     run_composite(transport, order, 2, 2, stimulus_check=assert_step_receive)
+
+
+CSV_GOLDENS = {
+    "big": [
+        STEP_GOLDENS["big"][0],
+        "001b0a00041234000200020102000a0003010203000304050600020004",
+    ],
+    "little": [
+        STEP_GOLDENS["little"][0],
+        "1b000a040034120200020001020a000300010203030004050602000400",
+    ],
+}
+
+
+def assert_csv_receive(server, client, value, order, bundle):
+    assert bundle.catalog["EnvelopeService"]["events"]["UpdateEnvelopeChangedEvent"][
+        "eventgroups"
+    ] == [7]
+    received, arrived = [], threading.Event()
+
+    def receive(_key, message):
+        if (
+            message.get("action") == "event"
+            and message.get("function") == "UpdateEnvelopeChangedEvent"
+        ):
+            actual = json.loads(message["args"])
+            if actual["tag"] in (9, 10):
+                received.append(message)
+                if len(received) >= 8:
+                    arrived.set()
+
+    client.register_callback("EnvelopeService_client", receive)
+    try:
+        text = (
+            Path(__file__).resolve().parents[2]
+            / "backend/tests/fixtures/stimulus_timeline.csv"
+        ).read_text()
+        server.send_event_notify_thread_start(
+            "EnvelopeService_server", "EnvelopeChanged", value, 0.02, csv_text=text
+        )
+        assert arrived.wait(3), "真实 UDP/TCP 消费者未交付八个 CSV 完整事件"
+        server.send_event_notify_thread_stop("EnvelopeService_server")
+        for index, message in enumerate(received[:8]):
+            phase = int(index * 20 >= 29)
+            actual = json.loads(message["args"])
+            assert actual["tag"] == [9, 10][phase]
+            assert actual["samples"] == [0x1234, [0xABCD, 2][phase]]
+            assert actual["nested"]["temperature"] == [-3, 4][phase]
+            assert (
+                actual["matrix"] == value["matrix"]
+                and actual["bytes"] == value["bytes"]
+            )
+            assert message["payload_hex"] == CSV_GOLDENS[order][phase]
+        native = server.sim_operator.send_request("running_service")[
+            "EnvelopeService_server"
+        ]
+        assert not native["event_cycle_running"] and native["event_source_count"] == 0
+        count = native["event_cycle_count"]
+        time.sleep(0.06)
+        assert (
+            server.sim_operator.send_request("running_service")[
+                "EnvelopeService_server"
+            ]["event_cycle_count"]
+            == count
+        )
+    finally:
+        client.unregister_callback("EnvelopeService_client", receive)
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+@pytest.mark.parametrize("order", ["big", "little"])
+def test_full_arxml_csv_actual_udp_tcp_and_cleanup(transport, order):
+    run_composite(transport, order, 2, 2, stimulus_check=assert_csv_receive)

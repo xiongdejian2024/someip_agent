@@ -92,3 +92,5 @@ python -m pytest native/tests/test_service_names.py -v \
 # 激励类型专项使用独立 catalog；旧黄金 PCAP 已封存，避免不同 payload schema 混流。
 python -m pytest native/tests/test_signal_sources_virtual.py native/tests/test_event_stimulus_virtual.py -v \
   --junitxml=build/virtual-evidence/signal-sources-junit.xml
+ip netns exec soa-server python -m pytest native/tests/test_csv_recovery_virtual.py -v \
+  --junitxml=build/virtual-evidence/csv-recovery-junit.xml

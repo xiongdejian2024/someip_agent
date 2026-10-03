@@ -143,7 +143,7 @@ export interface NativeEventSource {
   }
 }
 
-export type NativeCycleCommand = NativeServiceCommand & { interval_ms: number; sources?: NativeEventSource[] }
+export type NativeCycleCommand = NativeServiceCommand & { interval_ms: number; sources?: NativeEventSource[]; csv_text?: string | null }
 
 export interface NativeServiceSession {
   id: string

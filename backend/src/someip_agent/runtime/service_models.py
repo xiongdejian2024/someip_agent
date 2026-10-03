@@ -14,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from someip_agent.domain.csv_stimulus import compile_csv_stimulus
 from someip_agent.domain.models import GeneratorKind
 
 
@@ -99,6 +100,17 @@ class EventSignalSource(BaseModel):
 class ServiceCycleCommand(ServiceCommand):
     interval_ms: int = Field(default=100, ge=1, le=60_000, strict=True)
     sources: list[EventSignalSource] = Field(default_factory=list, max_length=128)
+    csv_text: StrictStr | None = Field(default=None, max_length=1048576)
+
+    @model_validator(mode="after")
+    def csv_is_portable_and_valid(self) -> "ServiceCycleCommand":
+        bindings = compile_csv_stimulus(self.csv_text)
+        if len(bindings) + len(self.sources) > 128:
+            raise ValueError("CSV 与其他激励合计最多 128 个路径")
+        paths = {source.path for source in self.sources}
+        if any(binding["path"] in paths for binding in bindings):
+            raise ValueError("CSV 与其他激励路径不能重复绑定")
+        return self
 
 
 class ServiceCycleStop(BaseModel):

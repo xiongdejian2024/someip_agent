@@ -12,6 +12,7 @@ const result = await build({
     import { ServiceRuntimePanel } from './src/components/ServiceRuntimePanel'
     import { SignalScope } from './src/components/SignalScope'
     import { ScenarioPanel } from './src/workbench/ScenarioPanel'
+    import { CsvStimulusEditor } from './src/components/CsvStimulusEditor'
     const document = { ...emptyProject(), name: '复合事件工程',
       services: {'/Vehicle': {application_name:'saved_app', application_id:0x3402,
         members:{Vehicle:{service:'/Vehicle',deployment_path:'/Deployment',role:'server',transport:'internal',instance_id:7}}}},
@@ -26,6 +27,9 @@ const result = await build({
       createElement(SignalScope,{samples:[{time:1,values:{'0x1234/0x8001/value':42,'0x1234/0x8001/other':3}}]})))
     export const scenario = renderToStaticMarkup(createElement(ScenarioPanel,{project:current}))
     export const noProjectScenario = renderToStaticMarkup(createElement(ScenarioPanel,{project:null}))
+    export const csv = renderToStaticMarkup(createElement(CsvStimulusEditor,{
+      value:'time_ms,/tag\\n0,9007199254740993\\n29,18446744073709551615\\n', disabled:false,
+      onChange:()=>{throw new Error('CSV 渲染不得执行或修改配置')}}))
   `, resolveDir: fileURLToPath(new URL('../frontend/', import.meta.url)), loader: 'js' },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css': 'empty' },
   define: { 'process.env.NODE_ENV': '"production"' },
@@ -47,4 +51,10 @@ assert.match(module.exports.scenario, /复合事件工程 · 修订 7/)
 assert.match(module.exports.scenario, /校验（不运行）/)
 assert.match(module.exports.scenario, /取消本次运行/)
 assert.match(module.exports.noProjectScenario, /disabled="">明确运行已保存工程/)
+assert.match(module.exports.csv, /aria-label="导入 CSV 激励文件" type="file"/)
+assert.match(module.exports.csv, /aria-label="CSV 时间轴"/)
+assert.match(module.exports.csv, /9007199254740993/)
+assert.match(module.exports.csv, /18446744073709551615/)
+assert.match(module.exports.csv, /不插值、不循环/)
+assert.match(module.exports.csv, /不执行文件或自动发包/)
 console.info('工程管理、服务配置与波形选择 SSR 验证通过：恢复仅加载配置，不运行任务；不冒充浏览器交互。')

@@ -312,6 +312,7 @@ class ServiceSessionManager:
             command.args,
             command.interval_ms / 1000,
             sources=[source.model_dump(mode="json") for source in command.sources],
+            **({"csv_text": command.csv_text} if command.csv_text is not None else {}),
         )
         return ServiceCycleStatus.model_validate(
             await asyncio.to_thread(session.partner.event_cycle_status, command.member)

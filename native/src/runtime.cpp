@@ -586,7 +586,7 @@ void Runtime::generator(std::shared_ptr<Member> m,std::shared_ptr<const Json> cf
     const auto &g=cfg->at("generator");
     auto &api=m->apis.at(cfg->at("function").get<std::string>());
     std::string signal=g.value("signal_name","value");
-    auto scalar=g.value("kind","constant")=="step"?
+    auto scalar=m->signal_source->needs_millisecond_clock()?
         m->signal_source->value_ms(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_duration).count()),m->count):
         m->signal_source->value(elapsed,m->count);
     m->last_value=scalar;++m->count;

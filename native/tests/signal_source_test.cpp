@@ -83,6 +83,51 @@ int main() {
         rejects([&]{SignalSource source(u8,Json{{"kind","step"},{"step_at_ms",1},{"step_value",256}});});
         rejects([&]{SignalSource source(u8,Json{{"kind","constant"},{"step_at_ms",1}});});
         rejects([&]{step.value(0.029,0);});
+        auto timeline=[](Json first,Json second) {return Json{{"kind","csv"},{"timeline",Json::array({
+            Json{{"at_ms",0},{"value",first}},Json{{"at_ms",29},{"value",second}}})}};};
+        Json csv_config=timeline(UINT64_MAX,UINT64_MAX-1);
+        csv_config["timeline"].push_back(Json{{"at_ms",UINT64_MAX},{"value",0ULL}});
+        SignalSource csv(u64,csv_config);
+        require(csv.needs_millisecond_clock() && csv.value_ms(0,0)==UINT64_MAX && csv.value_ms(28,2)==UINT64_MAX
+            && csv.value_ms(29,3)==UINT64_MAX-1 && csv.value_ms(UINT64_MAX-1,4)==UINT64_MAX-1
+            && csv.value_ms(UINT64_MAX,5)==0,"CSV 零阶保持或整型时间精度错误");
+        csv_config["timeline"][0]["value"]=1;
+        require(csv.value_ms(0,0)==UINT64_MAX,"CSV 源未冻结调用方数据");
+        SignalSource csv_signed(i64,timeline(INT64_MIN,INT64_MAX));
+        require(csv_signed.value_ms(28,1)==INT64_MIN && csv_signed.value_ms(1000,2)==INT64_MAX,
+            "CSV 有符号边界或末值保持错误");
+        SignalSource csv_float(Json{{"type","float32"}},timeline(0.1,42.5));
+        require(csv_float.value_ms(0,0)==0.10000000149011612 && csv_float.value_ms(29,0)==42.5,
+            "CSV float32 未按实际 Codec 量化");
+        SignalSource csv_flag(Json{{"type","boolean"}},timeline(false,true));
+        require(csv_flag.value_ms(0,0)==false && csv_flag.value_ms(29,0)==true,"CSV 布尔类型丢失");
+        SignalSource csv_text(Json{{"type","string"}},timeline("before","=SUM(1,2)"));
+        require(csv_text.value_ms(29,1)=="=SUM(1,2)","CSV 文本未保持惰性字面量");
+        rejects([&]{csv.value(0,0);});
+        for(const Json &at:Json::array({true,-1,29.0,1})) {
+            auto bad=timeline(1,2);bad["timeline"][0]["at_ms"]=at;
+            rejects([&]{SignalSource source(u8,bad);});
+        }
+        for(const Json &at:Json::array({0,-1,true,29.0})) {
+            auto bad=timeline(1,2);bad["timeline"][1]["at_ms"]=at;
+            rejects([&]{SignalSource source(u8,bad);});
+        }
+        auto reversed=timeline(1,2);reversed["timeline"].push_back(Json{{"at_ms",28},{"value",3}});
+        rejects([&]{SignalSource source(u8,reversed);});
+        auto extra=timeline(1,2);extra["timeline"][1]["script"]="ignored";
+        rejects([&]{SignalSource source(u8,extra);});
+        auto missing=timeline(1,2);missing["timeline"][1].erase("value");
+        rejects([&]{SignalSource source(u8,missing);});
+        auto large=timeline(1,2);large["timeline"]=Json::array();
+        for(int i=0;i<8193;++i)large["timeline"].push_back(Json{{"at_ms",i},{"value",1}});
+        rejects([&]{SignalSource source(u8,large);});
+        rejects([&]{SignalSource source(u8,Json{{"kind","csv"},{"timeline",Json::array()}});});
+        rejects([&]{SignalSource source(u8,timeline(1,256));});
+        rejects([&]{SignalSource source(u8,timeline(1,2.0));});
+        rejects([&]{SignalSource source(u8,timeline(1,true));});
+        rejects([&]{SignalSource source(Json{{"type","boolean"}},timeline(false,1));});
+        rejects([&]{SignalSource source(Json{{"type","string"}},timeline("before",1));});
+        rejects([&]{SignalSource source(u8,Json{{"kind","constant"},{"timeline",Json::array()}});});
         rejects([&]{SignalSource source(u64,Json{{"initial",9007199254740992.0}});});
         rejects([&]{SignalSource source(u64,Json{{"initial",1.5}});});
         rejects([&]{SignalSource source(u64,Json{{"initial",-1}});});
