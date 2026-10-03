@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { ConnectionState, HealthResponse, PageId } from '../types'
 import { Icon, type IconName } from './Icon'
 import { StatusBadge } from './StatusBadge'
+import { useProject } from '../workbench/projects'
 
 interface LayoutProps {
   page: PageId
@@ -44,6 +45,7 @@ export function Layout({
   page, onNavigate, onOpenAgent, sidebarOpen, onToggleSidebar, connectionState, health, agentOpen, agentPanel, children,
 }: LayoutProps) {
   const meta = pageMeta[page]
+  const project = useProject()
   const navigate = (id: PageId) => {
     onNavigate(id)
     if (window.innerWidth < 900) onToggleSidebar()
@@ -59,8 +61,7 @@ export function Layout({
         </button>
         <div className="workspace-selector">
           <span className="workspace-icon"><Icon name="network" /></span>
-          <span><small>当前工作区</small><strong>Vehicle Lab · A</strong></span>
-          <Icon name="arrowDown" size={14} />
+          <span><small>配置工作区</small><strong>{project?.document.name ?? '未打开工程'}</strong></span>
         </div>
         <nav className="main-nav" aria-label="主导航">
           <p>工作台</p>

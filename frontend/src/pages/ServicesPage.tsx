@@ -59,6 +59,10 @@ export function ServicesPage({ services, loading, source, onServicesChange, init
     setNotice(null)
     try {
       const result = await api.importArxml(file)
+      if (project) {
+        const model = await api.projectModel()
+        project.update(doc => ({ ...doc, model }))
+      }
       const count = result.imported ?? result.services?.length ?? 0
       if (!result.services?.length) {
         const reason = result.warnings?.[0] ?? '未识别到可展示的 SOME/IP 服务定义'

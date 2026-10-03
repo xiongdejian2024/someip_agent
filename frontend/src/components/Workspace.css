@@ -24,6 +24,8 @@
 .services-page .tree-group button { height: 34px; }
 .services-page .tree-group > span, .services-page .tree-root-label { font-size: 11px; }
 .services-page .service-identity p, .services-page .service-facts span { font-size: 12px; }
+.services-page .service-identity { min-width: 0; overflow-wrap: anywhere; }
+.services-page .service-logo { flex-shrink: 0; }
 .services-page .service-facts strong { font-size: 17px; }
 .services-page td, .services-page th { font-size: 12px; }
 .service-runtime-panel .panel-header h3 { font-size: 17px; }

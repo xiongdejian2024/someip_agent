@@ -196,6 +196,8 @@ jobs:
 
       - name: 工程配置恢复表面验收
         run: node scripts/check_project_surface.mjs
+      - name: 工程管理分层界面与保存保护
+        run: node scripts/check_project_manager.mjs
 
       - name: 离线记录时间轴回归
         run: node scripts/check_replay.mjs
