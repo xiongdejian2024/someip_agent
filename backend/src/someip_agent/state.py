@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from uuid import UUID
 
 from someip_agent.agent.console import ConsoleControls, console_tools
 from someip_agent.agent.service import AgentService, LlmConfigurationService
@@ -18,6 +19,7 @@ from someip_agent.soa.operator import NativeRuntimeError
 from someip_agent.storage.arxml_repository import ArxmlModelRepository
 from someip_agent.storage.repository import AuditRepository
 from someip_agent.update.service import UpdateService
+from someip_agent.workbench.projects import ProjectConflict, ProjectRepository, ProjectView
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +35,10 @@ class ApplicationState:
         self.services = ServiceSessionManager(settings, self.monitor)
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")
+        self.projects = ProjectRepository(settings.data_dir / "someip-agent.sqlite3")
         self.llm_configuration = LlmConfigurationService(settings)
         self.update_service = UpdateService(settings)
-        self._arxml_model = self._restore_arxml_model()
+        self._arxml_model = self._restore_project_model()
         self._model_lock = asyncio.Lock()
         self.console = ConsoleControls()
         self.agent = AgentService(
@@ -57,6 +60,37 @@ class ApplicationState:
     async def get_arxml_model(self) -> ArxmlModel | None:
         async with self._model_lock:
             return self._arxml_model.model_copy(deep=True) if self._arxml_model else None
+
+    def _restore_project_model(self) -> ArxmlModel | None:
+        try:
+            project = self.projects.current()
+            if project is not None:
+                logger.info(
+                    "已恢复工程配置，服务与激励保持停止", extra={"operation": "project.restart"}
+                )
+                return project.document.model
+        except Exception:
+            logger.exception(
+                "工程恢复失败，保留数据库并回退模型", extra={"operation": "project.restart"}
+            )
+        return self._restore_arxml_model()
+
+    async def open_project(self, identifier: UUID) -> ProjectView:
+        async with self._model_lock:
+            if (
+                any(s.active for s in self.services.statuses())
+                or any(s.running for s in self.simulator.list())
+                or any(s.running for s in self.network.list())
+            ):
+                raise ProjectConflict(
+                    "请先停止服务、仿真和监听，再切换工程；打开不会自动停止或启动它们"
+                )
+            view = await asyncio.to_thread(self.projects.get, identifier)
+            await asyncio.to_thread(self.projects.select, identifier)
+            self._arxml_model = (
+                view.document.model.model_copy(deep=True) if view.document.model else None
+            )
+            return view
 
     def services_as_dicts(self) -> list[dict[str, object]]:
         model = self._arxml_model
