@@ -131,3 +131,48 @@ def test_api_save_export_restore_and_restart_without_execution(tmp_path, monkeyp
         assert restarted.get("/api/v1/services/sessions").json() == []
         assert restarted.get("/api/v1/simulation").json() == []
         assert restarted.get("/api/v1/network/listeners").json() == []
+
+
+def test_native_active_session_blocks_open_and_drafts_do_not_start(tmp_path, native_runtime):
+    settings = Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime)
+    with TestClient(create_app(settings)) as client:
+        client.post("/api/v1/arxml/import", files={"file": (FIXTURE.name, FIXTURE.read_bytes())})
+        request = {
+            "application_name": "project_guard",
+            "application_id": 0x4901,
+            "members": {"Provider": {"service": "VehicleStatus", "role": "server"}},
+        }
+        created = client.post("/api/v1/services/sessions", json=request)
+        assert created.status_code == 200, created.text
+        session = created.json()
+        doc = document().model_dump(mode="json")
+        doc["services"] = {"saved": request}
+        doc["cycles"] = [
+            {
+                "service_profile": "saved",
+                "command": {
+                    "member": "Provider_server",
+                    "function": "UpdateSpeedChangedEvent",
+                    "args": 24.5,
+                    "interval_ms": 29,
+                },
+            }
+        ]
+        saved = client.post("/api/v1/projects", json={"document": doc})
+        assert saved.status_code == 200, saved.text
+        identifier = saved.json()["id"]
+        assert client.post(f"/api/v1/projects/{identifier}/open").status_code == 409
+        assert client.get("/api/v1/projects/current").json() is None
+        assert (
+            client.get(f"/api/v1/services/sessions/{session['id']}/cycles").json()[0]["running"]
+            is False
+        )
+        assert client.post(f"/api/v1/services/sessions/{session['id']}/stop").status_code == 200
+        assert client.post(f"/api/v1/projects/{identifier}/open").status_code == 200
+        assert not any(item["active"] for item in client.get("/api/v1/services/sessions").json())
+        assert (
+            client.get("/api/v1/projects/current").json()["document"]["cycles"][0]["command"][
+                "args"
+            ]
+            == 24.5
+        )

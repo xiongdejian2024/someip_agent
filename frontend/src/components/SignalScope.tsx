@@ -3,6 +3,8 @@ import type { WaveSample } from '../types'
 import { Icon } from './Icon'
 import { formatSignalValue, SIGNAL_COLORS, signalLabel, WaveformChart } from './WaveformChart'
 import './SignalScope.css'
+import { useProject } from '../workbench/projects'
+import { formatHex } from '../api/adapters'
 
 interface SignalScopeProps {
   samples: WaveSample[]
@@ -15,8 +17,10 @@ interface SignalScopeProps {
 const MAX_SIGNALS = 6
 
 export function SignalScope({ samples, compact = false, title = '信号示波器', initialSignalKeys, allowedSignalKeys }: SignalScopeProps) {
+  const project = useProject()
+  const restoredKeys = project?.document.workspace.waves.map(wave => `${formatHex(wave.service_id)}/${formatHex(wave.method_id)}/${wave.signal_name}`)
   const [search, setSearch] = useState('')
-  const [selectedKeys, setSelectedKeys] = useState<string[] | null>(initialSignalKeys?.slice(0, MAX_SIGNALS) ?? null)
+  const [selectedKeys, setSelectedKeys] = useState<string[] | null>(restoredKeys?.length ? restoredKeys.slice(0, MAX_SIGNALS) : initialSignalKeys?.slice(0, MAX_SIGNALS) ?? null)
   const [layout, setLayout] = useState<'lanes' | 'overlay'>('lanes')
   const [windowSeconds, setWindowSeconds] = useState(30)
   const [resetZoom, setResetZoom] = useState(0)
@@ -35,6 +39,16 @@ export function SignalScope({ samples, compact = false, title = '信号示波器
   useEffect(() => {
     if (selectedKeys === null && keys.length) setSelectedKeys(keys.slice(0, 3))
   }, [keys, selectedKeys])
+  const projectUpdate = project?.update
+  useEffect(() => {
+    if (selectedKeys === null) return
+    const waves = selectedKeys.flatMap(key => {
+      const [service, method, ...name] = key.split('/')
+      const service_id = Number(service), method_id = Number(method)
+      return name.length && Number.isInteger(service_id) && Number.isInteger(method_id) ? [{ service_id, method_id, signal_name: name.join('/') }] : []
+    })
+    projectUpdate?.(doc => ({ ...doc, workspace: { ...doc.workspace, waves } }))
+  }, [projectUpdate, selectedKeys])
 
   const toggleSignal = (key: string) => {
     setSelectedKeys((current) => {

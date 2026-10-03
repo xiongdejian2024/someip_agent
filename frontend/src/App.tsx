@@ -14,6 +14,7 @@ import { ServicesPage } from './pages/ServicesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SimulationPage } from './pages/SimulationPage'
 import type { AgentWorkspaceContext, PageId, ServiceDefinition, SimulationStartRequest } from './types'
+import { ProjectBar, ProjectContext, useProjectState, type ProjectView } from './workbench/projects'
 
 const pages: PageId[] = ['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings']
 
@@ -36,6 +37,14 @@ export default function App() {
   const { state: connectionState, health } = useBackendStatus()
   const { messages, samples, streamState, source, clear, streamCounters, bufferCounters } = useMonitorStream(true)
   const expectedServiceCount = health?.service_count
+  const restoreProject = useCallback(async (view: ProjectView) => {
+    const items = await api.services()
+    setServices(items); setServicesLoading(false); setServiceSource('live'); setModelError(null)
+    setSimulationDraft(undefined)
+    setPage(view.document.workspace.page)
+    window.location.hash = `/${view.document.workspace.page}`
+  }, [])
+  const project = useProjectState(restoreProject)
   const setScope = useCallback((next: AgentWorkspaceContext) => {
     setAgentScope((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
   }, [])
@@ -140,6 +149,7 @@ export default function App() {
 
   const navigate = (next: PageId) => {
     setPage(next)
+    project.update(doc => ({ ...doc, workspace: { ...doc.workspace, page: next } }))
     window.history.pushState(null, '', `#/${next}`)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -157,6 +167,7 @@ export default function App() {
   })()
 
   return (
+    <ProjectContext.Provider value={{ document: project.document, update: project.update }}>
     <AgentWorkspace.Provider value={agentWorkspace}>
       <Layout
         page={page}
@@ -174,8 +185,10 @@ export default function App() {
         }} />}
       >
         {modelError && <div className="inline-notice error" role="alert">{modelError}</div>}
-        {content}
+        <ProjectBar controls={{ document: project.document, update: project.update }} current={project.view} apply={project.apply} onSaved={view => { project.setView(view); project.update(() => view.document) }} />
+        {project.ready ? <div key={project.epoch}>{content}</div> : <p role="status">正在恢复工程配置（不会启动任务）…</p>}
       </Layout>
     </AgentWorkspace.Provider>
+    </ProjectContext.Provider>
   )
 }

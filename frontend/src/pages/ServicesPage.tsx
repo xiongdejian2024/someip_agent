@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon'
 import { ServiceRuntimePanel } from '../components/ServiceRuntimePanel'
 import { protocolId, useAgentScope } from '../agent/workspace'
 import type { ServiceDefinition } from '../types'
+import { useProject } from '../workbench/projects'
 
 interface ServicesPageProps {
   services: ServiceDefinition[]
@@ -19,7 +20,8 @@ type ChildType = 'methods' | 'events' | 'fields'
 const childLabels: Record<ChildType, string> = { methods: 'Methods', events: 'Events', fields: 'Fields' }
 
 export function ServicesPage({ services, loading, source, onServicesChange }: ServicesPageProps) {
-  const [selectedId, setSelectedId] = useState(services[0]?.id ?? '')
+  const project = useProject()
+  const [selectedId, setSelectedId] = useState(() => services.find(service => project?.document.workspace.service_paths.includes(service.path ?? ''))?.id ?? services[0]?.id ?? '')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([services[0]?.id].filter(Boolean)))
   const [search, setSearch] = useState('')
   const [showImporter, setShowImporter] = useState(false)
@@ -108,7 +110,7 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
           <div className="service-tree-list">
             {filtered.map((service) => (
               <div key={service.id} className="tree-service">
-                <button className={`tree-service-row${selected?.id === service.id ? ' selected' : ''}`} onClick={() => { setSelectedId(service.id); toggle(service.id) }}>
+                <button className={`tree-service-row${selected?.id === service.id ? ' selected' : ''}`} onClick={() => { setSelectedId(service.id); toggle(service.id); project?.update(doc => ({ ...doc, workspace: { ...doc.workspace, service_paths: service.path ? [service.path] : [] } })) }}>
                   <Icon name="chevron" size={13} className={expanded.has(service.id) ? 'expanded' : ''} />
                   <span className="tree-service-icon">S</span>
                   <span><strong>{service.name}</strong><small>{service.serviceId} · {service.instanceId}</small></span>

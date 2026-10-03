@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useProject } from '../workbench/projects'
 import { api, describeApiError } from '../api/client'
 import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
@@ -25,6 +26,7 @@ function formatTime(value: string) {
 }
 
 export function MonitorPage({ messages, samples, streamState, source, onClear, streamCounters, bufferCounters }: MonitorPageProps) {
+  const project = useProject()
   const [paused, setPaused] = useState(false)
   const [snapshot, setSnapshot] = useState<MonitorMessage[]>([])
   const [waveSnapshot, setWaveSnapshot] = useState<WaveSample[]>([])
@@ -48,7 +50,7 @@ export function MonitorPage({ messages, samples, streamState, source, onClear, s
   const [listenerBusy, setListenerBusy] = useState(false)
   const [listenerNotice, setListenerNotice] = useState<string | null>(null)
   const [captureInterfaces, setCaptureInterfaces] = useState<CaptureInterface[]>([])
-  const [listenerConfig, setListenerConfig] = useState<NetworkListenerConfig>({
+  const [listenerConfig, setListenerConfig] = useState<NetworkListenerConfig>(project?.document.listeners[0] ?? {
     name: 'SOME/IP UDP Listener',
     mode: 'socket',
     capture_interface: '',
@@ -60,6 +62,10 @@ export function MonitorPage({ messages, samples, streamState, source, onClear, s
     multicast_group: '239.192.255.251',
     interface_ip: '0.0.0.0',
   })
+  const projectUpdate = project?.update
+  useEffect(() => {
+    projectUpdate?.(doc => ({ ...doc, listeners: [{ ...listenerConfig, capture_interface: listenerConfig.capture_interface || undefined }, ...doc.listeners.slice(1)] }))
+  }, [listenerConfig, projectUpdate])
 
   const loadListeners = async () => {
     try {

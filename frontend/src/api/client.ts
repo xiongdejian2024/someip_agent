@@ -86,6 +86,18 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 }
 
 export const api = {
+  projectModel: () => request<unknown | null>('/model'),
+  projects: () => request<import('../workbench/projects').ProjectSummary[]>('/projects'),
+  currentProject: () => request<import('../workbench/projects').ProjectView | null>('/projects/current'),
+  saveProject: (document: import('../workbench/projects').ProjectDocument, current?: import('../workbench/projects').ProjectView) => request<import('../workbench/projects').ProjectView>(current ? `/projects/${current.id}` : '/projects', {
+    method: current ? 'PUT' : 'POST', body: stringifyJson({ document, ...(current ? { expected_revision: current.revision } : {}) }),
+  }),
+  openProject: (id: string) => request<import('../workbench/projects').ProjectView>(`/projects/${encodeURIComponent(id)}/open`, { method: 'POST' }),
+  exportProject: (id: string) => request<import('../workbench/projects').ProjectDocument>(`/projects/${encodeURIComponent(id)}/export`),
+  importProject: (document: unknown) => request<import('../workbench/projects').ProjectView>('/projects/import', { method: 'POST', body: stringifyJson(document) }),
+  validateProject: (document: unknown) => request<import('../workbench/projects').ProjectDocument>('/projects/validate', { method: 'POST', body: stringifyJson(document) }),
+  projectBackups: (id: string) => request<Array<{ revision: number; updated_at: string }>>(`/projects/${encodeURIComponent(id)}/backups`),
+  restoreProject: (id: string, revision: number, expected_revision: number) => request<import('../workbench/projects').ProjectView>(`/projects/${encodeURIComponent(id)}/restore`, { method: 'POST', body: stringifyJson({ revision, expected_revision }) }),
   consoleCommands: (afterId?: number) => request<{
     last_id: number; commands: Array<{ id: number; action: 'navigate'; page: import('../types').PageId }>
   }>(`/console/commands${afterId === undefined ? '' : `?after_id=${afterId}`}`),

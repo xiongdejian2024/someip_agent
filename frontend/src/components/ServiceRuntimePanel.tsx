@@ -4,29 +4,34 @@ import { parseJson, stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { byteOrderOverride, memberApplication, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
-import type { NativeEventCycle, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
+import type { NativeEventCycle, NativeServiceRequest, NativeServiceRequestMessage, NativeServiceSession, ServiceDefinition } from '../types'
+import { useProject } from '../workbench/projects'
 import { Icon } from './Icon'
 import './ServiceRuntimePanel.css'
 
 export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefinition; demo: boolean }) {
-  const [role, setRole] = useState<'client' | 'server'>('client')
-  const [transport, setTransport] = useState<'internal' | 'udp' | 'tcp'>('internal')
+  const project = useProject()
+  const profileKey = selected?.path ?? 'service'
+  const savedMember = Object.values(project?.document.services[profileKey]?.members ?? {})[0]
+  const savedCycle = project?.document.cycles.find(item => item.service_profile === profileKey)
+  const [role, setRole] = useState<'client' | 'server'>(savedMember?.role ?? 'client')
+  const [transport, setTransport] = useState<'internal' | 'udp' | 'tcp'>(savedMember?.transport ?? 'internal')
   const [byteOrder, setByteOrder] = useState<ByteOrderSelection>('arxml')
-  const [applicationId, setApplicationId] = useState('0x3401')
+  const [applicationId, setApplicationId] = useState(String(project?.document.services[profileKey]?.application_id ?? '0x3401'))
   const [independentApplications, setIndependentApplications] = useState(false)
-  const [peer, setPeer] = useState('10.77.0.2')
-  const [port, setPort] = useState('30520')
-  const [instance, setInstance] = useState('')
+  const [peer, setPeer] = useState(savedMember?.peer_host ?? '10.77.0.2')
+  const [port, setPort] = useState(String(savedMember?.port ?? 30520))
+  const [instance, setInstance] = useState(savedMember ? String(savedMember.instance_id) : '')
   const [includeInternalPeer, setIncludeInternalPeer] = useState(false)
   const [sessions, setSessions] = useState<NativeServiceSession[]>([])
   const [sessionId, setSessionId] = useState('')
   const [memberKey, setMemberKey] = useState('')
   const [action, setAction] = useState<'call' | 'notify' | 'respond'>('call')
   const [functionName, setFunctionName] = useState('')
-  const [args, setArgs] = useState('{}')
+  const [args, setArgs] = useState(savedCycle ? stringifyJson(savedCycle.command.args, 2) : '{}')
   const [requestId, setRequestId] = useState('')
   const [timeout, setTimeout] = useState('5')
-  const [cycleMs, setCycleMs] = useState('100')
+  const [cycleMs, setCycleMs] = useState(String(savedCycle?.command.interval_ms ?? 100))
   const [cycles, setCycles] = useState<NativeEventCycle[]>([])
   const [pending, setPending] = useState<NativeServiceRequestMessage[]>([])
   const [results, setResults] = useState<Array<{ id: string; member: string; functionName: string; text: string }>>([])
@@ -66,7 +71,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     return () => { active = false; window.clearInterval(timer) }
   }, [sessionId, session?.running])
 
-  useEffect(() => { setInstance(''); setByteOrder('arxml') }, [selected?.id])
+  useEffect(() => { setInstance(savedMember ? String(savedMember.instance_id) : ''); setByteOrder(savedMember?.byte_order ?? 'arxml') }, [selected?.id])
   useEffect(() => {
     let cancelled = false
     let polling = false
@@ -101,14 +106,14 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     finally { setOperations(current => { const next = new Set(current); next.delete(key); return next }) }
   }
 
-  const start = () => run('初始化原生服务会话', async () => {
+  const buildRequest = (): NativeServiceRequest => {
     if (!selected?.path || !selected.deploymentPath || demo) throw new Error('请先导入真实且具有明确部署的 ARXML 服务')
     const instanceId = Number(instance || instances[0])
     const appId = Number(applicationId)
     if (!Number.isInteger(instanceId) || !instances.includes(instanceId)) throw new Error('请选择已部署的实例')
     if (!Number.isInteger(appId) || appId <= 0 || appId >= 0xffff) throw new Error('应用 ID 必须为 1 至 65534 的整数，可使用十六进制')
     const routingName = `web_${crypto.randomUUID().replaceAll('-', '')}`
-    const created = await api.startServiceSession({
+    return {
       application_name: routingName,
       application_id: appId,
       members: {
@@ -127,11 +132,19 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
           },
         } : {}),
       },
-    })
+    }
+  }
+  const initialize = async (request: NativeServiceRequest) => {
+    const created = await api.startServiceSession(request)
     setSessions(current => [created, ...current]); setSessionId(created.id)
     setMemberKey(created.members[0]?.key ?? ''); setPending([])
-    setAction(role === 'client' ? 'call' : 'notify')
+    setAction(created.members[0]?.role === 'client' ? 'call' : 'notify')
     setNotice('原生进程与成员 socket 已初始化；服务是否在线以成员状态为准。')
+  }
+  const start = () => run('初始化原生服务会话', async () => {
+    const request = buildRequest()
+    project?.update(doc => ({ ...doc, services: { ...doc.services, [profileKey]: request } }))
+    await initialize(request)
   })
 
   const command = () => run('执行原生成员操作', async () => {
@@ -152,9 +165,12 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     if (!session?.running || member?.role !== 'server' || action !== 'notify' || !effectiveFunction) throw new Error('请选择活动 server 和真实事件')
     const interval = Number(cycleMs)
     if (!Number.isInteger(interval) || interval < 1 || interval > 60000) throw new Error('事件周期必须为 1–60000 ms 的整数')
-    const result = await api.configureServiceCycle(session.id, update ? 'update' : 'start', {
+    const command = {
       member: member.key, function: effectiveFunction, args: parseJson(args), interval_ms: interval,
-    })
+    }
+    const result = await api.configureServiceCycle(session.id, update ? 'update' : 'start', command)
+    const binding = Object.entries(project?.document.services ?? {}).find(([, request]) => request.application_name === session.application_name && request.application_id === session.application_id)?.[0]
+    if (binding) project?.update(doc => ({ ...doc, cycles: [...doc.cycles.filter(item => item.service_profile !== binding || item.command.member !== command.member), { service_profile: binding, command }] }))
     setCycles(await api.serviceCycles(session.id))
     setNotice(`原生周期任务${result.running ? '运行中' : '已停止'}；完整事件参数按当前会话 ARXML 编码，不代表远端收到。`)
   }, cycleKey)
@@ -172,7 +188,13 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       {transport === 'internal' && <label className="service-runtime-checkbox"><input type="checkbox" checked={includeInternalPeer} onChange={event => setIncludeInternalPeer(event.target.checked)} />同一会话加入内部测试对端</label>}
       {transport !== 'internal' && <><label>授权对端 IPv4<input value={peer} onChange={event => setPeer(event.target.value)} /></label><label>服务端口<input value={port} onChange={event => setPort(event.target.value)} /></label></>}
       <button className="button primary" disabled={busy || demo || !selected?.deploymentPath} onClick={() => void start()}><Icon name="play" />初始化所选服务</button>
+      <button className="button secondary" disabled={busy || demo || !selected?.deploymentPath} onClick={() => void run('保存服务配置草案', async () => {
+        const request = buildRequest()
+        project?.update(doc => ({ ...doc, services: { ...doc.services, [profileKey]: request } }))
+        setNotice('服务配置已加入工程草案；请在工程管理中保存，尚未启动。')
+      })}>加入工程草案（不启动）</button>
     </div>
+    {project && Object.entries(project.document.services).map(([key, request]) => <div key={key} className="context-actions"><span>工程服务配置：{key} · {Object.keys(request.members).length} 个成员</span><button className="button secondary" disabled={busy || demo} onClick={() => void run('初始化已保存服务配置', async () => initialize(request))}>明确启动此配置</button></div>)}
     {error && <div className="inline-notice error" role="alert">{error}</div>}
     {pollError && <div className="inline-notice error" role="alert">{pollError}</div>}
     {notice && <div className="inline-notice success" role="status">{notice}</div>}

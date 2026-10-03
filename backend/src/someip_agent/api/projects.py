@@ -80,6 +80,11 @@ async def import_project(document: ProjectDocument, state: ApplicationState = De
     )
 
 
+@router.post("/validate", response_model=ProjectDocument)
+async def validate_project(document: ProjectDocument) -> ProjectDocument:
+    return document
+
+
 @router.get("/{identifier}", response_model=ProjectView)
 async def get_project(identifier: UUID, state: ApplicationState = Depends(get_state)):
     return await operation(

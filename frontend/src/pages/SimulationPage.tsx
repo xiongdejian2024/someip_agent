@@ -7,6 +7,7 @@ import { SignalScope } from '../components/SignalScope'
 import { protocolId, useAgentScope } from '../agent/workspace'
 import type { ServiceDefinition, ServiceSignal, SimulationConfig, SimulationStartRequest, SimulationStatus, WaveSample } from '../types'
 import './SimulationPage.css'
+import { useProject } from '../workbench/projects'
 
 interface SimulationPageProps {
   services: ServiceDefinition[]
@@ -196,6 +197,8 @@ function waveKey(signal: Pick<SimulatableSignal, 'serviceId' | 'methodId' | 'nam
 }
 
 export function SimulationPage({ services, samples, draft, onDismissDraft, loading = false }: SimulationPageProps) {
+  const project = useProject()
+  const restoreDrafts = useRef(project?.document.simulations ?? [])
   const [simState, setSimState] = useState<SimState>('idle')
   const [mode, setMode] = useState<'physical' | 'virtual'>('virtual')
   const [config, setConfig] = useState<SimulationConfig>({
@@ -222,6 +225,22 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
 
   const projection = useMemo(() => buildSimulationProjection(services, new Set(services.map((service) => service.id))), [services])
   const signalIndex = useMemo(() => new Map(projection.signals.map((signal) => [signal.key, signal])), [projection.signals])
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current || !projection.signals.length) return
+    restored.current = true
+    const matches = restoreDrafts.current.flatMap(request => {
+      const signal = projection.signals.find(item => item.serviceId === request.service_id && item.instanceId === request.instance_id && item.methodId === request.method_id && item.name === request.generator.signal_name)
+      return signal && ['constant', 'sine', 'ramp'].includes(request.generator.kind) ? [{ signal, request }] : []
+    })
+    setSelectedKeys(matches.map(item => item.signal.key))
+    setSettings(Object.fromEntries(matches.map(({ signal, request }) => [signal.key, { kind: request.generator.kind as GeneratorMode, value: request.generator.initial, periodSeconds: request.generator.period_seconds, minimum: request.generator.minimum, maximum: request.generator.maximum }])))
+    const first = matches[0]?.request
+    if (first) {
+      setMode(first.transport === 'udp' ? 'physical' : 'virtual')
+      setConfig(current => ({ ...current, cycleMs: first.interval_ms, multiplier: 1, destinationHost: first.destination_host, destinationPort: first.destination_port, enableSd: first.enable_sd ?? true }))
+    }
+  }, [projection.signals])
   const signalCounts = useMemo(() => {
     const result = new Map<string, number>()
     projection.signals.forEach((signal) => result.set(signal.serviceKey, (result.get(signal.serviceKey) ?? 0) + 1))
@@ -254,6 +273,20 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
   const running = simState === 'running' || simState === 'stopping'
   const locked = simState !== 'idle'
   const effectiveIntervalMs = Math.max(10, Math.round(config.cycleMs / Math.max(config.multiplier, 0.01)))
+  const projectUpdate = project?.update
+  useEffect(() => {
+    if (!restored.current) return
+    const requests: SimulationStartRequest[] = selectedSignals.map(signal => {
+      const setting = settings[signal.key] ?? defaultSetting(signal)
+      return {
+        name: `${signal.serviceName}-${signal.name}-simulation`, service_id: signal.serviceId, instance_id: signal.instanceId,
+        method_id: signal.methodId, interface_version: signal.interfaceVersion, interval_ms: effectiveIntervalMs,
+        transport: mode === 'physical' ? 'udp' : 'internal', destination_host: config.destinationHost, destination_port: config.destinationPort, enable_sd: config.enableSd,
+        generator: { signal_name: signal.name, kind: setting.kind, data_type: signal.dataType, minimum: setting.minimum, maximum: setting.maximum, initial: setting.value, period_seconds: setting.periodSeconds, sequence: [] },
+      }
+    })
+    projectUpdate?.(doc => ({ ...doc, simulations: requests }))
+  }, [projectUpdate, selectedSignals, settings, effectiveIntervalMs, mode, config.destinationHost, config.destinationPort, config.enableSd])
   const visibleTasks = taskView === 'running' ? runningTasks : tasks
   const maxTaskPage = Math.max(0, Math.ceil(visibleTasks.length / TASK_PAGE_SIZE) - 1)
   const currentTaskPage = Math.min(taskPage, maxTaskPage)
