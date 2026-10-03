@@ -23,6 +23,7 @@ import {
   type RawPcapImportResult,
   type RawServiceDefinition,
 } from './adapters'
+import { parseJson, stringifyJson } from './json'
 
 const API_PREFIX = '/api/v1'
 
@@ -55,7 +56,7 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 8000
 
     const contentType = response.headers.get('content-type') ?? ''
     const body: unknown = contentType.includes('application/json')
-      ? await response.json()
+      ? parseJson(await response.text())
       : await response.text()
 
     if (!response.ok) {
@@ -97,7 +98,7 @@ export const api = {
   serviceRequests: (id: string) => request<NativeServiceRequestMessage[]>(`/services/sessions/${encodeURIComponent(id)}/requests`),
   serviceCommand: (id: string, action: 'call' | 'notify' | 'respond', command: NativeServiceCommand) => request<{
     status: 'responded' | 'submitted'; result: unknown; observation: 'vsomeip_response' | 'native_submission'; wire_verified: false
-  }>(`/services/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(command) }, 40_000),
+  }>(`/services/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: stringifyJson(command) }, 40_000),
   importArxml: async (file: File) => {
     const result = await uploadFile<{ services?: RawServiceDefinition[]; warnings?: string[] }>('/arxml/import', file)
     const services = normalizeServices(result.services ?? [])

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { formatHex, normalizePcapResult } from '../api/adapters'
 import { api, ApiError, describeApiError } from '../api/client'
+import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { FileDropzone } from '../components/FileDropzone'
 import { Icon } from '../components/Icon'
@@ -152,7 +153,7 @@ export function PcapPage() {
         },
         statistics: result,
       }
-      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+      const blob = new Blob([stringifyJson(report, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       const baseName = result.file_name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '_')

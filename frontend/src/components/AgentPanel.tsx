@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { boundedAgentHistory, streamAgentChat, type AgentStreamEvent } from '../api/agentStream'
 import { formatHex } from '../api/adapters'
 import { describeApiError } from '../api/client'
+import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import type { AgentMessage, AgentWorkspaceContext, ConnectionState, PageId, SimulationStartRequest } from '../types'
 import { Icon } from './Icon'
@@ -160,7 +161,7 @@ const MarkdownMessage = memo(function MarkdownMessage({ content, user }: { conte
 const ToolDetails = memo(function ToolDetails({ tool, onLoadSimulationPlan }: { tool: ToolActivity; onLoadSimulationPlan?: (config: SimulationStartRequest) => void }) {
   const [loaded, setLoaded] = useState(false)
   const result = useMemo(() => {
-    const text = JSON.stringify(tool.result, null, 2) ?? ''
+    const text = stringifyJson(tool.result, 2)
     return text.slice(0, 12_000) + (text.length > 12_000 ? '\n…（结果已截断）' : '')
   }, [tool.result])
   const plan = simulationPlan(tool)

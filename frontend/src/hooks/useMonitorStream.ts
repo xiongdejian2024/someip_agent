@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, monitorWebSocketUrl } from '../api/client'
+import { parseJson } from '../api/json'
 import { normalizeMonitorMessage, type RawMonitorMessage } from '../api/adapters'
 import { logError, logInfo } from '../api/logger'
 import { DISPLAY_INTERVAL_MS, MonitorBuffer, SAMPLE_CAPACITY, TRACE_CAPACITY } from '../data/monitorBuffer'
@@ -52,7 +53,7 @@ export function useMonitorStream(enabled = true) {
         current.onmessage = (event) => {
           if (!active || socket !== current) return
           try {
-            const payload = JSON.parse(String(event.data)) as {
+            const payload = parseJson(String(event.data)) as {
               type?: 'snapshot' | 'message' | 'heartbeat'
               messages?: RawMonitorMessage[]
               message?: RawMonitorMessage

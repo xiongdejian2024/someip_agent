@@ -1,4 +1,5 @@
 import type { AgentHistoryItem, AgentWorkspaceContext } from '../types'
+import { parseJson } from './json'
 
 export type AgentHistoryMessage = AgentHistoryItem
 
@@ -97,7 +98,7 @@ export async function streamAgentChat(
 
   const dispatch = () => {
     if (!dataLines.length) { eventName = ''; return }
-    const data: unknown = JSON.parse(dataLines.join('\n'))
+    const data: unknown = parseJson(dataLines.join('\n'))
     dataLines = []
     if (!data || typeof data !== 'object') throw new Error('智能体流式事件格式无效')
     if (['status', 'delta', 'tool', 'error', 'done'].includes(eventName)) {

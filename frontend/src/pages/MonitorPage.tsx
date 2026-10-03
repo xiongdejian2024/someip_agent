@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, describeApiError } from '../api/client'
+import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { Icon } from '../components/Icon'
 import { StatusBadge } from '../components/StatusBadge'
@@ -125,7 +126,7 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
     const keyword = search.trim().toLowerCase()
     return baseMessages.filter((item) => {
       const protocolMatch = protocol === 'ALL' || item.protocol === protocol
-      const keywordMatch = !keyword || [item.serviceId, item.methodId, item.source, item.destination, item.messageType, item.payload ?? '', JSON.stringify(item.signalValues ?? {})].some((value) => value.toLowerCase().includes(keyword))
+      const keywordMatch = !keyword || [item.serviceId, item.methodId, item.source, item.destination, item.messageType, item.payload ?? '', stringifyJson(item.signalValues ?? {})].some((value) => value.toLowerCase().includes(keyword))
       const directionMatch = direction === 'ALL' || item.direction === direction
       const errorMatch = !errorOnly || Boolean(item.status && item.status !== 'E_OK' && item.status !== '0x00')
       return protocolMatch && keywordMatch && directionMatch && errorMatch
@@ -285,7 +286,7 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
                     ['时间', selected.timestamp], ['方向', selected.direction], ['协议', selected.protocol], ['Service ID', selected.serviceId], ['Method / Event', selected.methodId], ['类型', selected.messageType], ['返回码', selected.status ?? '—'], ['信号解码', selected.signalDecodeError ? `失败：${selected.signalDecodeError}` : selected.signalDecoder ?? '未解码'], ['报文字节数', `${selected.length} B`], ['延迟', selected.latencyMs !== undefined ? `${selected.latencyMs.toFixed(2)} ms` : '—'], ['源地址', selected.source], ['目标地址', selected.destination],
                   ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
                   {detailTab === 'payload' && <pre className="trace-payload">{selected.payload || '无负载数据'}</pre>}
-                  {detailTab === 'signals' && (selected.signalDecodeError ? <p className="trace-detail-hint">原生信号解码失败：{selected.signalDecodeError}。原始 Payload 已保留。</p> : selected.signalValues && Object.keys(selected.signalValues).length ? <dl className="trace-signals">{Object.entries(selected.signalValues).map(([name, value]) => <div key={name}><dt title={name}>{name}<button className="text-button" aria-label={`分析信号 ${name}`} onClick={() => { setSelectedSignal(name); openAgent('请分析当前选中信号在缓存中的数值范围、采样间隔与异常证据，明确样本数量和限制。') }}>分析此信号</button></dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>)}</dl> : <p className="trace-detail-hint">当前报文未匹配到可解码的 ARXML 信号定义。</p>)}
+                  {detailTab === 'signals' && (selected.signalDecodeError ? <p className="trace-detail-hint">原生信号解码失败：{selected.signalDecodeError}。原始 Payload 已保留。</p> : selected.signalValues && Object.keys(selected.signalValues).length ? <dl className="trace-signals">{Object.entries(selected.signalValues).map(([name, value]) => <div key={name}><dt title={name}>{name}<button className="text-button" aria-label={`分析信号 ${name}`} onClick={() => { setSelectedSignal(name); openAgent('请分析当前选中信号在缓存中的数值范围、采样间隔与异常证据，明确样本数量和限制。') }}>分析此信号</button></dt><dd>{typeof value === 'object' ? stringifyJson(value) : String(value)}</dd></div>)}</dl> : <p className="trace-detail-hint">当前报文未匹配到可解码的 ARXML 信号定义。</p>)}
                 </>}
               </div>
             </aside>

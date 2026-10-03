@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, describeApiError } from '../api/client'
+import { parseJson, stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { byteOrderOverride, memberApplication, type ByteOrderSelection } from '../api/serviceConfig'
 import { protocolId } from '../agent/workspace'
@@ -114,10 +115,10 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     const seconds = Number(timeout)
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30) throw new Error('超时必须大于 0 且不超过 30 秒')
     const result = await api.serviceCommand(session.id, action, {
-      member: member.key, function: effectiveFunction, args: JSON.parse(args), timeout: seconds,
+      member: member.key, function: effectiveFunction, args: parseJson(args), timeout: seconds,
       ...(action === 'respond' ? { request_id: Number(requestId) } : {}),
     })
-    const text = result.status === 'responded' ? `收到真实方法响应：${JSON.stringify(result.result)}` : '原生已完成编码并提交；不代表远端接收或线上抓包验证。'
+    const text = result.status === 'responded' ? `收到真实方法响应：${stringifyJson(result.result)}` : '原生已完成编码并提交；不代表远端接收或线上抓包验证。'
     setNotice(text)
     setResults(current => [{ id: crypto.randomUUID(), member: member.key, functionName: effectiveFunction, text }, ...current].slice(0, 8))
     if (action === 'respond') setPending(await api.serviceRequests(session.id))
@@ -157,7 +158,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
       </div>
       <label>明确 JSON 参数（不会自动回显或猜测业务响应）<textarea rows={4} value={args} onChange={event => setArgs(event.target.value)} /></label>
       <div className="context-actions"><button className="button primary" disabled={busy || commandBusy || !session.running || !effectiveFunction || (action === 'respond' && !requestId)} onClick={() => void command()}><Icon name="send" />{commandBusy ? '等待原生回执…' : '执行所选操作'}</button><button className="button secondary" disabled={busy || requestsBusy || !session.running} onClick={() => void run('读取服务端请求', async () => { setPending(await api.serviceRequests(session.id)) }, `requests:${session.id}`)}>读取待响应请求</button></div>
-      {pending.map(item => <div className="service-runtime-request" key={`${item.member}-${item.request_id}-${item.received_at}`}><code>{item.member} · {item.function} · request_id {item.request_id} · {JSON.stringify(item.args)}</code><button className="button ghost" disabled={!item.reply_allowed || busy} onClick={() => { setMemberKey(item.member); setFunctionName(item.function); setRequestId(String(item.request_id)); setAction('respond'); setArgs('{}') }}>{item.reply_allowed ? '选择此请求并填写响应' : '无响应方法'}</button></div>)}
+      {pending.map(item => <div className="service-runtime-request" key={`${item.member}-${item.request_id}-${item.received_at}`}><code>{item.member} · {item.function} · request_id {item.request_id} · {stringifyJson(item.args)}</code><button className="button ghost" disabled={!item.reply_allowed || busy} onClick={() => { setMemberKey(item.member); setFunctionName(item.function); setRequestId(String(item.request_id)); setAction('respond'); setArgs('{}') }}>{item.reply_allowed ? '选择此请求并填写响应' : '无响应方法'}</button></div>)}
     </div>}
     {!!results.length && <div className="service-runtime-results" aria-live="polite">{results.map(item => <div key={item.id}><code>{item.member} · {item.functionName}</code><p>{item.text}</p></div>)}</div>}
   </section>

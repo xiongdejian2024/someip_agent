@@ -58,6 +58,7 @@ Windows/PyInstaller 制品通常还会携带由上述组件解析出的传递依
 | react-markdown | `^10.1.0` | MIT | [项目](https://github.com/remarkjs/react-markdown) / [LICENSE](https://github.com/remarkjs/react-markdown/blob/main/license) |
 | remark-gfm | `^4.0.1` | MIT | [项目](https://github.com/remarkjs/remark-gfm) / [LICENSE](https://github.com/remarkjs/remark-gfm/blob/main/license) |
 | Apache ECharts | `^5.6.0` | Apache-2.0 | [项目](https://github.com/apache/echarts) / [LICENSE](https://github.com/apache/echarts/blob/master/LICENSE) / [NOTICE](https://github.com/apache/echarts/blob/master/NOTICE.txt) |
+| lossless-json | `4.3.1` | MIT | [项目](https://github.com/josdejong/lossless-json) / [LICENSE](https://github.com/josdejong/lossless-json/blob/main/LICENSE.md) |
 | zrender | ECharts 传递依赖 | BSD-3-Clause | [项目](https://github.com/ecomfe/zrender) / [LICENSE](https://github.com/ecomfe/zrender/blob/master/LICENSE.txt) |
 | tslib | ECharts 传递依赖 | 0BSD | [项目](https://github.com/microsoft/tslib) / [LICENSE](https://github.com/microsoft/tslib/blob/main/LICENSE.txt) |
 | scheduler | React DOM 传递依赖 | MIT | [项目](https://github.com/facebook/react) / [LICENSE](https://github.com/facebook/react/blob/main/LICENSE) |
