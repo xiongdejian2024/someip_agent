@@ -286,8 +286,10 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             for (auto &[key,m]:members_) result[key]={{"state",m->state},{"role",m->role},
                 {"application_name",m->application->get_name()},{"application_id",m->application->get_client()},
                 {"emitted_count",m->count},{"last_value",m->last_value},
+                {"active_state",m->signal_source?m->signal_source->active_state():""},
                 {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count},
                 {"event_source_count",m->event_stimulus?m->event_stimulus->source_count():0},
+                {"event_active_states",m->event_stimulus?m->event_stimulus->active_states():Json::object()},
                 {"event_logical_seconds",m->event_logical_ms/1000.0}};
         } else if (function=="monitor") { monitors_.push_back(conn);result=true; }
         else if(function=="event_cycle_start" || function=="event_cycle_update") {
@@ -407,6 +409,12 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
         {"native_monotonic_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()}};
     if(api.event) {
+        if(type==2 && direction!="rx") {
+            if(m->signal_source && !m->signal_source->active_state().empty())
+                message["active_states"]=Json{{"",m->signal_source->active_state()}};
+            else if(m->event_stimulus && api.name==m->event_function)
+                message["active_states"]=m->event_stimulus->active_states();
+        }
         bool truncated=false;
         message["signal_values"]=decoded?event_signal_values(*decoded,truncated):
             event_signal_values(Codec::decode(api.input,payload),truncated);

@@ -16,6 +16,7 @@ from pydantic import (
 
 from someip_agent.domain.csv_stimulus import compile_csv_stimulus
 from someip_agent.domain.models import GeneratorKind
+from someip_agent.domain.timed_states import TimedSignalState, validate_timed_states
 
 
 class NativeMemberView(BaseModel):
@@ -80,9 +81,12 @@ class EventGeneratorConfig(BaseModel):
     seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
     step_at_ms: StrictInt | None = Field(default=None, ge=0, le=18446744073709551615)
     step_value: StrictInt | StrictFloat | StrictBool | StrictStr | None = None
+    initial_state: StrictStr | None = Field(default=None, max_length=64)
+    states: list[TimedSignalState] = Field(default_factory=list, max_length=128)
 
     @model_validator(mode="after")
     def step_shape(self) -> "EventGeneratorConfig":
+        validate_timed_states(self.kind, self.initial_state, self.states)
         if self.kind == GeneratorKind.STEP:
             if self.step_at_ms is None or self.step_value is None:
                 raise ValueError("阶跃源必须提供 step_at_ms 与 step_value")
@@ -125,6 +129,7 @@ class ServiceCycleStatus(BaseModel):
     running: bool
     emitted_count: int = Field(ge=0)
     source_count: int = Field(default=0, ge=0, le=128)
+    active_states: dict[str, str] = Field(default_factory=dict)
     logical_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
     observation: Literal["native_schedule"] = "native_schedule"
     wire_verified: Literal[False] = False

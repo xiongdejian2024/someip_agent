@@ -143,6 +143,71 @@ int main() {
         rejects([&]{SignalSource source(u8,Json{{"kind","arbitrary-script"}});});
         rejects([&]{SignalSource source(Json{{"type","struct"}},Json::object());});
         rejects([&]{sequence.value(-1,0);});
+        auto graph=[](Json first,Json second,uint64_t duration=29) {return Json{{"kind","state_machine"},
+            {"initial_state","idle"},{"states",Json::array({
+                Json{{"name","idle"},{"value",first},{"duration_ms",duration},{"next","active"}},
+                Json{{"name","active"},{"value",second}}})}};};
+        auto state_config=graph(UINT64_MAX,UINT64_MAX-1);
+        SignalSource machine(u64,state_config);
+        require(machine.active_state().empty(),"启动预检不能冒充实际采样");
+        require(machine.value_ms(28,0)==UINT64_MAX && machine.active_state()=="idle"
+            && machine.value_ms(29,1)==UINT64_MAX-1 && machine.active_state()=="active"
+            && machine.value_ms(UINT64_MAX,2)==UINT64_MAX-1,"状态机边界、终态保持或整数精度错误");
+        state_config["states"][0]["value"]=0;
+        require(machine.value_ms(0,0)==UINT64_MAX,"状态图未冻结");
+        rejects([&]{machine.value(0,0);});
+        SignalSource signed_machine(i64,graph(INT64_MIN,INT64_MAX,UINT64_MAX));
+        require(signed_machine.value_ms(UINT64_MAX-1,0)==INT64_MIN
+            && signed_machine.value_ms(UINT64_MAX,1)==INT64_MAX,"状态图 uint64 时刻发生舍入");
+        SignalSource float_machine(Json{{"type","float32"}},graph(0.1,42.5));
+        require(float_machine.value_ms(0,0)==0.10000000149011612
+            && float_machine.value_ms(29,0)==42.5,"状态值未按冻结 Codec 量化");
+        SignalSource flag_machine(Json{{"type","boolean"}},graph(false,true));
+        require(flag_machine.value_ms(0,0)==false && flag_machine.value_ms(29,0)==true,"布尔状态值错误");
+        SignalSource text_machine(Json{{"type","string"}},graph("before","=SUM(1,2)"));
+        require(text_machine.value_ms(29,0)=="=SUM(1,2)","文本状态不应执行表达式");
+        SignalSource bytes_machine(Json{{"type","bytes"}},graph("01","ab"));
+        require(bytes_machine.value_ms(29,0)=="ab","字节状态值错误");
+        auto cyclic=graph(1,2,3);
+        cyclic["states"][1]["duration_ms"]=5;cyclic["states"][1]["next"]="idle";
+        SignalSource loop(u8,cyclic);
+        for(uint64_t at:std::vector<uint64_t>{0,2,3,7,8,11,UINT64_MAX})
+            require(loop.value_ms(at,0)==(at%8<3?1:2),"状态循环取模错误");
+        cyclic["states"].push_back(Json{{"name","prefix"},{"value",7},{"duration_ms",2},{"next","idle"}});
+        cyclic["initial_state"]="prefix";
+        SignalSource prefix(u8,cyclic);
+        require(prefix.value_ms(1,0)==7 && prefix.value_ms(2,0)==1 && prefix.value_ms(5,0)==2
+            && prefix.value_ms(10,0)==1 && prefix.value_ms(UINT64_MAX,0)==((UINT64_MAX-2)%8<3?1:2),
+            "前缀进入循环或超长运行错误");
+        SignalSource self(u8,Json{{"kind","state_machine"},{"initial_state","hold"},{"states",Json::array({
+            Json{{"name","hold"},{"value",5},{"duration_ms",1},{"next","hold"}}})}});
+        require(self.value_ms(UINT64_MAX,0)==5,"自循环状态错误");
+        for(const Json &duration:Json::array({0,-1,true,29.0})) {
+            auto bad=graph(1,2);bad["states"][0]["duration_ms"]=duration;
+            rejects([&]{SignalSource source(u8,bad);});
+        }
+        for(const auto &field:{"duration_ms","next","value","name"}) {
+            auto bad=graph(1,2);bad["states"][0].erase(field);
+            rejects([&]{SignalSource source(u8,bad);});
+        }
+        auto bad=graph(1,256);rejects([&]{SignalSource source(u8,bad);});
+        bad=graph(1,2.0);rejects([&]{SignalSource source(u8,bad);});
+        bad=graph(false,1);rejects([&]{SignalSource source(Json{{"type","boolean"}},bad);});
+        bad=graph("valid",1);rejects([&]{SignalSource source(Json{{"type","string"}},bad);});
+        for(const auto &change:Json::array({
+            Json{{"name","idle"},{"value",3}},Json{{"name","unused"},{"value",3}},
+            Json{{"name","active"},{"value",3},{"duration_ms",2}},
+            Json{{"name","active"},{"value",3},{"script","exec"}}})) {
+            bad=graph(1,2);bad["states"].push_back(change);
+            rejects([&]{SignalSource source(u8,bad);});
+        }
+        bad=graph(1,2,UINT64_MAX);bad["states"][1]["duration_ms"]=1;bad["states"][1]["next"]="idle";
+        rejects([&]{SignalSource source(u8,bad);});
+        bad=graph(1,2);bad["initial_state"]="missing";rejects([&]{SignalSource source(u8,bad);});
+        bad=graph(1,2);bad["states"][0]["next"]="missing";rejects([&]{SignalSource source(u8,bad);});
+        SignalSource defaults(u8,Json{{"initial",3},{"states",Json::array()},{"initial_state",nullptr}});
+        require(defaults.value(0,0)==3,"默认空图破坏旧契约");
+        rejects([&]{SignalSource source(u8,Json{{"states",Json::array({Json{{"name","x"},{"value",1}}})}});});
         std::cout<<"原生激励整数边界、序列快照与每任务随机种子验证通过"<<std::endl;
         return 0;
     } catch(const std::exception &error) {log_error("signal_source.test",error);return 1;}

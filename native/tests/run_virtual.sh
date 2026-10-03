@@ -94,3 +94,5 @@ python -m pytest native/tests/test_signal_sources_virtual.py native/tests/test_e
   --junitxml=build/virtual-evidence/signal-sources-junit.xml
 ip netns exec soa-server python -m pytest native/tests/test_csv_recovery_virtual.py -v \
   --junitxml=build/virtual-evidence/csv-recovery-junit.xml
+ip netns exec soa-server python -m pytest native/tests/test_state_recovery_virtual.py -v \
+  --junitxml=build/virtual-evidence/state-recovery-junit.xml

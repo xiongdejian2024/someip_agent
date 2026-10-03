@@ -23,8 +23,9 @@ partners = source_partners
     ],
     indirect=["partners"],
 )
+@pytest.mark.parametrize("source_kind", ["constant", "state_machine"])
 def test_source_exact_value_actual_veth_receive_and_stop(
-    partners, data_type, value, golden
+    partners, data_type, value, golden, source_kind
 ):
     server, client, transport = partners
     received, arrived = [], threading.Event()
@@ -46,11 +47,19 @@ def test_source_exact_value_actual_veth_receive_and_stop(
                 "function": "UpdateSampleEvent",
                 "interval_ms": 10,
                 "generator": {
-                    "kind": "constant",
+                    "kind": source_kind,
                     "signal_name": "value",
                     "data_type": data_type,
                     "initial": value,
                     "seed": 123,
+                    **(
+                        {
+                            "initial_state": "hold",
+                            "states": [{"name": "hold", "value": value}],
+                        }
+                        if source_kind == "state_machine"
+                        else {}
+                    ),
                 },
             },
         )

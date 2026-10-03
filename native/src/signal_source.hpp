@@ -1,7 +1,9 @@
 #pragma once
 #include "codec.hpp"
+#include "time_state_machine.hpp"
 #include <algorithm>
 #include <random>
+#include <optional>
 
 namespace agent {
 // 业务激励源，不实现协议或定时器；编码复用 Codec，随机复用标准库。
@@ -10,7 +12,8 @@ class SignalSource {
     Json schema_, initial_, minimum_, maximum_, step_value_;
     std::vector<Json> sequence_;
     std::vector<std::pair<uint64_t,Json>> timeline_;
-    std::string type_, kind_;
+    std::optional<TimeStateMachine> state_machine_;
+    std::string type_, kind_, active_state_;
     double period_;
     uint64_t step_at_ms_ = 0;
     std::mt19937_64 random_;
@@ -34,10 +37,10 @@ class SignalSource {
         return value.get<uint64_t>();
     }
     Json normalize(Json value,bool wave=false) const {
-        if(kind_=="csv" && ((integer_type() && !value.is_number_integer()) ||
+        if((kind_=="csv" || kind_=="state_machine") && ((integer_type() && !value.is_number_integer()) ||
             (type_=="boolean" && !value.is_boolean()) ||
             ((type_=="string" || type_=="bytes") && !value.is_string())))
-            throw std::runtime_error("CSV 单元格 JSON 类型与冻结标量类型不一致");
+            throw std::runtime_error("CSV／状态值 JSON 类型与冻结标量类型不一致");
         if(integer_type()) {
             if(value.is_number_float()) {
                 auto number=finite_number(value);
@@ -66,12 +69,16 @@ public:
         type_(schema_.value("type","")),kind_(config.value("kind","constant")),
         period_(finite_number(config.value("period_seconds",Json(5)))),
         random_(seed(config.value("seed",Json(0)))) {
-        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp" && kind_!="step" && kind_!="csv")
+        if(kind_!="constant" && kind_!="sequence" && kind_!="random" && kind_!="sine" && kind_!="ramp" && kind_!="step" && kind_!="csv" && kind_!="state_machine")
             throw std::runtime_error("未知激励源类型");
         if(type_=="struct" || type_=="array" || type_.empty())
             throw std::runtime_error("单个激励源必须绑定明确标量类型");
         if(period_<=0)throw std::runtime_error("激励周期必须为正数");
-        if(kind_=="csv") {
+        if(kind_=="state_machine") {
+            if(config.contains("timeline"))throw std::runtime_error("状态机不能包含 CSV 时间轴");
+            state_machine_.emplace(config,[this](Json value){return normalize(std::move(value));});
+            initial_=state_machine_->value(0);
+        } else if(kind_=="csv") {
             const auto &points=config.at("timeline");
             if(!points.is_array() || points.empty() || points.size()>8192)
                 throw std::runtime_error("CSV 时间轴必须有 1 至 8192 行");
@@ -88,6 +95,9 @@ public:
             if(config.contains("timeline"))throw std::runtime_error("非 CSV 源不能包含时间轴");
             initial_=normalize(config.value("initial",Json(0)));
         }
+        if(kind_!="state_machine" && ((config.contains("states") && config.at("states")!=Json::array()) ||
+            (config.contains("initial_state") && !config.at("initial_state").is_null())))
+            throw std::runtime_error("非状态机源不能包含状态图");
         if(kind_=="step") {
             if(!config.contains("step_at_ms") || !config.contains("step_value") || config.at("step_value").is_null())
                 throw std::runtime_error("阶跃源必须提供 step_at_ms 与 step_value");
@@ -133,8 +143,11 @@ public:
         }
     }
     const Json &initial() const { return initial_; }
-    bool needs_millisecond_clock() const { return kind_=="step" || kind_=="csv"; }
+    std::string state_ms(uint64_t elapsed) const {return state_machine_?state_machine_->state(elapsed):"";}
+    const std::string &active_state() const {return active_state_;}
+    bool needs_millisecond_clock() const { return kind_=="step" || kind_=="csv" || kind_=="state_machine"; }
     Json value_ms(uint64_t elapsed_ms,uint64_t index) {
+        if(state_machine_) {active_state_=state_machine_->state(elapsed_ms);return state_machine_->value(elapsed_ms);}
         if(kind_=="step")return elapsed_ms>=step_at_ms_?step_value_:initial_;
         if(kind_=="csv") {
             auto next=std::upper_bound(timeline_.begin(),timeline_.end(),elapsed_ms,

@@ -123,6 +123,7 @@ export interface NativeEventCycle {
   running: boolean
   emitted_count: number
   source_count: number
+  active_states?: Record<string, string>
   logical_seconds: number
   observation: 'native_schedule'
   wire_verified: false
@@ -131,7 +132,7 @@ export interface NativeEventCycle {
 export interface NativeEventSource {
   path: string
   generator: {
-    kind?: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step'
+    kind?: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step' | 'state_machine'
     initial?: number | bigint | boolean | string
     minimum?: number | bigint
     maximum?: number | bigint
@@ -140,7 +141,16 @@ export interface NativeEventSource {
     seed?: number | bigint
     step_at_ms?: number | bigint | null
     step_value?: number | bigint | boolean | string | null
+    initial_state?: string | null
+    states?: TimedSignalState[]
   }
+}
+
+export interface TimedSignalState {
+  name: string
+  value: number | bigint | boolean | string
+  duration_ms?: number | bigint | null
+  next?: string | null
 }
 
 export type NativeCycleCommand = NativeServiceCommand & { interval_ms: number; sources?: NativeEventSource[]; csv_text?: string | null }
@@ -292,7 +302,7 @@ export interface SimulationStartRequest {
   destination_port: number
   generator: {
     signal_name: string
-    kind: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step'
+    kind: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence' | 'step' | 'state_machine'
     data_type: 'boolean' | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'int8' | 'int16' | 'int32' | 'int64' | 'float32' | 'float64'
     minimum: number | bigint
     maximum: number | bigint
@@ -302,6 +312,8 @@ export interface SimulationStartRequest {
     seed?: number | bigint
     step_at_ms?: number | bigint | null
     step_value?: number | bigint | null
+    initial_state?: string | null
+    states?: TimedSignalState[]
   }
 }
 

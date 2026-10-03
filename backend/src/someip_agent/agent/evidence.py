@@ -23,6 +23,7 @@ from someip_agent.domain.models import (
     SignalGeneratorConfig,
     SimulationConfig,
 )
+from someip_agent.domain.timed_states import TimedSignalState
 from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.protocol.sd_metadata import read_sd
 from someip_agent.runtime.monitor import MonitorStore
@@ -82,7 +83,9 @@ class SimulationPlan(Arguments):
     service_id: int = Field(ge=0, le=0xFFFF)
     method_id: int = Field(ge=0, le=0xFFFF)
     signal_name: str | None = Field(default=None, max_length=256)
-    kind: Literal["constant", "sine", "ramp", "step", "random", "sequence"] = "constant"
+    kind: Literal["constant", "sine", "ramp", "step", "random", "sequence", "state_machine"] = (
+        "constant"
+    )
     initial: float | None = None
     minimum: float | None = None
     maximum: float | None = None
@@ -92,6 +95,8 @@ class SimulationPlan(Arguments):
     step_value: StrictInt | StrictFloat | None = None
     sequence: list[StrictInt | StrictFloat] = Field(default_factory=list, max_length=1000)
     seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
+    initial_state: str | None = Field(default=None, max_length=64)
+    states: list[TimedSignalState] = Field(default_factory=list, max_length=128)
 
 
 def service_brief(service: dict[str, Any]) -> dict[str, Any]:
@@ -679,6 +684,10 @@ class EvidenceTools:
         numbers = [generator.initial, generator.minimum, generator.maximum, *generator.sequence]
         if generator.step_value is not None:
             numbers.append(generator.step_value)
+        for state in generator.states:
+            if isinstance(state.value, str):
+                raise ValueError("智能体数值状态机不接受文本状态值")
+            numbers.append(state.value)
         if len(generator.sequence) > 1000 or not math.isfinite(generator.period_seconds):
             raise ValueError("仿真序列或周期超出安全边界")
         if any(not math.isfinite(v) or v < low or v > high for v in numbers):
@@ -716,6 +725,8 @@ class EvidenceTools:
                 step_value=args.step_value,
                 sequence=args.sequence,
                 seed=args.seed,
+                initial_state=args.initial_state,
+                states=args.states,
             ),
         )
         self.validate_simulation(config)

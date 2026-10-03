@@ -664,6 +664,7 @@ class S2sBaseClass(WTIAssertions):
                 "running": running,
                 "emitted_count": count,
                 "source_count": native.get("event_source_count", 0),
+                "active_states": native.get("event_active_states", {}),
                 "logical_seconds": native.get("event_logical_seconds", 0),
             }
 

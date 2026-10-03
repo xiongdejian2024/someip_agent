@@ -12,9 +12,12 @@ from pydantic import (
     JsonValue,
     StrictFloat,
     StrictInt,
+    StrictStr,
     field_validator,
     model_validator,
 )
+
+from .timed_states import TimedSignalState, validate_timed_states
 
 
 class MessageType(IntEnum):
@@ -202,6 +205,7 @@ class GeneratorKind(str, Enum):
     RANDOM = "random"
     SEQUENCE = "sequence"
     STEP = "step"
+    STATE_MACHINE = "state_machine"
 
 
 class SignalGeneratorConfig(BaseModel):
@@ -217,9 +221,12 @@ class SignalGeneratorConfig(BaseModel):
     seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
     step_at_ms: StrictInt | None = Field(default=None, ge=0, le=18446744073709551615)
     step_value: StrictInt | StrictFloat | None = None
+    initial_state: StrictStr | None = Field(default=None, max_length=64)
+    states: list[TimedSignalState] = Field(default_factory=list, max_length=128)
 
     @model_validator(mode="after")
     def step_shape(self) -> SignalGeneratorConfig:
+        validate_timed_states(self.kind, self.initial_state, self.states)
         if self.kind == GeneratorKind.STEP:
             if self.step_at_ms is None or self.step_value is None:
                 raise ValueError("阶跃源必须提供 step_at_ms 与 step_value")

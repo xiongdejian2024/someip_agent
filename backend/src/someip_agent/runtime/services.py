@@ -435,6 +435,7 @@ class ServiceSessionManager:
                             "application_name": trace.get("application_name"),
                             "application_id": trace.get("application_id"),
                             "signal_values_truncated": trace.get("signal_values_truncated", False),
+                            "active_states": trace.get("active_states", {}),
                         },
                     )
                 )

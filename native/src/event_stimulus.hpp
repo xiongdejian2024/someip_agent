@@ -8,6 +8,7 @@ class EventStimulus {
     struct Binding { Json::json_pointer path; SignalSource source; };
     Json schema_, arguments_;
     std::vector<Binding> bindings_;
+    Json active_states_=Json::object();
 
     static Json schema_at(const Json &root,const Json::json_pointer &path) {
         std::vector<std::string> tokens;
@@ -53,7 +54,7 @@ public:
             auto schema=schema_at(schema_,path);
             const auto &config=binding.at("generator");
             if(!config.is_object())throw std::runtime_error("激励源配置必须为字典");
-            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed","step_at_ms","step_value","timeline"};
+            static const std::set<std::string> fields={"kind","initial","minimum","maximum","period_seconds","sequence","seed","step_at_ms","step_value","timeline","states","initial_state"};
             for(const auto &[key,value]:config.items())if(!fields.count(key))
                 throw std::runtime_error("完整事件激励源包含未知字段");
             SignalSource source(schema,config);
@@ -68,9 +69,14 @@ public:
         return Codec::encode(schema_,arguments_);
     }
     Bytes sample_ms(uint64_t elapsed_ms,uint64_t index) {
-        for(auto &binding:bindings_)arguments_.at(binding.path)=binding.source.value_ms(elapsed_ms,index);
+        for(auto &binding:bindings_) {
+            arguments_.at(binding.path)=binding.source.value_ms(elapsed_ms,index);
+            auto state=binding.source.state_ms(elapsed_ms);
+            if(!state.empty())active_states_[binding.path.to_string()]=state;
+        }
         return Codec::encode(schema_,arguments_);
     }
+    const Json &active_states() const {return active_states_;}
     size_t source_count() const { return bindings_.size(); }
     const Json &arguments() const { return arguments_; }
 };

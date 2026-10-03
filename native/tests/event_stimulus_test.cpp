@@ -58,6 +58,20 @@ int main() {
         EventStimulus csv_scalar(Json{{"type","uint64"}},0,Json::array({
             Json{{"path",""},{"generator",csv_config(UINT64_MAX,0ULL)}}}));
         require(hex(csv_scalar.sample_ms(29,1))=="0000000000000000","CSV 根标量绑定失败");
+        auto graph=[](Json first,Json second) {return Json{{"kind","state_machine"},{"initial_state","idle"},
+            {"states",Json::array({Json{{"name","idle"},{"value",first},{"duration_ms",29},{"next","active"}},
+                Json{{"name","active"},{"value",second}}})}};};
+        EventStimulus state_event(schema,arguments,Json::array({
+            Json{{"path","/counter"},{"generator",graph(UINT64_MAX,UINT64_MAX-1)}},
+            Json{{"path","/samples/1"},{"generator",graph(2,3)}},
+            Json{{"path","/nested/a~1b~0"},{"generator",csv_config(0.1,42.5)}}
+        }));
+        require(state_event.active_states().empty(),"预检不得记录实际状态");
+        require(hex(state_event.sample_ms(28,2))=="ffffffffffffffff123400023dcccccd"
+            && state_event.active_states()==Json{{"/counter","idle"},{"/samples/1","idle"}}
+            && hex(state_event.sample_ms(29,3))=="feffffffffffffff12340003422a0000"
+            && state_event.active_states()==Json{{"/counter","active"},{"/samples/1","active"}},
+            "状态图和 CSV 未共享时钟、字节序或状态观测错误");
         Json random_config={{"kind","random"},{"minimum",0ULL},{"maximum",UINT64_MAX},{"seed",19}};
         SignalSource reference(Json{{"type","uint64"}},random_config);
         EventStimulus random_event(Json{{"type","uint64"}},0,Json::array({Json{{"path",""},{"generator",random_config}}}));

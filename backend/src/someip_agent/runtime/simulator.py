@@ -148,6 +148,7 @@ class SimulationManager:
                             "runtime": "vsomeip",
                             "native_monotonic_ns": message["native_monotonic_ns"],
                             "observation": message["observation"],
+                            "active_states": message.get("active_states", {}),
                             "wire_verified": False,
                             "note": "协议栈 API 观测，不代替线上抓包；内部模式不发送 SD 组播",
                         },

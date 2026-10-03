@@ -253,3 +253,80 @@ def assert_csv_receive(server, client, value, order, bundle):
 @pytest.mark.parametrize("order", ["big", "little"])
 def test_full_arxml_csv_actual_udp_tcp_and_cleanup(transport, order):
     run_composite(transport, order, 2, 2, stimulus_check=assert_csv_receive)
+
+
+def assert_state_receive(server, client, value, order, bundle):
+    assert bundle.catalog["EnvelopeService"]["events"]["UpdateEnvelopeChangedEvent"][
+        "eventgroups"
+    ] == [7]
+    received, arrived = [], threading.Event()
+
+    def receive(_key, message):
+        if (
+            message.get("action") == "event"
+            and message.get("function") == "UpdateEnvelopeChangedEvent"
+        ):
+            actual = json.loads(message["args"])
+            if actual["tag"] in (9, 10):
+                received.append(message)
+                if len(received) >= 8:
+                    arrived.set()
+
+    def source(first, second):
+        return {
+            "kind": "state_machine",
+            "initial_state": "idle",
+            "states": [
+                {"name": "idle", "value": first, "duration_ms": 29, "next": "active"},
+                {"name": "active", "value": second},
+            ],
+        }
+
+    client.register_callback("EnvelopeService_client", receive)
+    try:
+        server.send_event_notify_thread_start(
+            "EnvelopeService_server",
+            "EnvelopeChanged",
+            value,
+            0.02,
+            sources=[
+                {"path": "/tag", "generator": source(9, 10)},
+                {"path": "/nested/temperature", "generator": source(-3, 4)},
+            ],
+        )
+        assert arrived.wait(3), "真实 UDP/TCP 未交付八个时间状态机事件"
+        active = server.event_cycle_status("EnvelopeService_server")
+        assert active["active_states"] == {
+            "/tag": "active",
+            "/nested/temperature": "active",
+        }
+        for index, message in enumerate(received[:8]):
+            phase = int(index * 20 >= 29)
+            actual = json.loads(message["args"])
+            assert actual["tag"] == [9, 10][phase]
+            assert actual["nested"]["temperature"] == [-3, 4][phase]
+            assert (
+                actual["samples"] == value["samples"]
+                and actual["matrix"] == value["matrix"]
+            )
+            assert message["payload_hex"] == STEP_GOLDENS[order][phase]
+        server.send_event_notify_thread_stop("EnvelopeService_server")
+        stopped = server.event_cycle_status("EnvelopeService_server")
+        assert (
+            not stopped["running"]
+            and stopped["source_count"] == 0
+            and stopped["active_states"] == {}
+        )
+        time.sleep(0.06)
+        assert (
+            server.event_cycle_status("EnvelopeService_server")["emitted_count"]
+            == stopped["emitted_count"]
+        )
+    finally:
+        client.unregister_callback("EnvelopeService_client", receive)
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+@pytest.mark.parametrize("order", ["big", "little"])
+def test_full_arxml_time_state_actual_udp_tcp_and_cleanup(transport, order):
+    run_composite(transport, order, 2, 2, stimulus_check=assert_state_receive)
