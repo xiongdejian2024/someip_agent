@@ -34,7 +34,7 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { state: connectionState, health } = useBackendStatus()
-  const { messages, samples, streamState, source, clear } = useMonitorStream(true)
+  const { messages, samples, streamState, source, clear, streamCounters, bufferCounters } = useMonitorStream(true)
   const expectedServiceCount = health?.service_count
   const setScope = useCallback((next: AgentWorkspaceContext) => {
     setAgentScope((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
@@ -148,7 +148,7 @@ export default function App() {
     switch (page) {
       case 'services': return <ServicesPage services={services} loading={servicesLoading} source={serviceSource} onServicesChange={(items) => { setServices(items); setServicesLoading(false); setServiceSource('live'); setModelError(null) }} />
       case 'simulation': return <SimulationPage services={services} samples={samples} draft={simulationDraft} onDismissDraft={() => setSimulationDraft(undefined)} loading={servicesLoading} />
-      case 'monitor': return <MonitorPage messages={messages} samples={samples} streamState={streamState} source={source} onClear={clear} />
+      case 'monitor': return <MonitorPage messages={messages} samples={samples} streamState={streamState} source={source} onClear={clear} streamCounters={streamCounters} bufferCounters={bufferCounters} />
       case 'pcap': return <PcapPage />
       case 'settings': return <SettingsPage currentVersion={health?.version} />
       case 'dashboard':

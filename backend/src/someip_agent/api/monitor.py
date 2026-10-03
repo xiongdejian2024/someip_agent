@@ -46,16 +46,26 @@ async def monitor_websocket(websocket: WebSocket) -> None:
     try:
         initial = await state.monitor.list(limit=500)
         await websocket.send_json(
-            {"type": "snapshot", "messages": [item.model_dump(mode="json") for item in initial]}
+            {
+                "type": "snapshot",
+                "messages": [item.model_dump(mode="json") for item in initial],
+                "stream_counters": await state.monitor.statistics(queue),
+            }
         )
         while True:
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=20)
                 await websocket.send_json(
-                    {"type": "message", "message": message.model_dump(mode="json")}
+                    {
+                        "type": "message",
+                        "message": message.model_dump(mode="json"),
+                        "stream_counters": await state.monitor.statistics(queue),
+                    }
                 )
             except asyncio.TimeoutError:
-                await websocket.send_json({"type": "heartbeat"})
+                await websocket.send_json(
+                    {"type": "heartbeat", "stream_counters": await state.monitor.statistics(queue)}
+                )
     except WebSocketDisconnect:
         pass
     finally:

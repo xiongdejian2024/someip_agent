@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon'
 import { StatusBadge } from '../components/StatusBadge'
 import { SignalScope } from '../components/SignalScope'
 import { protocolId, useAgentScope } from '../agent/workspace'
-import type { CaptureInterface, ConnectionState, MonitorMessage, NetworkListener, NetworkListenerConfig, WaveSample } from '../types'
+import type { CaptureInterface, ConnectionState, MonitorBufferCounters, MonitorMessage, MonitorStreamCounters, NetworkListener, NetworkListenerConfig, WaveSample } from '../types'
 import './MonitorPage.css'
 
 interface MonitorPageProps {
@@ -15,6 +15,8 @@ interface MonitorPageProps {
   streamState: ConnectionState
   source: 'live' | 'demo'
   onClear: () => Promise<void>
+  streamCounters?: MonitorStreamCounters
+  bufferCounters?: MonitorBufferCounters
 }
 
 function formatTime(value: string) {
@@ -22,7 +24,7 @@ function formatTime(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })
 }
 
-export function MonitorPage({ messages, samples, streamState, source, onClear }: MonitorPageProps) {
+export function MonitorPage({ messages, samples, streamState, source, onClear, streamCounters, bufferCounters }: MonitorPageProps) {
   const [paused, setPaused] = useState(false)
   const [snapshot, setSnapshot] = useState<MonitorMessage[]>([])
   const [waveSnapshot, setWaveSnapshot] = useState<WaveSample[]>([])
@@ -213,6 +215,12 @@ export function MonitorPage({ messages, samples, streamState, source, onClear }:
           <button className="button ghost" disabled={clearBusy} onClick={() => void clearDisplay()}>{clearBusy ? <span className="spinner" /> : <Icon name="x" />}{clearBusy ? '清空中…' : '清空'}</button>
           <button className="button ghost" onClick={exportCsv} disabled={!filtered.length}><Icon name="download" />导出 CSV</button>
         </div>
+      </section>
+
+      <section className="panel" aria-label="分层监控计数">
+        <p>后端本进程累计 · 订阅队列丢弃 {streamCounters?.subscriber_discarded_total ?? '未知'}（当前连接 {streamCounters?.current_subscriber_discarded ?? '未知'}） · 历史缓冲淘汰 {streamCounters?.history_evicted_total ?? '未知'}</p>
+        <p>当前页面累计 · Trace 淘汰 {bufferCounters?.trace_evicted_total ?? '未知'} · 波形采样淘汰 {bufferCounters?.sample_evicted_total ?? '未知'}；清空显示不重置累计计数，后端重启使用新的计数周期。</p>
+        <p>抓包丢包按下方各监听器单独报告；无可用统计时为未知，不与应用缓冲淘汰相加，也不据此推断车辆网络丢包。</p>
       </section>
 
       {clearNotice && <div className="inline-notice error" role="alert"><Icon name="info" size={15} /><span>{clearNotice}</span><button aria-label="关闭清空失败提示" onClick={() => setClearNotice(null)}><Icon name="x" size={14} /></button></div>}

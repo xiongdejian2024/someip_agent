@@ -43,3 +43,13 @@
 整数明确拒绝，溢出/下溢明确失败；波形只接收有限 number/boolean，不将 bigint 静默转为 float。
 新增 `node scripts/check_json_precision.mjs` 验证 int64/uint64、嵌套值、HTTP 往返与 SSE。
 前端 typecheck/build、既有 agent_stream 和 monitor_buffer 回归通过；整轮原生/安装包验收仍待完成。
+
+### 小块 2：监控分层丢弃与淘汰计数
+
+后端分别统计发布、历史淘汰、手动清空、订阅队列丢弃；每个订阅者独立计数，退订释放登记，
+重连从新的连接计数开始，但保留本进程累计。后端 UUID 标识计数周期，重启不混合旧周期。
+REST summary 与实际 WebSocket snapshot/message/heartbeat 携带相同统计契约。
+前端继续 100 ms 批量刷新，独立显示本页面 Trace/采样淘汰与后端计数；明确与 libpcap
+内核/接口丢包区分，未知不显示为零，手动清空不伪装成网络丢包。
+新增 3 项后端测试覆盖多订阅者、满载、清空、重连、非法容量和真实 TestClient WebSocket；
+前端 20,000 帧缓存回归、分层指标 SSR、typecheck/build 通过。SSR 不等同于真实浏览器验收。

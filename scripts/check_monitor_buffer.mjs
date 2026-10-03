@@ -18,8 +18,10 @@ const { BoundedBuffer, MonitorBuffer, TRACE_CAPACITY, SAMPLE_CAPACITY, messageSa
 const ring = new BoundedBuffer(3)
 for (let index = 0; index < 10; index++) ring.push(index)
 assert.deepEqual(ring.values(), [7, 8, 9])
+assert.equal(ring.evictedTotal, 7)
 ring.clear()
 assert.deepEqual(ring.values(), [])
+assert.equal(ring.evictedTotal, 7, '手动清空与历史淘汰必须分开统计')
 
 const makeMessage = (index) => ({
   id: String(index), timestamp: new Date(1_700_000_000_000 + index).toISOString(), direction: 'RX',
@@ -36,11 +38,13 @@ assert.equal(view.messages[0].id, '19999')
 assert.equal(view.messages.at(-1).id, String(20_000 - TRACE_CAPACITY))
 assert.ok(view.samples.every((sample) => Object.keys(sample.values).length === 1), '不得向其他信号伪造采样')
 assert.equal(buffer.dirty, false)
+assert.deepEqual(buffer.statistics(), { trace_evicted_total: 20_000 - TRACE_CAPACITY, sample_evicted_total: 20_000 - SAMPLE_CAPACITY })
 
 buffer.replace([makeMessage(2), makeMessage(1)])
 assert.deepEqual(buffer.snapshot().samples.map((sample) => sample.time), [1_700_000_000_001, 1_700_000_000_002])
 buffer.replace([])
 assert.deepEqual(buffer.snapshot(), { messages: [], samples: [] })
+assert.equal(buffer.statistics().trace_evicted_total, 20_000 - TRACE_CAPACITY, '重连快照替换不重置页面累计淘汰')
 assert.equal(messageSample({ ...makeMessage(0), timestamp: 'invalid' }), null)
 assert.deepEqual(messageSample({ ...makeMessage(0), signalValues: { 布尔: true, 文本: '跳过', 无效: NaN, 结构: { x: 10 }, 数组: [1, 2], 空: null } }).values,
   { '0x1234/0x8001/布尔': 1 })

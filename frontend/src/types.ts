@@ -10,6 +10,23 @@ export type PageId =
 
 export type ConnectionState = 'online' | 'offline' | 'connecting'
 
+export interface MonitorStreamCounters {
+  backend_epoch: string
+  counter_scope: 'backend_process_lifetime'
+  published_total: number
+  retained_messages: number
+  history_evicted_total: number
+  cleared_total: number
+  subscriber_discarded_total: number
+  current_subscriber_discarded: number | null
+  active_subscribers: number
+}
+
+export interface MonitorBufferCounters {
+  trace_evicted_total: number
+  sample_evicted_total: number
+}
+
 export interface HealthResponse {
   status: string
   version?: string

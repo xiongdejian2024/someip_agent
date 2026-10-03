@@ -9,6 +9,7 @@ export class BoundedBuffer<T> {
   private readonly items: Array<T | undefined>
   private cursor = 0
   private count = 0
+  evictedTotal = 0
 
   constructor(readonly capacity: number) {
     if (!Number.isInteger(capacity) || capacity < 1) throw new Error('缓存容量必须是正整数')
@@ -16,6 +17,7 @@ export class BoundedBuffer<T> {
   }
 
   push(value: T) {
+    if (this.count === this.capacity) this.evictedTotal += 1
     this.items[this.cursor] = value
     this.cursor = (this.cursor + 1) % this.capacity
     this.count = Math.min(this.count + 1, this.capacity)
@@ -71,5 +73,9 @@ export class MonitorBuffer {
   snapshot() {
     this.dirty = false
     return { messages: this.trace.values().reverse(), samples: this.signals.values().sort((a, b) => a.time - b.time) }
+  }
+
+  statistics() {
+    return { trace_evicted_total: this.trace.evictedTotal, sample_evicted_total: this.signals.evictedTotal }
   }
 }

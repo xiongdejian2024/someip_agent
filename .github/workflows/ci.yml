@@ -182,6 +182,11 @@ jobs:
       - name: 业务整数无损传输验收
         run: node scripts/check_json_precision.mjs
 
+      - name: 监控缓冲与分层淘汰计数验收
+        run: |
+          node scripts/check_monitor_buffer.mjs
+          node scripts/check_monitor_counters_render.mjs
+
       - name: 设置页发行目标与缺省升级门禁渲染验收
         run: node scripts/check_settings_render.mjs
 

@@ -4,20 +4,21 @@ import { parseJson } from '../api/json'
 import { normalizeMonitorMessage, type RawMonitorMessage } from '../api/adapters'
 import { logError, logInfo } from '../api/logger'
 import { DISPLAY_INTERVAL_MS, MonitorBuffer, SAMPLE_CAPACITY, TRACE_CAPACITY } from '../data/monitorBuffer'
-import type { ConnectionState, MonitorMessage, WaveSample } from '../types'
+import type { ConnectionState, MonitorBufferCounters, MonitorMessage, MonitorStreamCounters, WaveSample } from '../types'
 
-type MonitorSnapshot = { messages: MonitorMessage[]; samples: WaveSample[] }
+type MonitorSnapshot = { messages: MonitorMessage[]; samples: WaveSample[]; streamCounters?: MonitorStreamCounters; bufferCounters?: MonitorBufferCounters }
 
 export function useMonitorStream(enabled = true) {
   const [view, setView] = useState<MonitorSnapshot>({ messages: [], samples: [] })
   const [streamState, setStreamState] = useState<ConnectionState>('connecting')
   const bufferRef = useRef(new MonitorBuffer())
+  const countersRef = useRef<MonitorStreamCounters>()
 
   const clear = useCallback(async () => {
     try {
       await api.clearMessages()
       bufferRef.current.clear()
-      setView(bufferRef.current.snapshot())
+      setView({ ...bufferRef.current.snapshot(), streamCounters: countersRef.current, bufferCounters: bufferRef.current.statistics() })
       logInfo('监控缓冲区已清空')
     } catch (error) {
       logError('清空后端监控缓冲区失败，保留本地数据', error)
@@ -33,7 +34,7 @@ export function useMonitorStream(enabled = true) {
     let retry = 0
 
     const publish = () => {
-      if (active && bufferRef.current.dirty) setView(bufferRef.current.snapshot())
+      if (active && bufferRef.current.dirty) setView({ ...bufferRef.current.snapshot(), streamCounters: countersRef.current, bufferCounters: bufferRef.current.statistics() })
     }
     const displayTimer = window.setInterval(publish, DISPLAY_INTERVAL_MS)
     const connect = () => {
@@ -57,7 +58,12 @@ export function useMonitorStream(enabled = true) {
               type?: 'snapshot' | 'message' | 'heartbeat'
               messages?: RawMonitorMessage[]
               message?: RawMonitorMessage
+              stream_counters?: MonitorStreamCounters
             } | RawMonitorMessage
+            if ('stream_counters' in payload && payload.stream_counters) {
+              countersRef.current = payload.stream_counters
+              bufferRef.current.dirty = true
+            }
             if ('type' in payload && payload.type === 'snapshot' && Array.isArray(payload.messages)) {
               bufferRef.current.replace(payload.messages.map(normalizeMonitorMessage))
               publish()
