@@ -82,7 +82,7 @@ class SimulationPlan(Arguments):
     service_id: int = Field(ge=0, le=0xFFFF)
     method_id: int = Field(ge=0, le=0xFFFF)
     signal_name: str | None = Field(default=None, max_length=256)
-    kind: Literal["constant", "sine", "ramp", "step"] = "constant"
+    kind: Literal["constant", "sine", "ramp", "step", "random", "sequence"] = "constant"
     initial: float | None = None
     minimum: float | None = None
     maximum: float | None = None
@@ -90,6 +90,8 @@ class SimulationPlan(Arguments):
     period_seconds: float = Field(default=5, gt=0, le=86400)
     step_at_ms: StrictInt | None = Field(default=None, ge=0, le=18446744073709551615)
     step_value: StrictInt | StrictFloat | None = None
+    sequence: list[StrictInt | StrictFloat] = Field(default_factory=list, max_length=1000)
+    seed: StrictInt = Field(default=0, ge=0, le=18446744073709551615)
 
 
 def service_brief(service: dict[str, Any]) -> dict[str, Any]:
@@ -686,6 +688,10 @@ class EvidenceTools:
         service, signal = self.simulation_target(args.service_id, args.method_id)
         if args.signal_name is not None and args.signal_name != signal.name:
             raise ValueError("选中的信号不属于该 Event/Notifier")
+        if args.kind == "sequence" and not args.sequence:
+            raise ValueError("智能体序列草案必须至少提供一项")
+        if args.kind != "sequence" and args.sequence:
+            raise ValueError("非序列草案不能包含序列值")
         low, high = self.safe_range(signal)
         minimum = args.minimum if args.minimum is not None else max(low, min(0, high))
         maximum = args.maximum if args.maximum is not None else max(minimum, min(100, high))
@@ -708,6 +714,8 @@ class EvidenceTools:
                 period_seconds=args.period_seconds,
                 step_at_ms=args.step_at_ms,
                 step_value=args.step_value,
+                sequence=args.sequence,
+                seed=args.seed,
             ),
         )
         self.validate_simulation(config)

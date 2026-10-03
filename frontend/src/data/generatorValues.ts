@@ -62,3 +62,17 @@ export function validateGeneratorStep(dataType: GeneratorDataType, at: unknown, 
   const value = validateGeneratorValue(after, dataType)
   if (value < minimum || value > maximum) throw new Error('阶跃后值超出激励范围')
 }
+
+export function validateGeneratorSequence(value: unknown, dataType: GeneratorDataType, minimum: GeneratorNumber, maximum: GeneratorNumber): GeneratorNumber[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8192) throw new Error('序列须为包含 1–8192 项的 JSON 数组')
+  return value.map((item, index) => {
+    const exact = validateGeneratorValue(item, dataType)
+    if (exact < minimum || exact > maximum) throw new Error('序列第 ' + (index + 1) + ' 项超出激励范围')
+    return exact
+  })
+}
+
+export function parseGeneratorSequence(text: string, dataType: GeneratorDataType, minimum: GeneratorNumber, maximum: GeneratorNumber): GeneratorNumber[] {
+  if (text.length > 262144) throw new Error('序列文本不能超过 256 KiB 字符')
+  return validateGeneratorSequence(parseJson(text), dataType, minimum, maximum)
+}

@@ -9,6 +9,7 @@ const output = await build({
     import { createElement } from 'react'
     import { renderToStaticMarkup } from 'react-dom/server'
     import { GeneratorNumberInput } from './src/components/GeneratorNumberInput'
+    import { GeneratorSequenceInput } from './src/components/GeneratorSequenceInput'
     import { SimulationPage } from './src/pages/SimulationPage'
     export * from './src/data/generatorValues'
     export * from './src/api/json'
@@ -23,13 +24,17 @@ const output = await build({
         events:[{id:'0x8001',name:'Counter',signals:[{name:'Counter',dataType:'uint64',minimum:9007199254740993n,maximum:18446744073709551615n}]}]}],
       samples:[], onDismissDraft:()=>{}
     }))
+    export const sequenceInput = renderToStaticMarkup(createElement(GeneratorSequenceInput, {
+      value:[0,9007199254740993n,18446744073709551615n],dataType:'uint64',minimum:0,maximum:18446744073709551615n,
+      disabled:false,onChange:()=>{throw new Error('只读渲染不应改序列')},onValidityChange:()=>{}
+    }))
   `, resolveDir: fileURLToPath(new URL('../frontend/', import.meta.url)), loader: 'js' },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css':'empty' },
   define: { 'process.env.NODE_ENV': '"production"' },
 })
 const module = { exports: {} }
 new Function('require', 'module', 'exports', output.outputFiles[0].text)(require, module, module.exports)
-const { parseGeneratorValue, validateGeneratorValue, validateGeneratorRange, validateGeneratorStep, generatorMidpoint, generatorSliderSafe, parseJson, stringifyJson, api, input, page } = module.exports
+const { parseGeneratorValue, validateGeneratorValue, validateGeneratorRange, validateGeneratorStep, parseGeneratorSequence, validateGeneratorSequence, generatorMidpoint, generatorSliderSafe, parseJson, stringifyJson, api, input, page, sequenceInput } = module.exports
 for (const [literal, type, expected] of [
   ['9007199254740993', 'uint64', 9007199254740993n],
   ['18446744073709551615', 'uint64', 18446744073709551615n],
@@ -68,6 +73,19 @@ assert.doesNotMatch(input, /type="number"|type="range"/)
 assert.ok(page.includes('value="' + generatorMidpoint(9007199254740993n,18446744073709551615n,'uint64') + '"'))
 assert.match(page, /9007199254740993/)
 assert.match(page, /18446744073709551615/)
+assert.match(page, /value="random"/)
+assert.match(page, /value="sequence"/)
+assert.match(sequenceInput, /textarea/)
+assert.match(sequenceInput, /\[0,9007199254740993,18446744073709551615\]/)
+assert.deepEqual(parseGeneratorSequence('[0,9007199254740993,18446744073709551615]', 'uint64', 0, 18446744073709551615n), [0,9007199254740993n,18446744073709551615n])
+for (const text of ['[]','null','{}','[true]','["1"]','[-1]','[18446744073709551616]','[1.5]','[1e400]']) {
+  assert.throws(() => parseGeneratorSequence(text, 'uint64', 0, 18446744073709551615n))
+}
+assert.throws(() => validateGeneratorSequence(Array(8193).fill(0),'uint8',0,255), /8192/)
+assert.throws(() => parseGeneratorSequence(' '.repeat(262145),'uint8',0,255), /256/)
+assert.throws(() => parseGeneratorSequence('[101]','uint8',0,100), /第 1 项/)
+assert.throws(() => parseGeneratorSequence('[3.5e38]','float32',0,3.5e38), /安全范围|溢出/)
+assert.throws(() => validateGeneratorValue(true, 'uint64'))
 
 const originalFetch = globalThis.fetch
 globalThis.window = { setTimeout, clearTimeout }
@@ -93,6 +111,10 @@ try {
   assert.equal(stepSubmitted.generator.step_at_ms, 18446744073709551615n)
   assert.equal(stepSubmitted.generator.step_value, 18446744073709551615n)
   assert.deepEqual(parseJson(stringifyJson({simulations:[stepCommand]})).simulations[0], stepCommand)
+  const sequenceCommand = { ...command, generator: { ...generator, kind:'sequence',sequence:[0,9007199254740993n,18446744073709551615n] } }
+  await api.startSimulation(sequenceCommand)
+  assert.deepEqual(parseJson(submitted).generator.sequence, [0,9007199254740993n,18446744073709551615n])
+  assert.deepEqual(parseJson(stringifyJson({simulations:[sequenceCommand]})).simulations[0], sequenceCommand)
 } finally {
   globalThis.fetch = originalFetch
   delete globalThis.window

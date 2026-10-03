@@ -133,7 +133,8 @@ def test_api_save_export_restore_and_restart_without_execution(tmp_path, monkeyp
         assert restarted.get("/api/v1/network/listeners").json() == []
 
 
-def test_exact_integer_simulation_drafts_restart_without_execution(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["constant", "random", "sequence"])
+def test_exact_integer_simulation_drafts_restart_without_execution(tmp_path, monkeypatch, kind):
     monkeypatch.setattr("someip_agent.agent.service.keyring.get_password", lambda *_: None)
     settings = Settings(_env_file=None, data_dir=tmp_path)
     doc = document("精确整数工程").model_dump(mode="json")
@@ -142,12 +143,13 @@ def test_exact_integer_simulation_drafts_restart_without_execution(tmp_path, mon
             "service_id": 0x1234,
             "method_id": 0x8001,
             "generator": {
-                "kind": "constant",
+                "kind": kind,
                 "data_type": data_type,
                 "minimum": low,
                 "maximum": high,
                 "initial": initial,
                 "seed": 18446744073709551615,
+                "sequence": [initial, high, low] if kind == "sequence" else [],
             },
         }
         for data_type, low, high, initial in [
@@ -165,6 +167,18 @@ def test_exact_integer_simulation_drafts_restart_without_execution(tmp_path, mon
         assert exported[1]["generator"]["initial"] == -9223372036854775808
         assert all(type(item["generator"]["initial"]) is int for item in exported)
         assert all(item["generator"]["seed"] == 18446744073709551615 for item in exported)
+        assert all(item["generator"]["kind"] == kind for item in exported)
+        if kind == "sequence":
+            assert exported[0]["generator"]["sequence"] == [
+                9007199254740993,
+                18446744073709551615,
+                0,
+            ]
+            assert exported[1]["generator"]["sequence"] == [
+                -9223372036854775808,
+                9223372036854775807,
+                -9223372036854775808,
+            ]
     with TestClient(create_app(settings)) as restarted:
         restored = restarted.get("/api/v1/projects/current").json()["document"]["simulations"]
         assert restored == exported

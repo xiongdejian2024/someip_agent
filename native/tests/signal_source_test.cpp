@@ -46,6 +46,19 @@ int main() {
         require(std::abs(sine.value(1,0).get<double>()-10)<1e-9,"正弦峰值错误");
         SignalSource boolean(Json{{"type","boolean"}},Json{{"kind","constant"},{"initial",true}});
         require(boolean.value(0,0)==true,"布尔初值错误");
+        Json boolean_random_config={{"kind","random"},{"minimum",0},{"maximum",1},{"seed",42}};
+        SignalSource boolean_random(Json{{"type","boolean"}},boolean_random_config);
+        SignalSource boolean_repeat(Json{{"type","boolean"}},boolean_random_config);
+        bool seen_false=false,seen_true=false;
+        for(int i=0;i<64;++i) {
+            auto value=boolean_random.value(0,i);
+            require(value.is_boolean() && value==boolean_repeat.value(0,i),"布尔随机种子未复现");
+            seen_true=seen_true || value.get<bool>();seen_false=seen_false || !value.get<bool>();
+        }
+        require(seen_true && seen_false,"布尔随机未从两个离散值中采样");
+        SignalSource false_random(Json{{"type","boolean"}},Json{{"kind","random"},{"minimum",0},{"maximum",0}});
+        require(false_random.value(0,0)==false,"布尔随机定值范围错误");
+        rejects([&]{SignalSource source(Json{{"type","boolean"}},Json{{"kind","random"},{"minimum",0},{"maximum",2}});});
         SignalSource rounded(Json{{"type","float32"}},Json{{"kind","constant"},{"initial",0.1}});
         require(rounded.value(0,0)==Json(0.10000000149011612),"float32 激励观测未反映实际编码量化");
         require(hex(Codec::encode(Json{{"type","float32"}},rounded.value(0,0)))=="3dcccccd",

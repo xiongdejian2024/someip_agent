@@ -95,6 +95,69 @@ def test_source_exact_value_actual_veth_receive_and_stop(
 
 
 @pytest.mark.parametrize(
+    "partners",
+    [
+        {"transport": transport, "signal_type": "boolean"}
+        for transport in ("udp", "tcp")
+    ],
+    indirect=["partners"],
+)
+def test_boolean_random_actual_udp_tcp_is_discrete_and_stops(partners):
+    server, client, _transport = partners
+    received, arrived = [], threading.Event()
+
+    def receive(_key, message):
+        if (
+            message.get("action") == "event"
+            and message.get("function") == "UpdateSampleEvent"
+        ):
+            received.append(message)
+            if len(received) >= 32:
+                arrived.set()
+
+    client.register_callback("DoorService_client", receive)
+    try:
+        server.sim_operator.send_request(
+            "generator_start",
+            {
+                "member": "DoorService_server",
+                "function": "UpdateSampleEvent",
+                "interval_ms": 10,
+                "generator": {
+                    "kind": "random",
+                    "data_type": "boolean",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "seed": 42,
+                },
+            },
+        )
+        assert arrived.wait(3), "布尔随机消费者未收到足够线上样本"
+        values = [json.loads(message["args"])["value"] for message in received[:32]]
+        assert set(values) == {False, True} and all(
+            type(value) is bool for value in values
+        )
+        assert [message["payload_hex"] for message in received[:32]] == [
+            "01" if value else "00" for value in values
+        ]
+        server.sim_operator.send_request(
+            "generator_stop", {"member": "DoorService_server"}
+        )
+        view = server.sim_operator.send_request("running_service")["DoorService_server"]
+        stopped_count = view["emitted_count"]
+        assert stopped_count >= 32
+        threading.Event().wait(0.05)
+        assert (
+            server.sim_operator.send_request("running_service")["DoorService_server"][
+                "emitted_count"
+            ]
+            == stopped_count
+        )
+    finally:
+        client.unregister_callback("DoorService_client", receive)
+
+
+@pytest.mark.parametrize(
     "partners,before,after,goldens",
     [
         ({"transport": transport, "signal_type": data_type}, before, after, goldens)

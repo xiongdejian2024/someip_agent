@@ -94,6 +94,9 @@ public:
                 auto lo=finite_number(low),hi=finite_number(high);
                 if(hi<lo || (kind_=="random" && !std::isfinite(hi-lo)))
                     throw std::runtime_error("随机范围倒置或浮点跨度溢出");
+                if(type_=="boolean" && kind_=="random" &&
+                    ((lo!=0 && lo!=1) || (hi!=0 && hi!=1)))
+                    throw std::runtime_error("布尔随机范围必须为 0 或 1");
                 normalize(low);normalize(high);
                 minimum_=low;maximum_=high;
             }
@@ -119,6 +122,8 @@ public:
         if(kind_=="constant" || (kind_=="sequence" && sequence_.empty()))return initial_;
         if(kind_=="sequence")return sequence_[index%sequence_.size()];
         if(kind_=="random") {
+            if(type_=="boolean")return Json(std::uniform_int_distribution<int>(
+                minimum_.get<int>(),maximum_.get<int>())(random_)!=0);
             if(integer_type()) {
                 if(unsigned_type())return std::uniform_int_distribution<uint64_t>(
                     minimum_.get<uint64_t>(),maximum_.get<uint64_t>())(random_);

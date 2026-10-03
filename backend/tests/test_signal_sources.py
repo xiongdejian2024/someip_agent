@@ -215,6 +215,22 @@ async def test_native_random_restarts_per_task_seed(tmp_path, native_runtime):
 
 
 @pytest.mark.asyncio
+async def test_native_boolean_random_is_discrete_reproducible_and_typed(tmp_path, native_runtime):
+    config = SignalGeneratorConfig(
+        data_type="boolean", kind="random", minimum=0, maximum=1, seed=42
+    )
+    first = await samples(tmp_path, native_runtime, config, count=32)
+    second = await samples(tmp_path, native_runtime, config, count=32)
+    values = [message.signal_values["value"] for message in first]
+    assert set(values) == {False, True}
+    assert all(type(value) is bool for value in values)
+    assert values == [message.signal_values["value"] for message in second]
+    assert [message.payload_hex for message in first] == [
+        "01" if value else "00" for value in values
+    ]
+
+
+@pytest.mark.asyncio
 async def test_native_invalid_replacement_keeps_existing_source(tmp_path, native_runtime):
     monitor = MonitorStore()
     manager = SimulationManager(

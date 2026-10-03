@@ -161,6 +161,59 @@ async def test_invalid_step_plan_does_not_start_simulation(tmp_path, overrides) 
     assert subject._simulator.list() == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,sequence", [("random", []), ("sequence", [0, 50, 100])])
+async def test_prepare_random_sequence_keeps_seed_without_running(tmp_path, kind, sequence) -> None:
+    subject = agent(tmp_path)
+    result = await invoke(
+        subject,
+        "prepare_simulation",
+        service_id=0x1234,
+        method_id=0x8001,
+        kind=kind,
+        sequence=sequence,
+        seed=18446744073709551615,
+    )
+    assert result["status"] == "prepared"
+    generator = result["simulation_config"]["generator"]
+    assert generator["sequence"] == sequence
+    assert generator["seed"] == 18446744073709551615
+    assert generator["kind"] == kind
+    assert subject._simulator.list() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"sequence": []},
+        {"sequence": [101]},
+        {"sequence": [True]},
+        {"sequence": ["1"]},
+        {"sequence": [1] * 1001},
+        {"seed": True},
+        {"seed": -1},
+        {"seed": 18446744073709551616},
+        {"kind": "constant"},
+    ],
+)
+async def test_invalid_sequence_or_seed_plan_does_not_run(tmp_path, overrides) -> None:
+    subject = agent(tmp_path)
+    result = await invoke(
+        subject,
+        "prepare_simulation",
+        **{
+            "service_id": 0x1234,
+            "method_id": 0x8001,
+            "kind": "sequence",
+            "sequence": [1],
+            **overrides,
+        },
+    )
+    assert "error" in result
+    assert subject._simulator.list() == []
+
+
 def test_history_and_context_are_bounded_and_do_not_accept_system_role() -> None:
     valid = AgentChatRequest.model_validate(
         {
