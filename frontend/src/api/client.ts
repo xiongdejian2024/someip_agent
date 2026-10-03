@@ -86,6 +86,12 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 }
 
 export const api = {
+  scenarioRuns: () => request<import('../workbench/ScenarioPanel').ScenarioSummary[]>('/scenarios/runs?limit=100'),
+  scenarioRun: (id: string) => request<import('../workbench/ScenarioPanel').ScenarioRun>(`/scenarios/runs/${encodeURIComponent(id)}`),
+  validateScenario: (definition: unknown) => request<unknown>('/scenarios/runs/validate', { method: 'POST', body: stringifyJson(definition) }),
+  startScenario: (project_id: string, definition: unknown) => request<import('../workbench/ScenarioPanel').ScenarioRun>('/scenarios/runs', { method: 'POST', body: stringifyJson({ project_id, definition }) }, 30000),
+  cancelScenario: (id: string) => request<import('../workbench/ScenarioPanel').ScenarioRun>(`/scenarios/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }, 100000),
+  scenarioArtifactUrl: (id: string, kind: 'junit' | 'report') => `${API_PREFIX}/scenarios/runs/${encodeURIComponent(id)}/${kind}`,
   recordings: () => request<import('../workbench/RecordingPanel').RecordingView[]>('/recordings'),
   startRecording: (config: { name: string; quota_bytes: number }) => request<import('../workbench/RecordingPanel').RecordingView>('/recordings', { method: 'POST', body: stringifyJson(config) }),
   stopRecording: (id: string) => request<import('../workbench/RecordingPanel').RecordingView>(`/recordings/${encodeURIComponent(id)}/stop`, { method: 'POST' }, 40000),

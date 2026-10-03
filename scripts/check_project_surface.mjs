@@ -11,6 +11,7 @@ const result = await build({
     import { ProjectBar, ProjectContext, emptyProject } from './src/workbench/projects'
     import { ServiceRuntimePanel } from './src/components/ServiceRuntimePanel'
     import { SignalScope } from './src/components/SignalScope'
+    import { ScenarioPanel } from './src/workbench/ScenarioPanel'
     const document = { ...emptyProject(), name: '复合事件工程',
       services: {'/Vehicle': {application_name:'saved_app', application_id:0x3402,
         members:{Vehicle:{service:'/Vehicle',deployment_path:'/Deployment',role:'server',transport:'internal',instance_id:7}}}},
@@ -23,6 +24,8 @@ const result = await build({
       createElement(ServiceRuntimePanel,{demo:false,selected:{name:'Vehicle',id:'1',path:'/Vehicle',deploymentPath:'/Deployment',serviceId:'0x1234',instanceId:'7',instanceIds:[7],methods:[],events:[],fields:[]}})))
     export const wave = renderToStaticMarkup(createElement(ProjectContext.Provider,{value:controls},
       createElement(SignalScope,{samples:[{time:1,values:{'0x1234/0x8001/value':42,'0x1234/0x8001/other':3}}]})))
+    export const scenario = renderToStaticMarkup(createElement(ScenarioPanel,{project:current}))
+    export const noProjectScenario = renderToStaticMarkup(createElement(ScenarioPanel,{project:null}))
   `, resolveDir: fileURLToPath(new URL('../frontend/', import.meta.url)), loader: 'js' },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css': 'empty' },
   define: { 'process.env.NODE_ENV': '"production"' },
@@ -39,4 +42,9 @@ assert.match(module.exports.service, /明确启动此配置/)
 assert.match(module.exports.service, /value="13314"/)
 assert.match(module.exports.service, /value="7"/)
 assert.match(module.exports.wave, /1 \/ 6 路/)
+assert.match(module.exports.scenario, /自动场景与产品测试历史/)
+assert.match(module.exports.scenario, /复合事件工程 · 修订 7/)
+assert.match(module.exports.scenario, /校验（不运行）/)
+assert.match(module.exports.scenario, /取消本次运行/)
+assert.match(module.exports.noProjectScenario, /disabled="">明确运行已保存工程/)
 console.info('工程管理、服务配置与波形选择 SSR 验证通过：恢复仅加载配置，不运行任务；不冒充浏览器交互。')

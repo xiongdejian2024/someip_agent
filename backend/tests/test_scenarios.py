@@ -223,6 +223,10 @@ def test_scenario_api_and_restart_interrupted(tmp_path):
     with TestClient(app) as client:
         state = app.state.container
         saved = project(state)
+        draft = {"name": "仅校验", "steps": [{"kind": "delay"}]}
+        checked = client.post("/api/v1/scenarios/runs/validate", json=draft)
+        assert checked.status_code == 200 and checked.json() == draft
+        assert state.runs.list() == [] and state.recordings.list() == []
         response = client.post(
             "/api/v1/scenarios/runs",
             json=request(saved, [{"kind": "delay"}]).model_dump(mode="json", exclude_unset=True),

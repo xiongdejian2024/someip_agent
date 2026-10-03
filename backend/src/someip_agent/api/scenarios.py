@@ -13,7 +13,12 @@ from someip_agent.api.dependencies import get_state
 from someip_agent.state import ApplicationState
 from someip_agent.workbench.projects import ProjectNotFound
 from someip_agent.workbench.run_repository import RunNotFound
-from someip_agent.workbench.scenario_models import RunSummary, RunView, ScenarioRunRequest
+from someip_agent.workbench.scenario_models import (
+    RunSummary,
+    RunView,
+    ScenarioDefinition,
+    ScenarioRunRequest,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scenarios/runs", tags=["scenarios"])
@@ -30,6 +35,11 @@ async def operation(work: Callable[[], Awaitable[T]]) -> T:
         if isinstance(exc, ValueError):
             raise HTTPException(422, str(exc)) from exc
         raise
+
+
+@router.post("/validate", response_model=ScenarioDefinition, response_model_exclude_unset=True)
+async def validate(definition: ScenarioDefinition) -> ScenarioDefinition:
+    return definition
 
 
 @router.post("", response_model=RunView, status_code=202)
