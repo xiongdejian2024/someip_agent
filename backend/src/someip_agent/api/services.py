@@ -19,6 +19,9 @@ from someip_agent.runtime.service_models import (
     ServiceIncomingRequest,
     ServiceResponse,
     ServiceSessionView,
+    ServiceSyncCommand,
+    ServiceSyncControl,
+    ServiceSyncStatus,
 )
 from someip_agent.runtime.services import ServiceSessionConflict, ServiceSessionNotFound
 from someip_agent.soa.catalog import NativeCatalogRequest
@@ -157,6 +160,45 @@ async def stop_cycle(
         "services.cycle.stop",
         identifier,
         lambda: state.services.stop_cycle(identifier, command),
+    )
+
+
+@router.get("/{identifier}/sync", response_model=ServiceSyncStatus)
+async def sync_status(
+    identifier: str, state: ApplicationState = Depends(get_state)
+) -> ServiceSyncStatus:
+    try:
+        return await state.services.sync_status(identifier)
+    except Exception as exc:
+        logger.exception("读取同步状态失败", extra={"operation": "services.sync.status"})
+        if isinstance(exc, ServiceSessionNotFound):
+            raise HTTPException(404, str(exc)) from exc
+        if isinstance(exc, (NativeRuntimeError, OSError)):
+            raise HTTPException(503, str(exc)) from exc
+        raise
+
+
+@router.post("/{identifier}/sync/start", response_model=ServiceSyncStatus)
+async def start_sync(
+    identifier: str, command: ServiceSyncCommand, state: ApplicationState = Depends(get_state)
+) -> ServiceSyncStatus:
+    return await _operation(
+        state,
+        "services.sync.start",
+        identifier,
+        lambda: state.services.start_sync(identifier, command),
+    )
+
+
+@router.post("/{identifier}/sync/control", response_model=ServiceSyncStatus)
+async def control_sync(
+    identifier: str, command: ServiceSyncControl, state: ApplicationState = Depends(get_state)
+) -> ServiceSyncStatus:
+    return await _operation(
+        state,
+        "services.sync." + command.action,
+        identifier,
+        lambda: state.services.control_sync(identifier, command),
     )
 
 

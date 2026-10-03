@@ -30,6 +30,9 @@ from .service_models import (
     ServiceIncomingRequest,
     ServiceResponse,
     ServiceSessionView,
+    ServiceSyncCommand,
+    ServiceSyncControl,
+    ServiceSyncStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -295,6 +298,8 @@ class ServiceSessionManager:
         session = self._session(identifier)
         self._api(session, command, role="server", event=True)
         current = await asyncio.to_thread(session.partner.event_cycle_status, command.member)
+        if current["synchronized"]:
+            raise ServiceSessionConflict("成员属于同步组，请先使用组控制停止")
         if current["running"] and current["function"] != command.function:
             raise ServiceSessionConflict("此成员已有其他事件周期任务，请先停止，不能隐式覆盖")
         if update and not current["running"]:
@@ -325,10 +330,40 @@ class ServiceSessionManager:
     async def _stop_cycle(self, identifier: str, command: ServiceCycleStop) -> ServiceCycleStatus:
         session = self._session(identifier)
         self._cycle_member(session, command.member)
+        current = await asyncio.to_thread(session.partner.event_cycle_status, command.member)
+        if current["synchronized"]:
+            raise ServiceSessionConflict("成员属于同步组，请先使用组控制停止")
         await asyncio.to_thread(session.partner.send_event_notify_thread_stop, command.member)
         return ServiceCycleStatus.model_validate(
             await asyncio.to_thread(session.partner.event_cycle_status, command.member)
         )
+
+    async def sync_status(self, identifier: str) -> ServiceSyncStatus:
+        session = self._session(identifier)
+        return ServiceSyncStatus.model_validate(
+            await asyncio.to_thread(session.partner.event_sync_status)
+        )
+
+    async def start_sync(self, identifier: str, command: ServiceSyncCommand) -> ServiceSyncStatus:
+        async with self._cycle_control:
+            session = self._session(identifier)
+            for event in command.events:
+                self._api(session, event, role="server", event=True)
+            result = await asyncio.to_thread(
+                session.partner.start_event_sync,
+                [event.model_dump(mode="json") for event in command.events],
+                paused=command.paused,
+                speed=command.speed,
+            )
+            return ServiceSyncStatus.model_validate(result)
+
+    async def control_sync(self, identifier: str, command: ServiceSyncControl) -> ServiceSyncStatus:
+        async with self._cycle_control:
+            session = self._session(identifier)
+            result = await asyncio.to_thread(
+                session.partner.control_event_sync, command.action, speed=command.speed
+            )
+            return ServiceSyncStatus.model_validate(result)
 
     def requests(self, identifier: str) -> list[ServiceIncomingRequest]:
         session = self._session(identifier)
@@ -436,6 +471,11 @@ class ServiceSessionManager:
                             "application_id": trace.get("application_id"),
                             "signal_values_truncated": trace.get("signal_values_truncated", False),
                             "active_states": trace.get("active_states", {}),
+                            **{
+                                key: trace[key]
+                                for key in ("sync_group_id", "sync_logical_ms", "sync_frame_index")
+                                if key in trace
+                            },
                         },
                     )
                 )

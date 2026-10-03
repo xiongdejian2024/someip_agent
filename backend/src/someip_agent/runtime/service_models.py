@@ -1,5 +1,6 @@
 """服务会话控制面的请求、状态与结果，不承担线上编解码。"""
 
+import json
 from datetime import datetime
 from typing import Any, Literal
 
@@ -131,6 +132,69 @@ class ServiceCycleStatus(BaseModel):
     source_count: int = Field(default=0, ge=0, le=128)
     active_states: dict[str, str] = Field(default_factory=dict)
     logical_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+    observation: Literal["native_schedule"] = "native_schedule"
+    wire_verified: Literal[False] = False
+    synchronized: bool = False
+
+
+class ServiceSyncCommand(BaseModel):
+    """同一原生会话内的多事件公共时钟；不允许任意脚本或隐式停止旧任务。"""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    events: list[ServiceCycleCommand] = Field(min_length=1, max_length=16)
+    paused: StrictBool = True
+    speed: StrictInt | StrictFloat = 1
+
+    @model_validator(mode="after")
+    def group_shape(self) -> "ServiceSyncCommand":
+        if self.speed not in (0.25, 0.5, 1, 2, 4):
+            raise ValueError("同步倍率仅支持 0.25、0.5、1、2、4")
+        keys = [(event.member, event.function) for event in self.events]
+        if len(keys) != len(set(keys)):
+            raise ValueError("同步组不能重复绑定同一成员事件")
+        if (
+            len(json.dumps(self.model_dump(mode="json"), ensure_ascii=True).encode())
+            > 4 * 1024 * 1024
+        ):
+            raise ValueError("同步配置超过 4 MiB 控制消息预算")
+        return self
+
+
+class ServiceSyncControl(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    action: Literal["pause", "resume", "step", "stop", "speed"]
+    speed: StrictInt | StrictFloat | None = None
+
+    @model_validator(mode="after")
+    def control_shape(self) -> "ServiceSyncControl":
+        if self.action == "speed":
+            if self.speed not in (0.25, 0.5, 1, 2, 4):
+                raise ValueError("同步倍率仅支持 0.25、0.5、1、2、4")
+        elif self.speed is not None:
+            raise ValueError("只有 speed 操作接受倍率")
+        return self
+
+
+class SyncEventStatus(BaseModel):
+    member: str
+    function: str
+    interval_ms: int = Field(ge=1, le=60000)
+    emitted_count: int = Field(ge=0)
+    last_logical_ms: int | None = Field(default=None, ge=0, le=18446744073709551615)
+    source_count: int = Field(default=0, ge=0, le=128)
+    active_states: dict[str, str] = Field(default_factory=dict)
+
+
+class ServiceSyncStatus(BaseModel):
+    active: bool
+    paused: bool
+    group_id: str | None
+    logical_ms: int = Field(ge=0, le=18446744073709551615)
+    frame_index: int = Field(ge=0, le=18446744073709551615)
+    interval_ms: int | None = Field(default=None, ge=1, le=60000)
+    speed: float = Field(allow_inf_nan=False)
+    events: list[SyncEventStatus] = Field(default_factory=list, max_length=16)
+    last_error: str | None = None
     observation: Literal["native_schedule"] = "native_schedule"
     wire_verified: Literal[False] = False
 

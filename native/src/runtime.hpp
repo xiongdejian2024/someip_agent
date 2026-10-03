@@ -3,6 +3,7 @@
 #include "dispatch.hpp"
 #include "signal_source.hpp"
 #include "event_stimulus.hpp"
+#include "sync_clock.hpp"
 #include <vsomeip/vsomeip.hpp>
 #include <map>
 #include <set>
@@ -40,6 +41,7 @@ struct Member {
     std::shared_ptr<boost::asio::steady_timer> event_timer;
     uint64_t event_epoch = 0, event_count = 0;
     bool event_running = false;
+    bool synchronized = false;
     std::string event_function;
     Bytes event_payload;
     Json event_arguments;
@@ -59,6 +61,30 @@ class Runtime {
     bool restricted_ = false, shutting_down_ = false;
     std::shared_ptr<vsomeip::application> application(const std::string &);
     std::map<std::string,std::shared_ptr<Member>> members_;
+    struct SyncEntry {
+        std::shared_ptr<Member> member;
+        std::string function;
+        uint64_t interval_ms=0, count=0;
+        Json last_logical_ms=nullptr, arguments;
+        Bytes payload;
+        std::unique_ptr<EventStimulus> stimulus;
+    };
+    struct SyncGroup {
+        SyncClock clock;
+        std::shared_ptr<boost::asio::steady_timer> timer;
+        std::string id, error;
+        bool active=true, paused=true;
+        uint64_t epoch=0;
+        std::vector<SyncEntry> entries;
+        SyncGroup(boost::asio::io_context &io,const std::vector<uint64_t> &intervals)
+            :clock(intervals),timer(std::make_shared<boost::asio::steady_timer>(io)) {}
+    };
+    std::shared_ptr<SyncGroup> event_sync_;
+    Json sync_control(const std::string &,const Json &);
+    Json sync_status() const;
+    void stop_sync();
+    void sync_frame(const std::shared_ptr<SyncGroup> &,std::chrono::steady_clock::time_point);
+    void arm_sync(const std::shared_ptr<SyncGroup> &,std::chrono::steady_clock::time_point);
     struct Pending {
         std::weak_ptr<Connection> connection;
         std::shared_ptr<Member> member;
@@ -74,12 +100,12 @@ class Runtime {
     void receive(const std::string &,std::shared_ptr<vsomeip::message>);
     void subscribe(std::shared_ptr<Member>, const std::string &, bool);
     bool has_other_event_consumer(const std::shared_ptr<Member> &, uint16_t) const;
-    void notify(std::shared_ptr<Member>, const Api &, const Bytes &, const Json * = nullptr);
+    void notify(std::shared_ptr<Member>, const Api &, const Bytes &, const Json * = nullptr, const Json * = nullptr);
     void generator(std::shared_ptr<Member>, std::shared_ptr<const Json>, uint64_t, std::chrono::steady_clock::time_point,
                    std::chrono::steady_clock::time_point);
     void event_cycle(std::shared_ptr<Member>, uint64_t, std::chrono::steady_clock::time_point);
     void trace(std::shared_ptr<Member>, const Api &, const Bytes &, const std::string &,
-               uint8_t, uint16_t=0, uint16_t=0, uint8_t=0, const Json * = nullptr);
+               uint8_t, uint16_t=0, uint16_t=0, uint8_t=0, const Json * = nullptr, const Json * = nullptr);
 public:
     Runtime(boost::asio::io_context &, Json, Json, std::string, std::string);
     ~Runtime();

@@ -72,6 +72,7 @@ void Runtime::stop_member(const std::string &key) {
     auto it=members_.find(key);
     if (it==members_.end()) return;
     auto m=it->second;
+    if(m->synchronized)stop_sync();
     m->active=false;
     ++m->generator_epoch;
     m->signal_source.reset();
@@ -287,13 +288,15 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
                 {"application_name",m->application->get_name()},{"application_id",m->application->get_client()},
                 {"emitted_count",m->count},{"last_value",m->last_value},
                 {"active_state",m->signal_source?m->signal_source->active_state():""},
-                {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count},
+                {"event_cycle_running",m->event_running},{"event_cycle_count",m->event_count},{"synchronized",m->synchronized},
                 {"event_source_count",m->event_stimulus?m->event_stimulus->source_count():0},
                 {"event_active_states",m->event_stimulus?m->event_stimulus->active_states():Json::object()},
                 {"event_logical_seconds",m->event_logical_ms/1000.0}};
         } else if (function=="monitor") { monitors_.push_back(conn);result=true; }
+        else if(function.rfind("event_sync_",0)==0) {result=sync_control(function,args);}
         else if(function=="event_cycle_start" || function=="event_cycle_update") {
             auto m=members_.at(args.at("member").get<std::string>());
+            if(m->synchronized)throw std::runtime_error("成员属于同步组，请使用组控制");
             auto name=args.at("function").get<std::string>();
             const auto &api=m->apis.at(name);
             if(m->role!="server" || !api.event)throw std::runtime_error("周期通知需要 server event");
@@ -331,6 +334,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
             std::cout<<Json{{"operation",function},{"member",m->key},{"message","原生周期通知已配置"}}.dump()<<std::endl;
         } else if(function=="event_cycle_stop") {
             auto m=members_.at(args.at("member").get<std::string>());
+            if(m->synchronized)throw std::runtime_error("成员属于同步组，请使用组控制");
             ++m->event_epoch;m->event_running=false;
             m->event_stimulus.reset();
             if(m->event_timer)m->event_timer->cancel();
@@ -339,6 +343,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
         }
         else if (function=="generator_start") {
             auto m=members_.at(args.at("member").get<std::string>());
+            if(m->synchronized)throw std::runtime_error("成员属于同步组，请使用组控制");
             if (m->role!="server") throw std::runtime_error("周期发生器仅支持 server");
             if(m->event_running)throw std::runtime_error("完整事件周期仍在运行，请先明确停止");
             const auto &api=m->apis.at(args.at("function").get<std::string>());
@@ -394,7 +399,7 @@ void Runtime::control(const Json &request,std::shared_ptr<Connection> conn) {
     }
 }
 void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payload,const std::string &direction,
-                    uint8_t type,uint16_t client,uint16_t session,uint8_t code,const Json *decoded) {
+                    uint8_t type,uint16_t client,uint16_t session,uint8_t code,const Json *decoded,const Json *stimulus_context) {
     // 没有实际监控连接时不构造大型 trace；业务交付仍包含原始 payload_hex。
     monitors_.erase(std::remove_if(monitors_.begin(),monitors_.end(),[](const auto &weak){
         auto connection=weak.lock();return !connection || !connection->socket.is_open();
@@ -409,6 +414,7 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
         {"native_monotonic_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()}};
     if(api.event) {
+        if(stimulus_context && direction!="rx")for(const auto &[key,value]:stimulus_context->items())message[key]=value;
         if(type==2 && direction!="rx") {
             if(m->signal_source && !m->signal_source->active_state().empty())
                 message["active_states"]=Json{{"",m->signal_source->active_state()}};
@@ -422,10 +428,10 @@ void Runtime::trace(std::shared_ptr<Member> m,const Api &api,const Bytes &payloa
     }
     for (auto &weak:monitors_) if(auto conn=weak.lock())conn->send(message);
 }
-void Runtime::notify(std::shared_ptr<Member> m,const Api &api,const Bytes &data,const Json *decoded) {
+void Runtime::notify(std::shared_ptr<Member> m,const Api &api,const Bytes &data,const Json *decoded,const Json *stimulus_context) {
     auto payload=vsomeip::runtime::get()->create_payload();payload->set_data(data);
     m->application->notify(m->service,m->instance,api.id,payload,true);
-    trace(m,api,data,"tx",2,0,0,0,decoded);
+    trace(m,api,data,"tx",2,0,0,0,decoded,stimulus_context);
 }
 void Runtime::command(std::shared_ptr<Member> m,const Json &request,std::shared_ptr<Connection> conn) {
     const std::string function=request.value("function","");

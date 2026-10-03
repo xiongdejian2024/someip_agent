@@ -142,6 +142,7 @@ class S2sBaseClass(WTIAssertions):
         self._method_timing = MethodTimingAudit()
         self._member_configs: dict[str, dict[str, Any]] = {}
         self._native_keys: dict[str, str] = {}
+        self._sync_config: dict[str, Any] | None = None
         if auto_start:
             try:
                 self.start_soa(partner_members or {})
@@ -235,6 +236,8 @@ class S2sBaseClass(WTIAssertions):
         self._member_configs = {f"{alias}_{cfg['role']}": cfg for alias, cfg in configs.items()}
         for key, address in addresses.items():
             self._connect(key, address)
+        if self._sync_config is not None and not self.event_sync_status()["active"]:
+            self._sync_config = None
 
     def _connect(self, key: str, address: list[Any]) -> None:
         native_key = key
@@ -378,6 +381,8 @@ class S2sBaseClass(WTIAssertions):
                 for key, info in self.partner_infos.items()
                 if info.cycle_config is not None and not info.start_event
             }
+            sync = deepcopy(self._sync_config)
+            self._sync_config = None
             self.sim_operator.stop_operator()
             # 旧读线程必须结束，否则它可能在新请求开始后清除同名成员的关联状态。
             for info in self.partner_infos.values():
@@ -397,6 +402,13 @@ class S2sBaseClass(WTIAssertions):
                     **(
                         {"csv_text": cycle["csv_text"]} if cycle.get("csv_text") is not None else {}
                     ),
+                )
+            if sync is not None:
+                # 异常恢复不假装公共时间连续；从 0 重新预编译并保持暂停，需明确恢复。
+                self.start_event_sync(sync["events"], paused=True, speed=sync["speed"])
+                logger.warning(
+                    "原生同步组异常恢复后已重新准备并暂停",
+                    extra={"operation": "soa.event_sync.recover"},
                 )
 
     def _send(self, key: str, message: dict[str, Any]) -> None:
@@ -666,7 +678,77 @@ class S2sBaseClass(WTIAssertions):
                 "source_count": native.get("event_source_count", 0),
                 "active_states": native.get("event_active_states", {}),
                 "logical_seconds": native.get("event_logical_seconds", 0),
+                "synchronized": native.get("synchronized", False),
             }
+
+    def start_event_sync(
+        self, events: list[dict[str, Any]], *, paused: bool = True, speed: float = 1
+    ) -> dict[str, Any]:
+        """一次控制提交全部预编译事件；原生公共时钟采样，不使用 Python 逐周期调用。"""
+        with self._lifecycle:
+            commands = []
+            for event in events:
+                commands.append(
+                    {
+                        "member": self._native_member(event["member"]),
+                        "function": self._event_name(event["function"]),
+                        "args": deepcopy(event["args"]),
+                        "interval_ms": event["interval_ms"],
+                        "sources": self._cycle_sources(event.get("sources"), event.get("csv_text")),
+                    }
+                )
+            result = self.sim_operator.send_request(
+                "event_sync_start",
+                {
+                    "group_id": str(uuid4()),
+                    "events": commands,
+                    "paused": paused,
+                    "speed": speed,
+                },
+            )
+            if not isinstance(result, dict) or not result.get("active"):
+                raise NativeRuntimeError("原生同步组未能完成准备")
+            self._sync_config = {"events": deepcopy(events), "speed": speed}
+            logger.info(
+                "原生同步组已准备",
+                extra={"operation": "soa.event_sync.start", "event_count": len(events)},
+            )
+            return self._canonical_sync_status(result)
+
+    def _canonical_sync_status(self, result: Any) -> dict[str, Any]:
+        if not isinstance(result, dict):
+            raise NativeRuntimeError("原生同步状态不是字典")
+        result = deepcopy(result)
+        names = {native: canonical for canonical, native in self._native_keys.items()}
+        for event in result.get("events", []):
+            event["member"] = names.get(event["member"], event["member"])
+        return result
+
+    def event_sync_status(self) -> dict[str, Any]:
+        with self._lifecycle:
+            result = self._canonical_sync_status(
+                self.sim_operator.send_request("event_sync_status", print_result=False)
+            )
+            if not result["active"]:
+                self._sync_config = None
+            return result
+
+    def control_event_sync(self, action: str, *, speed: float | None = None) -> dict[str, Any]:
+        if action not in ("pause", "resume", "step", "stop", "speed"):
+            raise ValueError("未知同步操作")
+        with self._lifecycle:
+            result = self._canonical_sync_status(
+                self.sim_operator.send_request(
+                    "event_sync_" + action,
+                    {"speed": speed} if action == "speed" else {},
+                )
+            )
+            if self._sync_config is not None:
+                self._sync_config["speed"] = result["speed"]
+                if not result["active"]:
+                    self._sync_config = None
+            logger.info("原生同步组操作完成", extra={"operation": "soa.event_sync." + action})
+            return result
 
     def _cycle_update_locked(
         self,
@@ -1222,6 +1304,8 @@ class S2sBaseClass(WTIAssertions):
         self.sim_operator.send_request(
             "start_config_get_args", {alias: {"role": role, "enable": "disable"}}
         )
+        if self._sync_config is not None and not self.event_sync_status()["active"]:
+            self._sync_config = None
         self._disconnect(partner_key)
 
     def _disconnect(self, partner_key: str) -> None:
@@ -1279,6 +1363,12 @@ class S2sBaseClass(WTIAssertions):
             self._close_locked()
 
     def _close_locked(self) -> None:
+        if self._sync_config is not None:
+            try:
+                self.control_event_sync("stop")
+            except Exception:
+                logger.exception("关闭 SOA 时同步组已不可用", extra={"operation": "soa.close"})
+                self._sync_config = None
         for key in list(self.partner_infos):
             if not self.partner_infos[key].start_event:
                 try:

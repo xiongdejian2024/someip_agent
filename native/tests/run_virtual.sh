@@ -96,3 +96,7 @@ ip netns exec soa-server python -m pytest native/tests/test_csv_recovery_virtual
   --junitxml=build/virtual-evidence/csv-recovery-junit.xml
 ip netns exec soa-server python -m pytest native/tests/test_state_recovery_virtual.py -v \
   --junitxml=build/virtual-evidence/state-recovery-junit.xml
+python -m pytest native/tests/test_sync_virtual.py -v \
+  --junitxml=build/virtual-evidence/sync-junit.xml
+ip netns exec soa-server python -m pytest native/tests/test_sync_recovery_virtual.py -v \
+  --junitxml=build/virtual-evidence/sync-recovery-junit.xml

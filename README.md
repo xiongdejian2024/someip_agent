@@ -58,6 +58,8 @@ IPv4 EOL 零补齐、NOP、通用 TLV 长度边界及带选项首片已接通，
 离线 PCAP 已接入相同原生重组/解码路径，Python 仅聚合展示，不保留纯 Python 解析回退。
 IPv4 分片已接入成熟重组库，但不代表支持所有 IP 流量。当前状态与复现命令见
 [原生运行时](docs/native-runtime.md)和[执行记录](docs/vsomeip-progress.md)。
+完整事件的原生公共时钟 API 支持同服务多事件、异周期、暂停／恢复／单步与倍率；
+同步配置和接收证据的边界见[完整事件公共时钟](docs/stimulus-sync.md)。
 已补充同机的 RPC、逐条 Python 通知和原生序列发生器短负载证据，分别核对线上与客户端
 交付；数值与口径见[性能证据](docs/performance.md)，不作为硬实时、线速或长稳承诺。
 
