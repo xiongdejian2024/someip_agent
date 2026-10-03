@@ -21,6 +21,8 @@ from someip_agent.storage.repository import AuditRepository
 from someip_agent.update.service import UpdateService
 from someip_agent.workbench.projects import ProjectConflict, ProjectRepository, ProjectView
 from someip_agent.workbench.recordings import RecordingManager
+from someip_agent.workbench.run_repository import RunRepository
+from someip_agent.workbench.scenarios import ScenarioManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class ApplicationState:
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")
         self.projects = ProjectRepository(settings.data_dir / "someip-agent.sqlite3")
+        self.runs = RunRepository(settings.data_dir / "someip-agent.sqlite3")
         self.llm_configuration = LlmConfigurationService(settings)
         self.update_service = UpdateService(settings)
         self._arxml_model = self._restore_project_model()
@@ -53,6 +56,7 @@ class ApplicationState:
             audit=self.audit.add,
         )
         self.agent.register_console_tools(console_tools(self))
+        self.scenarios = ScenarioManager(self)
 
     async def set_arxml_model(self, model: ArxmlModel) -> None:
         async with self._model_lock:
@@ -185,6 +189,7 @@ class ApplicationState:
         return self.enrich_messages([message])[0]
 
     async def shutdown(self) -> None:
+        await self.scenarios.shutdown()
         await self.agent.shutdown()
         await self.services.shutdown()
         await self.network.shutdown()

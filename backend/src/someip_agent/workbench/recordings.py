@@ -37,6 +37,8 @@ class RecordingRequest(StrictModel):
     queue_capacity: int = Field(default=512, ge=16, le=4096, strict=True)
     service_id: int | None = Field(default=None, ge=0, le=65535)
     method_id: int | None = Field(default=None, ge=0, le=65535)
+    service_session_ids: list[UUID] | None = Field(default=None, max_length=512)
+    listener_ids: list[UUID] | None = Field(default=None, max_length=512)
 
 
 class RecordingSegment(StrictModel):
@@ -255,6 +257,15 @@ class RecordingManager:
                     messages.append(queue.get_nowait())
                 for message in messages:
                     config = writer.view.config
+                    if config.service_session_ids is not None or config.listener_ids is not None:
+                        sessions = {str(value) for value in config.service_session_ids or []}
+                        listeners = {str(value) for value in config.listener_ids or []}
+                        if (
+                            message.metadata.get("service_session_id") not in sessions
+                            and message.metadata.get("listener_id") not in listeners
+                        ):
+                            writer.view.skipped_by_filter += 1
+                            continue
                     if (
                         config.service_id is not None and message.service_id != config.service_id
                     ) or (config.method_id is not None and message.method_id != config.method_id):
@@ -404,3 +415,16 @@ class RecordingManager:
     async def shutdown(self) -> None:
         for identifier in tuple(self._writers):
             await self.stop(identifier)
+
+    def permit_source(self, identifier: UUID, source_id: UUID, *, listener: bool = False) -> None:
+        """场景内部登记它刚创建的资源；不开放任意路径或网络发送。"""
+        writer = self._writers[identifier]
+        values = (
+            writer.view.config.listener_ids if listener else writer.view.config.service_session_ids
+        )
+        if values is None:
+            raise ValueError("该记录没有启用资源范围过滤")
+        if source_id not in values:
+            if len(values) >= 512:
+                raise RecordingConflict("记录资源范围最多 512 个来源")
+            values.append(source_id)
