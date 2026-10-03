@@ -25,6 +25,7 @@ from someip_agent.version import __version__
 
 from .projects import ProjectView
 from .recordings import RecordingRequest
+from .results import runtime_identity
 from .scenario_models import (
     RunView,
     ScenarioRunRequest,
@@ -90,6 +91,7 @@ class ScenarioManager:
                 ).hexdigest(),
                 model_source_sha256=model.source_sha256,
                 application_version=__version__,
+                runtime_identity=await asyncio.to_thread(runtime_identity, self.state.settings),
                 started_at=datetime.now(timezone.utc),
             )
             await asyncio.to_thread(
@@ -184,7 +186,7 @@ class ScenarioManager:
             # 清理自己登记的资源。不能使用 stop-all，也不能关闭用户此前运行的会话。
             await self._release(run)
             counters = await self.state.monitor.detach(run.queue)
-            run.queue_discards = int(counters["current_subscriber_discarded"] or 0)
+            run.queue_discards = int(str(counters["current_subscriber_discarded"] or 0))
             if run.view.recording_id:
                 try:
                     record = await self.state.recordings.stop(run.view.recording_id)
@@ -372,64 +374,71 @@ class ScenarioManager:
     async def _dispatch(
         self, run: Run, model: ArxmlModel, step: ScenarioStep, case: int, index: str
     ) -> Any:
+        profile_name = step.profile or ""
+        session_name = step.session or ""
+        listener_name = step.listener or ""
         if step.kind == "start_service":
-            if step.profile in run.sessions:
+            if profile_name in run.sessions:
                 raise ValueError("场景会话已经启动，不能覆盖资源归属")
-            profile = run.project.document.services[step.profile]
-            creation = asyncio.create_task(
+            service_profile = run.project.document.services[profile_name]
+            service_creation = asyncio.create_task(
                 self.state.services.start(
                     model,
                     NativeCatalogRequest.model_validate(
-                        parameters(profile.model_dump(mode="json"), run.values["parameters"])
+                        parameters(
+                            service_profile.model_dump(mode="json"), run.values["parameters"]
+                        )
                     ),
                 )
             )
             cancelled = False
             try:
-                created = await asyncio.shield(creation)
+                service_created = await asyncio.shield(service_creation)
             except asyncio.CancelledError:
                 # 底层可能已在 to_thread 中创建进程；先登记归属，再交给 finally 释放。
-                created = await creation
+                service_created = await service_creation
                 cancelled = True
-            run.sessions[step.profile] = created.id
+            run.sessions[profile_name] = service_created.id
             if cancelled:
                 raise asyncio.CancelledError
-            self.state.recordings.permit_source(run.view.recording_id, UUID(created.id))
-            return created.model_dump(mode="json")
+            assert run.view.recording_id is not None
+            self.state.recordings.permit_source(run.view.recording_id, UUID(service_created.id))
+            return service_created.model_dump(mode="json")
         if step.kind == "start_listener":
-            if step.profile in run.listeners:
+            if profile_name in run.listeners:
                 raise ValueError("场景监听已经启动")
-            profile = int(step.profile)
-            if profile < 0 or profile >= len(run.project.document.listeners):
+            listener_index = int(profile_name)
+            if listener_index < 0 or listener_index >= len(run.project.document.listeners):
                 raise ValueError("工程监听草案下标越界")
-            config = run.project.document.listeners[profile]
-            creation = asyncio.create_task(
+            config = run.project.document.listeners[listener_index]
+            listener_creation = asyncio.create_task(
                 self.state.network.start(
                     ListenerConfig.model_validate(config.model_dump(mode="json"))
                 )
             )
             cancelled = False
             try:
-                created = await asyncio.shield(creation)
+                listener_created = await asyncio.shield(listener_creation)
             except asyncio.CancelledError:
-                created = await creation
+                listener_created = await listener_creation
                 cancelled = True
-            run.listeners[step.profile] = created.id
+            run.listeners[profile_name] = listener_created.id
             if cancelled:
                 raise asyncio.CancelledError
+            assert run.view.recording_id is not None
             self.state.recordings.permit_source(
-                run.view.recording_id, UUID(created.id), listener=True
+                run.view.recording_id, UUID(listener_created.id), listener=True
             )
-            return created.model_dump(mode="json")
+            return listener_created.model_dump(mode="json")
         if step.kind == "stop_service":
-            identifier = run.sessions[step.session]
-            result = await self.state.services.stop(identifier)
-            run.sessions.pop(step.session)
-            return result.model_dump(mode="json")
+            identifier = run.sessions[session_name]
+            stopped_service = await self.state.services.stop(identifier)
+            run.sessions.pop(session_name)
+            return stopped_service.model_dump(mode="json")
         if step.kind == "stop_listener":
-            result = await self.state.network.stop(run.listeners[step.listener])
-            run.listeners.pop(step.listener)
-            return [item.model_dump(mode="json") for item in result]
+            stopped_listeners = await self.state.network.stop(run.listeners[listener_name])
+            run.listeners.pop(listener_name)
+            return [item.model_dump(mode="json") for item in stopped_listeners]
         if step.kind == "delay":
             await asyncio.sleep(step.seconds)
             return {"waited_seconds": step.seconds}
@@ -441,8 +450,10 @@ class ScenarioManager:
                 matched = canonical(actual) == canonical(step.expected)
             elif step.comparison == "approx":
                 matched = (
-                    type(actual) in {int, float}
-                    and type(step.expected) in {int, float}
+                    isinstance(actual, (int, float))
+                    and not isinstance(actual, bool)
+                    and isinstance(step.expected, (int, float))
+                    and not isinstance(step.expected, bool)
                     and math.isclose(actual, step.expected, abs_tol=step.tolerance, rel_tol=0)
                 )
             else:
@@ -478,7 +489,7 @@ class ScenarioManager:
                         )
         if step.kind == "wait_message":
             return await asyncio.wait_for(self._message(run, step), step.timeout)
-        identifier = run.sessions[step.session]
+        identifier = run.sessions[session_name]
         if step.kind == "wait_ready":
 
             async def ready():
@@ -538,7 +549,7 @@ class ScenarioManager:
         return (await self.state.services.notify(identifier, command)).model_dump(mode="json")
 
     async def _message(self, run: Run, step: ScenarioStep) -> dict[str, Any]:
-        source = run.sessions[step.session] if step.session else run.listeners[step.listener]
+        source = run.sessions[step.session] if step.session else run.listeners[step.listener or ""]
         source_key = "service_session_id" if step.session else "listener_id"
 
         def matches(message: MonitorMessage) -> bool:

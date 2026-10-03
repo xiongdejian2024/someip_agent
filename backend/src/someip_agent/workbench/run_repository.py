@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 from xml.etree.ElementTree import Element, SubElement, tostring
 
-from .scenario_models import RunSummary, RunView
+from .scenario_models import RunSummary, RunView, canonical
 
 
 class RunNotFound(LookupError):
@@ -25,10 +25,17 @@ class RunRepository:
                 id TEXT PRIMARY KEY, started_at TEXT NOT NULL, status TEXT NOT NULL,
                 result_json TEXT NOT NULL, input_json TEXT NOT NULL,
                 result_sha256 TEXT NOT NULL)""")
+            if "input_sha256" not in {
+                row["name"] for row in db.execute("PRAGMA table_info(scenario_runs)")
+            }:
+                # 旧输入此前未封存，不重新打哈希假装它从一开始就可验证。
+                db.execute("ALTER TABLE scenario_runs ADD COLUMN input_sha256 TEXT")
             rows = db.execute(
-                "SELECT id,result_json FROM scenario_runs WHERE status='running'"
+                "SELECT id,result_json,result_sha256 FROM scenario_runs WHERE status='running'"
             ).fetchall()
             for row in rows:
+                if hashlib.sha256(row["result_json"].encode()).hexdigest() != row["result_sha256"]:
+                    raise ValueError("中断运行结果完整性校验不符，不能重签损坏历史")
                 view = RunView.model_validate_json(row["result_json"])
                 view.status = "interrupted"
                 view.error = "上次进程中断；不声称清理完成或自动重新执行"
@@ -48,19 +55,23 @@ class RunRepository:
         body = view.model_dump_json()
         if len(body.encode()) > 8 * 1024 * 1024:
             raise ValueError("运行结果超过 8 MiB，不能持久化为完整结果")
+        if inputs is not None and len(canonical(inputs).encode()) > 12 * 1024 * 1024:
+            raise ValueError("运行输入超过 12 MiB，不能持久化为完整输入")
         with closing(self._connect()) as db, db:
             if inputs is not None:
                 if db.execute("SELECT COUNT(*) FROM scenario_runs").fetchone()[0] >= 500:
                     raise ValueError("产品测试历史达到 500 次，请先按运维要求归档")
                 db.execute(
-                    "INSERT INTO scenario_runs VALUES(?,?,?,?,?,?)",
+                    "INSERT INTO scenario_runs(id,started_at,status,result_json,input_json,"
+                    "result_sha256,input_sha256) VALUES(?,?,?,?,?,?,?)",
                     (
                         str(view.id),
                         view.started_at.isoformat(),
                         view.status,
                         body,
-                        json.dumps(inputs, ensure_ascii=False, allow_nan=False),
+                        canonical(inputs),
                         hashlib.sha256(body.encode()).hexdigest(),
+                        hashlib.sha256(canonical(inputs).encode()).hexdigest(),
                     ),
                 )
             else:
@@ -84,8 +95,12 @@ class RunRepository:
         self.get(identifier)
         with closing(self._connect()) as db:
             row = db.execute(
-                "SELECT input_json FROM scenario_runs WHERE id=?", (str(identifier),)
+                "SELECT input_json,input_sha256 FROM scenario_runs WHERE id=?", (str(identifier),)
             ).fetchone()
+        if not row["input_sha256"]:
+            raise ValueError("旧运行输入未封存，不能作为完整基线或证据包")
+        if hashlib.sha256(row["input_json"].encode()).hexdigest() != row["input_sha256"]:
+            raise ValueError("运行输入完整性校验不符")
         return json.loads(row["input_json"])
 
     def list(self, limit: int = 100) -> list[RunSummary]:

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import Field, JsonValue, StrictInt, field_validator, model_validator
 
-from .projects import StrictModel
+from .projects import StrictModel, check_portable_data
 
 
 class MessageMatch(StrictModel):
@@ -116,18 +116,28 @@ class ScenarioStep(StrictModel):
         return self
 
 
+def default_cases() -> list[dict[str, JsonValue]]:
+    return [{}]
+
+
 class ScenarioDefinition(StrictModel):
     format: Literal["someip-agent-scenario"] = "someip-agent-scenario"
     format_version: Literal[1] = 1
     name: str = Field(min_length=1, max_length=128)
     model_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     cases: list[dict[str, JsonValue]] = Field(
-        default_factory=lambda: [{}], min_length=1, max_length=20
+        default_factory=default_cases, min_length=1, max_length=20
     )
     steps: list[ScenarioStep] = Field(min_length=1, max_length=200)
     cleanup: list[ScenarioStep] = Field(default_factory=list, max_length=32)
     timeout_seconds: float = Field(default=120, gt=0, le=600)
     stop_on_failure: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def portable(cls, value: Any) -> Any:
+        check_portable_data(value)
+        return value
 
     @field_validator("format_version", mode="before")
     @classmethod
@@ -180,6 +190,7 @@ class RunView(StrictModel):
     definition_sha256: str
     model_source_sha256: str | None
     application_version: str
+    runtime_identity: dict[str, str] = Field(default_factory=dict)
     status: Literal["running", "passed", "failed", "cancelled", "interrupted"] = "running"
     started_at: datetime
     finished_at: datetime | None = None

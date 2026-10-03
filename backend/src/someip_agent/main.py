@@ -108,6 +108,10 @@ app = create_app()
 
 
 def run() -> None:
+    if sys.argv[1:2] == ["evidence-verify"]:
+        from someip_agent.scenario_cli import verify_main
+
+        raise SystemExit(verify_main(sys.argv[2:]))
     if sys.argv[1:2] == ["scenario"]:
         from someip_agent.scenario_cli import main
 

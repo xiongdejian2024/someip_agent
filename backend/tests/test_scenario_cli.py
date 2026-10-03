@@ -8,6 +8,15 @@ import pytest
 from someip_agent.scenario_cli import api_root, execute, write_artifact
 
 
+def test_evidence_subcommand_dispatch_does_not_start_backend(monkeypatch):
+    from someip_agent.main import run
+
+    monkeypatch.setattr("sys.argv", ["someip-agent", "evidence-verify", "--help"])
+    with pytest.raises(SystemExit) as result:
+        run()
+    assert result.value.code == 0
+
+
 def arguments(tmp_path):
     definition = tmp_path / "scenario.json"
     definition.write_text(

@@ -21,6 +21,7 @@ from someip_agent.storage.repository import AuditRepository
 from someip_agent.update.service import UpdateService
 from someip_agent.workbench.projects import ProjectConflict, ProjectRepository, ProjectView
 from someip_agent.workbench.recordings import RecordingManager
+from someip_agent.workbench.results import ResultManager
 from someip_agent.workbench.run_repository import RunRepository
 from someip_agent.workbench.scenarios import ScenarioManager
 
@@ -57,6 +58,7 @@ class ApplicationState:
         )
         self.agent.register_console_tools(console_tools(self))
         self.scenarios = ScenarioManager(self)
+        self.results = ResultManager(self)
 
     async def set_arxml_model(self, model: ArxmlModel) -> None:
         async with self._model_lock:

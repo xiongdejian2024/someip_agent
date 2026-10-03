@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -71,6 +72,31 @@ class AuditRepository:
                 """,
                 (max(1, min(limit, 2000)),),
             ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "actor": row["actor"],
+                "action": row["action"],
+                "target": row["target"],
+                "success": bool(row["success"]),
+                "detail": json.loads(row["detail_json"]),
+            }
+            for row in rows
+        ]
+
+    def for_scenario(self, identifier: str) -> builtins.list[dict[str, Any]]:
+        """按运行精确取审计，不受全局最近 200 条限制，不悄悄截断。"""
+        from contextlib import closing
+
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM audit_events WHERE target=? AND action LIKE 'scenario.%' "
+                "ORDER BY id LIMIT 10001",
+                (identifier,),
+            ).fetchall()
+        if len(rows) > 10000:
+            raise ValueError("场景审计超过 10000 条，拒绝不完整证据导出")
         return [
             {
                 "id": row["id"],

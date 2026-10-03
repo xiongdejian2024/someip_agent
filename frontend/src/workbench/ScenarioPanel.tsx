@@ -15,6 +15,13 @@ export interface ScenarioRun extends Omit<ScenarioSummary, 'step_count'> {
   steps: Array<{ case: number; index: string; name: string; kind: string; status: 'passed' | 'failed'; duration_ms: number; result: unknown; error: string | null }>
   cleanup_errors: string[]; error: string | null
 }
+export interface ScenarioComparison {
+  baseline_id: string; current_id: string; comparable: boolean
+  metadata_changes: Array<{ field: string; baseline: unknown; current: unknown }>
+  status: { baseline: string; current: string }; cleanup_complete: { baseline: boolean; current: boolean }
+  assertions: Array<{ case: number; index: string; changed: boolean; baseline: { status: string } | null; current: { status: string } | null }>
+  duration_ms: { baseline: number; current: number }; note: string
+}
 
 export function exampleScenario() {
   return { format: 'someip-agent-scenario', format_version: 1, name: '参数化精确断言示例',
@@ -31,6 +38,8 @@ export function ScenarioPanel({ project }: { project: ProjectView | null }) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [pollRetry, setPollRetry] = useState(0)
+  const [baseline, setBaseline] = useState('')
+  const [comparison, setComparison] = useState<ScenarioComparison | null>(null)
   const refresh = async () => setHistory(await api.scenarioRuns())
   useEffect(() => { void refresh().catch(error => logError('读取产品测试历史失败', error)) }, [])
   useEffect(() => {
@@ -76,7 +85,7 @@ export function ScenarioPanel({ project }: { project: ProjectView | null }) {
       <button className="button secondary" disabled={busy} onClick={() => void action('场景校验（不运行）', async () => { setEditor(stringifyJson(await api.validateScenario(definition()), 2)) })}>校验（不运行）</button>
       <button className="button primary" disabled={busy || !project} onClick={() => void action('场景启动', async () => {
         if (!project) return
-        const started = await api.startScenario(project.id, definition()); setSelected(started.id); await refresh()
+        const started = await api.startScenario(project.id, definition()); setComparison(null); setSelected(started.id); await refresh()
       })}>明确运行已保存工程</button>
       <button className="button secondary" disabled={busy} onClick={() => void action('导出场景定义', async () => downloadDefinition())}>导出定义 JSON</button>
       <label>导入定义<input aria-label="导入场景定义 JSON" type="file" accept=".json,application/json" disabled={busy} onChange={event => {
@@ -88,15 +97,28 @@ export function ScenarioPanel({ project }: { project: ProjectView | null }) {
       }} /></label>
     </div>
     <div className="context-actions">
-      <select aria-label="选择产品测试历史" value={selected} onChange={event => setSelected(event.target.value)}><option value="">选择历史运行</option>{history.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status} · {item.started_at}</option>)}</select>
+      <select aria-label="选择产品测试历史" disabled={busy} value={selected} onChange={event => { setSelected(event.target.value); setComparison(null) }}><option value="">选择历史运行</option>{history.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status} · {item.started_at}</option>)}</select>
       <button className="button secondary" disabled={busy} onClick={() => void action('刷新测试历史', async () => { await refresh(); setPollRetry(value => value + 1) })}>刷新历史/结果</button>
       <button className="button secondary" disabled={busy || !run || run.status !== 'running'} onClick={() => void action('取消场景并清理', async () => { if (run) setRun(await api.cancelScenario(run.id)); await refresh(); setPollRetry(value => value + 1) })}>取消本次运行</button>
       {run && run.status !== 'running' && <>
         <a className="button secondary" href={api.scenarioArtifactUrl(run.id, 'junit')} download>下载 JUnit</a>
         <a className="button secondary" href={api.scenarioArtifactUrl(run.id, 'report')} target="_blank" rel="noreferrer">查看 HTML 报告</a>
+        <a className="button secondary" href={api.scenarioArtifactUrl(run.id, 'evidence')} download>下载完整证据包（含完整性声明）</a>
         {run.recording_id && <a className="button secondary" href={api.recordingExportUrl(run.recording_id)} download>下载原始记录</a>}
       </>}
     </div>
+    <div className="context-actions">
+      <select aria-label="选择测试基线" disabled={busy} value={baseline} onChange={event => { setBaseline(event.target.value); setComparison(null) }}><option value="">选择对比基线</option>{history.filter(item => item.status !== 'running').map(item => <option key={item.id} value={item.id}>{item.name} · {item.status} · {item.started_at}</option>)}</select>
+      <button className="button secondary" disabled={busy || !baseline || !run || run.status === 'running'} onClick={() => void action('测试基线比较', async () => { if (run) setComparison(await api.compareScenarios(run.id, baseline)) })}>比较所选运行与基线</button>
+      <button className="button secondary" disabled={busy || !run} onClick={() => void action('载入历史场景定义（不运行）', async () => { if (run) setEditor(stringifyJson((await api.scenarioInputs(run.id)).definition, 2)) })}>载入历史定义（不运行）</button>
+    </div>
+    {comparison && <section aria-label="测试基线比较结果">
+      <p>同条件可比较：{comparison.comparable ? '是' : '否（配置/模型/版本/执行代码不同）'} · 基线 {comparison.status.baseline} → 当前 {comparison.status.current}</p>
+      <p className="muted">{comparison.note}</p>
+      <p>动作累计耗时：{comparison.duration_ms.baseline.toFixed(1)} → {comparison.duration_ms.current.toFixed(1)} ms（不是硬实时判据）</p>
+      <table><thead><tr><th>参数组/断言</th><th>基线</th><th>当前</th><th>差异</th></tr></thead><tbody>{comparison.assertions.map(item => <tr key={`${item.case}:${item.index}`}><td>{item.case}/{item.index}</td><td>{item.baseline?.status ?? '无'}</td><td>{item.current?.status ?? '无'}</td><td>{item.changed ? '变更' : '一致'}</td></tr>)}</tbody></table>
+      <details><summary>比较详情（含模型/配置差异与精确值）</summary><pre style={{ maxHeight: 400, overflow: 'auto' }}>{stringifyJson(comparison, 2)}</pre></details>
+    </section>}
     {notice && <p role="status">{notice}</p>}
     {run && <>
       <p>状态：{run.status} · 清理完成：{run.cleanup_complete ? '是' : '否'} · 请求：{run.request_id}</p>

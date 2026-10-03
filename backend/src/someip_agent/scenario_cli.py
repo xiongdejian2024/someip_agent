@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import httpx
 
 from someip_agent.logging_config import configure_logging
+from someip_agent.workbench.results import verify_evidence
 from someip_agent.workbench.scenario_models import ScenarioDefinition
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,17 @@ def execute(args: argparse.Namespace, client: httpx.Client) -> int:
             response = client.get(f"{root}/{identifier}/{suffix}")
             response.raise_for_status()
             write_artifact(path, response.content)
+    evidence_path = getattr(args, "evidence", None)
+    evidence_complete = True
+    if evidence_path:
+        response = client.get(f"{root}/{identifier}/evidence", timeout=90)
+        response.raise_for_status()
+        write_artifact(evidence_path, response.content)
+        evidence_complete = bool(verify_evidence(evidence_path)["complete"])
+        if not evidence_complete:
+            logger.warning(
+                "运行结果已返回，但证据包声明不完整", extra={"operation": "scenario.cli.evidence"}
+            )
     logger.info(
         "产品场景已完成",
         extra={
@@ -114,7 +126,11 @@ def execute(args: argparse.Namespace, client: httpx.Client) -> int:
             "status": result["status"],
         },
     )
-    return 0 if result["status"] == "passed" and result["cleanup_complete"] else 1
+    return (
+        0
+        if result["status"] == "passed" and result["cleanup_complete"] and evidence_complete
+        else 1
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -126,6 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--result", type=Path, help="最终结果 JSON（不覆盖已有文件）")
     parser.add_argument("--junit", type=Path, help="JUnit XML（不覆盖已有文件）")
     parser.add_argument("--html", type=Path, help="HTML 报告（不覆盖已有文件）")
+    parser.add_argument(
+        "--evidence", type=Path, help="完整证据 ZIP（不完整时退出 1，不覆盖已有文件）"
+    )
     args = parser.parse_args(argv)
     configure_logging("INFO")
     if not 0 < args.timeout <= 900:
@@ -138,6 +157,27 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except Exception:
         logger.exception("场景客户端执行失败", extra={"operation": "scenario.cli.failed"})
+        return 2
+
+
+def verify_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="离线只读校验产品证据 ZIP，不执行或导入内容")
+    parser.add_argument("path", type=Path, help="已下载证据 ZIP")
+    args = parser.parse_args(argv)
+    configure_logging("INFO")
+    try:
+        manifest = verify_evidence(args.path)
+        logger.info(
+            "证据附件与场景/模型关联校验通过",
+            extra={
+                "operation": "evidence.verify",
+                "run_id": manifest["run_id"],
+                "status": "complete" if manifest["complete"] else "incomplete",
+            },
+        )
+        return 0 if manifest["complete"] else 1
+    except Exception:
+        logger.exception("证据校验失败", extra={"operation": "evidence.verify"})
         return 2
 
 

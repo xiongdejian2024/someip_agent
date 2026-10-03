@@ -26,6 +26,34 @@ logger = logging.getLogger(__name__)
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 
+def check_portable_data(node: Any, depth: int = 0) -> None:
+    """工程和场景共享的可移植输入门禁，不把本机凭据或授权装进证据。"""
+    forbidden = {
+        "api_key",
+        "llm_api_key",
+        "private_key",
+        "private_key_path",
+        "token",
+        "password",
+        "install_root",
+        "data_dir",
+        "native_binary",
+        "runtime_path",
+        "network_send_enabled",
+        "allowed_destinations",
+    }
+    if depth > 64:
+        raise ValueError("可移植配置嵌套超过 64 层")
+    if isinstance(node, dict):
+        if any(str(key).casefold().replace("-", "_") in forbidden for key in node):
+            raise ValueError("可移植配置不接受密钥、主机路径或发送授权字段")
+        for child in node.values():
+            check_portable_data(child, depth + 1)
+    elif isinstance(node, list):
+        for child in node:
+            check_portable_data(child, depth + 1)
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -77,34 +105,7 @@ class ProjectDocument(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def migrate(cls, value: Any) -> Any:
-        forbidden = {
-            "api_key",
-            "llm_api_key",
-            "private_key",
-            "private_key_path",
-            "token",
-            "password",
-            "install_root",
-            "data_dir",
-            "native_binary",
-            "runtime_path",
-            "network_send_enabled",
-            "allowed_destinations",
-        }
-
-        def check(node: Any, depth: int = 0) -> None:
-            if depth > 64:
-                raise ValueError("工程嵌套超过 64 层")
-            if isinstance(node, dict):
-                if forbidden.intersection(node):
-                    raise ValueError("工程不接受密钥、主机路径或发送授权字段")
-                for child in node.values():
-                    check(child, depth + 1)
-            elif isinstance(node, list):
-                for child in node:
-                    check(child, depth + 1)
-
-        check(value)
+        check_portable_data(value)
         if (
             isinstance(value, dict)
             and "format_version" in value
