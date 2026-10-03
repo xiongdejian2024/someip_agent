@@ -184,6 +184,7 @@ jobs:
           node scripts/check_json_precision.mjs
           node scripts/check_generator_precision.mjs
           node scripts/check_timed_states.mjs
+          node scripts/check_workbench_ui.mjs
 
       - name: 监控缓冲与分层淘汰计数验收
         run: |

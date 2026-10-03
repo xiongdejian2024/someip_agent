@@ -1,4 +1,9 @@
 .sim-workbench { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sim-service-route { padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel-soft); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sim-service-route > div { flex: 1 1 240px; }
+.sim-service-route strong { font-size: 13px; }
+.sim-service-route p { margin: 5px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.sim-service-route button { white-space: normal; }
 .sim-workbench .inline-notice { margin: 0; font-size: 12px; }
 .sim-workbench .inline-notice > span { flex: 1; min-width: 0; }
 .sim-session-bar { padding: 15px 17px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }

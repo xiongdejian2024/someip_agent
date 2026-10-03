@@ -1,16 +1,42 @@
-.service-runtime-panel { padding: 22px; }
+.service-runtime-panel { padding: 22px; min-width: 0; }
 .service-runtime-panel > .muted { line-height: 1.65; margin: 0 0 16px; }
-.service-runtime-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.service-runtime-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; align-items: end; margin-bottom: 18px; }
 .service-runtime-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
-.service-runtime-panel input, .service-runtime-panel select, .service-runtime-panel textarea { padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); min-width: 120px; }
+.service-runtime-panel input, .service-runtime-panel select, .service-runtime-panel textarea { padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-input); color: var(--text); min-width: 0; width: 100%; font-size: 13px; }
 .service-runtime-panel textarea { resize: vertical; width: 100%; font-family: ui-monospace, monospace; margin-bottom: 10px; }
 .service-runtime-sessions { display: grid; gap: 10px; margin-top: 16px; }
-.service-runtime-sessions article { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; }
+.service-runtime-sessions article { min-width: 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border: 1px solid var(--line-soft); border-radius: 9px; padding: 14px; background: var(--panel-soft); }
+.service-runtime-sessions .button.ghost { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; justify-content: flex-start; }
 .service-runtime-sessions small { width: 100%; overflow-wrap: anywhere; color: var(--muted); }
 .service-runtime-commands { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px; display: grid; gap: 12px; }
 .service-runtime-request { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .service-runtime-request code { overflow-wrap: anywhere; }
-.service-runtime-panel label.service-runtime-checkbox { flex-direction: row; align-items: center; padding: 10px 0; }
-.service-runtime-panel .service-runtime-checkbox input { min-width: auto; margin: 0; }
+.service-runtime-panel label.service-runtime-checkbox { grid-column: 1 / -1; flex-direction: row; align-items: center; padding: 2px 0; line-height: 1.6; }
+.service-runtime-panel .service-runtime-checkbox input { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
 .service-runtime-results { display: grid; gap: 8px; margin-top: 16px; overflow-wrap: anywhere; }
 .service-runtime-results p { margin: 4px 0; color: var(--muted); font-size: 12px; }
+.service-runtime-step { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 20px 0 14px; }
+.service-runtime-step > span { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 7px; background: rgba(32,230,179,.12); color: var(--green); font-size: 12px; font-weight: 650; }
+.service-runtime-step h4 { margin: 0; font-size: 15px; }
+.service-runtime-step small { color: var(--text-secondary); font-size: 12px !important; }
+.service-runtime-init-actions { grid-column: 1 / -1; padding-top: 6px; }
+.service-runtime-badge { flex-shrink: 0; padding: 6px 10px; font-size: 12px; color: var(--green); background: rgba(32,230,179,.08); border: 1px solid var(--green-dim); border-radius: 20px; }
+.service-runtime-technical { flex: 1 1 100%; font-size: 12px; }
+.service-runtime-technical summary, .service-runtime-help summary { cursor: pointer; color: var(--text-secondary); padding: 8px 0; }
+.service-runtime-technical small { display: block; line-height: 1.8; font-size: 11px !important; }
+.service-runtime-commands > section { padding: 18px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 10px; min-width: 0; }
+.service-runtime-commands > section .service-runtime-step { margin-top: 0; }
+.service-runtime-commands > section p, .service-runtime-panel > .muted { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.service-runtime-help { margin: 14px 0; padding: 0 12px; border: 1px solid var(--line-soft); border-radius: 7px; }
+.service-json-input { min-width: 0; margin: 12px 0; }
+.service-json-heading { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.service-json-input textarea { margin: 0 0 6px; line-height: 1.7; tab-size: 2; }
+.service-json-input textarea[aria-invalid=true] { border-color: var(--red); }
+.service-json-input small { font-size: 11px !important; line-height: 1.7; display: block; overflow-wrap: anywhere; }
+.service-json-error { color: #ffb4bd !important; }
+@container (max-width: 560px) {
+  .service-runtime-panel { padding: 16px; }
+  .service-runtime-form { grid-template-columns: minmax(0, 1fr); }
+  .service-runtime-panel .context-actions > button { flex: 1 1 180px; justify-content: center; }
+  .service-runtime-commands > section { padding: 12px; }
+}

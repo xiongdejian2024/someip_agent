@@ -13,18 +13,20 @@ interface ServicesPageProps {
   loading: boolean
   source: 'live' | 'demo'
   onServicesChange: (services: ServiceDefinition[]) => void
+  initialView?: 'model' | 'runtime'
 }
 
 type ChildType = 'methods' | 'events' | 'fields'
 
 const childLabels: Record<ChildType, string> = { methods: 'Methods', events: 'Events', fields: 'Fields' }
 
-export function ServicesPage({ services, loading, source, onServicesChange }: ServicesPageProps) {
+export function ServicesPage({ services, loading, source, onServicesChange, initialView = 'model' }: ServicesPageProps) {
   const project = useProject()
   const [selectedId, setSelectedId] = useState(() => services.find(service => project?.document.workspace.service_paths.includes(service.path ?? ''))?.id ?? services[0]?.id ?? '')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([services[0]?.id].filter(Boolean)))
   const [search, setSearch] = useState('')
   const [showImporter, setShowImporter] = useState(false)
+  const [view, setView] = useState<'model' | 'runtime'>(initialView)
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
@@ -38,7 +40,8 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
     )
   }, [search, services])
 
-  const selected = filtered.find((item) => item.id === selectedId) ?? filtered[0]
+  const selectable = view === 'model' ? filtered : services
+  const selected = selectable.find((item) => item.id === selectedId) ?? selectable[0]
   const openAgent = useAgentScope({ page: 'services', source: 'live', service_id: selected?.deployed === false ? undefined : protocolId(selected?.serviceId) })
 
   const toggle = (id: string) => {
@@ -91,7 +94,12 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
 
       {notice && <div className={`inline-notice ${notice.tone}`}><Icon name={notice.tone === 'success' ? 'check' : 'info'} />{notice.text}<button onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
 
-      <ServiceRuntimePanel selected={selected} demo={source === 'demo'} />
+      <nav className="service-view-tabs" aria-label="服务工作区视图">
+        <button className={view === 'model' ? 'active' : ''} aria-pressed={view === 'model'} onClick={() => setView('model')}><Icon name="database" size={17} />模型与接口<span>查看定义</span></button>
+        <button className={view === 'runtime' ? 'active' : ''} aria-pressed={view === 'runtime'} onClick={() => setView('runtime')}><Icon name="play" size={17} />服务运行与激励<span>明确启动</span></button>
+        {view === 'runtime' && <select aria-label="选择运行服务" value={selected?.id ?? ''} onChange={event => { setSelectedId(event.target.value); const service = services.find(item => item.id === event.target.value); project?.update(doc => ({ ...doc, workspace: { ...doc.workspace, service_paths: service?.path ? [service.path] : [] } })) }}><option value="" disabled>请选择服务</option>{services.map(service => <option key={service.id} value={service.id}>{service.name} · {service.serviceId}</option>)}</select>}
+      </nav>
+      <div hidden={view !== 'runtime'}><ServiceRuntimePanel selected={selected} demo={source === 'demo'} /></div>
 
       {showImporter && (
         <section className="panel import-panel">
@@ -101,7 +109,7 @@ export function ServicesPage({ services, loading, source, onServicesChange }: Se
         </section>
       )}
 
-      <section className="model-workspace">
+      <section className="model-workspace" hidden={view !== 'model'}>
         <aside className="model-tree panel">
           <div className="tree-toolbar">
             <div className="search-input"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索服务或接口" />{search && <button onClick={() => setSearch('')}><Icon name="x" size={13} /></button>}</div>

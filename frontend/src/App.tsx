@@ -35,6 +35,7 @@ export default function App() {
   const [simulationDraft, setSimulationDraft] = useState<{ id: string; config: SimulationStartRequest }>()
   const [modelError, setModelError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [serviceInitialView, setServiceInitialView] = useState<'model' | 'runtime'>('model')
   const { state: connectionState, health } = useBackendStatus()
   const { messages, samples, streamState, source, clear, streamCounters, bufferCounters } = useMonitorStream(true)
   const expectedServiceCount = health?.service_count
@@ -157,8 +158,11 @@ export default function App() {
 
   const content = (() => {
     switch (page) {
-      case 'services': return <ServicesPage services={services} loading={servicesLoading} source={serviceSource} onServicesChange={(items) => { setServices(items); setServicesLoading(false); setServiceSource('live'); setModelError(null) }} />
-      case 'simulation': return <SimulationPage services={services} samples={samples} draft={simulationDraft} onDismissDraft={() => setSimulationDraft(undefined)} loading={servicesLoading} />
+      case 'services': return <ServicesPage initialView={serviceInitialView} services={services} loading={servicesLoading} source={serviceSource} onServicesChange={(items) => { setServices(items); setServicesLoading(false); setServiceSource('live'); setModelError(null) }} />
+      case 'simulation': return <SimulationPage services={services} samples={samples} draft={simulationDraft} onDismissDraft={() => setSimulationDraft(undefined)} loading={servicesLoading} onOpenService={service => {
+        project.update(doc => ({ ...doc, workspace: { ...doc.workspace, service_paths: service.path ? [service.path] : [] } }))
+        setServiceInitialView('runtime'); navigate('services')
+      }} />
       case 'monitor': return <MonitorPage messages={messages} samples={samples} streamState={streamState} source={source} onClear={clear} streamCounters={streamCounters} bufferCounters={bufferCounters} />
       case 'pcap': return <PcapPage />
       case 'settings': return <SettingsPage currentVersion={health?.version} />

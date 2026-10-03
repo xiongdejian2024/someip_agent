@@ -3,6 +3,37 @@
 .protocol-agent-dock[hidden] { display: none; }
 .protocol-agent-dock { min-width: 0; height: min(760px, 85dvh); min-height: 480px; padding: 0 15px 15px; scroll-margin-top: 76px; }
 .context-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.main-content > details.panel { margin-bottom: 12px; padding: 0 16px; }
+.main-content > details.panel > summary { padding: 13px 0; cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.6; }
+.main-content > details.panel[open] { padding-bottom: 16px; }
+.main-content > details.panel p { font-size: 12px; line-height: 1.8; }
+.main-content > details.panel textarea, .main-content > details.panel input, .main-content > details.panel select { min-width: 0; max-width: 100%; background: var(--surface-input); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+.main-content > details.panel textarea { line-height: 1.7; }
+.main-content > details.panel .context-actions { margin: 12px 0; }
+.service-view-tabs { display: flex; gap: 6px; margin-bottom: 18px; padding: 5px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 10px; }
+.service-view-tabs button { display: flex; align-items: center; gap: 9px; padding: 11px 16px; background: transparent; border: 0; border-radius: 7px; font-size: 13px; cursor: pointer; }
+.service-view-tabs button.active { background: var(--surface-hover); color: var(--green); }
+.service-view-tabs button > span { font-size: 11px; color: var(--text-tertiary); }
+.service-view-tabs select { min-width: 0; margin-left: auto; max-width: 40%; padding: 8px; background: var(--surface-input); border: 1px solid var(--line); border-radius: 7px; color: var(--text); }
+.app-shell .brand small { font-size: 9px; }
+.button { font-size: 12px; min-height: 38px; height: auto; padding-block: 9px; }
+.button.secondary { background: var(--surface-hover); border-color: var(--line); }
+.button.secondary:hover { background: var(--panel-strong); }
+.services-page .toolbar-summary { font-size: 12px; }
+.services-page .tree-service-row strong, .services-page .tree-group button { font-size: 12px; }
+.services-page .tree-group button { height: 34px; }
+.services-page .tree-group > span, .services-page .tree-root-label { font-size: 11px; }
+.services-page .service-identity p, .services-page .service-facts span { font-size: 12px; }
+.services-page .service-facts strong { font-size: 17px; }
+.services-page td, .services-page th { font-size: 12px; }
+.service-runtime-panel .panel-header h3 { font-size: 17px; }
+.service-runtime-panel .panel-header .panel-kicker { font-size: 11px; }
+@container (max-width: 580px) {
+  .service-view-tabs { flex-wrap: wrap; }
+  .service-view-tabs button { flex: 1; justify-content: center; padding: 10px; }
+  .service-view-tabs button > span { display: none; }
+  .service-view-tabs select { flex: 1 1 100%; max-width: 100%; }
+}
 .agent-draft-review { padding: 16px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; border-color: var(--green-dim); }
 .agent-draft-review > div:first-child { flex: 1; min-width: 180px; }
 .agent-draft-review strong { overflow-wrap: anywhere; }

@@ -19,6 +19,7 @@ interface SimulationPageProps {
   services: ServiceDefinition[]
   samples: WaveSample[]
   loading?: boolean
+  onOpenService?: (service: ServiceDefinition) => void
   draft?: { id: string; config: SimulationStartRequest }
   onDismissDraft: () => void
 }
@@ -208,7 +209,7 @@ function waveKey(signal: Pick<SimulatableSignal, 'serviceId' | 'methodId' | 'nam
   return formatHex(signal.serviceId) + '/' + formatHex(signal.methodId) + '/' + signal.name
 }
 
-export function SimulationPage({ services, samples, draft, onDismissDraft, loading = false }: SimulationPageProps) {
+export function SimulationPage({ services, samples, draft, onDismissDraft, loading = false, onOpenService }: SimulationPageProps) {
   const project = useProject()
   const restoreDrafts = useRef(project?.document.simulations ?? [])
   const [simState, setSimState] = useState<SimState>('idle')
@@ -505,6 +506,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
           : <button className="button primary" disabled={!runtimeChecked || simState === 'starting' || !selectedSignals.length || !inputsValid} onClick={() => void start()}>{!runtimeChecked || simState === 'starting' ? <span className="spinner" /> : <Icon name="play" size={16} />}{!runtimeChecked ? '同步状态…' : simState === 'starting' ? '启动中…' : '启动工作集'}</button>}
       </section>
       {notice && <div role="status" className={'inline-notice ' + (notice.error ? 'error' : 'success')}><Icon name="info" size={16} /><span>{notice.text}</span><button aria-label="关闭仿真提示" onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
+      {activeService && onOpenService && <section className="sim-service-route" aria-label="完整服务仿真入口"><div><strong>完整事件 / 多信号激励</strong><p>本页配置数值单信号。复合事件、方法与字段使用冻结 ARXML 服务入口；切换页面不会停止正在运行的任务。</p></div><button className="button secondary" onClick={() => onOpenService(activeService)}>打开 {activeService.name} 的完整服务入口<Icon name="chevron" size={14} /></button></section>}
 
       <nav className="sim-view-tabs" aria-label="仿真工作区视图"><button className={workspaceView === 'signals' ? 'active' : ''} onClick={() => setWorkspaceView('signals')}><Icon name="layers" size={16} /> 信号激励 <span>{selectedSignals.length}</span></button><button className={workspaceView === 'waveform' ? 'active' : ''} onClick={() => setWorkspaceView('waveform')}><Icon name="activity" size={16} /> 输出波形</button><button className={workspaceView === 'tasks' ? 'active' : ''} onClick={() => setWorkspaceView('tasks')}><Icon name="terminal" size={16} /> 运行任务 <span>{runningTasks.length}</span></button></nav>
 
