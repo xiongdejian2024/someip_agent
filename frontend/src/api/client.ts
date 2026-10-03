@@ -156,7 +156,7 @@ export const api = {
   }),
   startSimulation: (config: SimulationStartRequest) => request<{ id: string; running: boolean }>('/simulation/start', {
     method: 'POST',
-    body: JSON.stringify(config),
+    body: stringifyJson(config),
   }),
   simulations: () => request<SimulationStatus[]>('/simulation'),
   stopSimulation: (simulationId?: string) => request<unknown[]>('/simulation/stop', {

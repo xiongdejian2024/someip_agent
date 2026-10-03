@@ -6,6 +6,7 @@ import { formatHex } from '../api/adapters'
 import { describeApiError } from '../api/client'
 import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
+import { isGeneratorNumber } from '../data/generatorValues'
 import type { AgentMessage, AgentWorkspaceContext, ConnectionState, PageId, SimulationStartRequest } from '../types'
 import { Icon } from './Icon'
 import { StatusBadge } from './StatusBadge'
@@ -143,8 +144,9 @@ function simulationPlan(tool: ToolActivity): SimulationStartRequest | null {
     || typeof generator.signal_name !== 'string'
     || !['constant', 'sine', 'ramp', 'random', 'sequence'].includes(String(generator.kind))
     || !['boolean', 'uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64', 'float32', 'float64'].includes(String(generator.data_type))
-    || !['minimum', 'maximum', 'initial', 'period_seconds'].every((key) => typeof generator[key] === 'number' && Number.isFinite(generator[key]))
-    || !Array.isArray(generator.sequence) || !generator.sequence.every((item) => typeof item === 'number' && Number.isFinite(item))) return null
+    || !['minimum', 'maximum', 'initial'].every(key => isGeneratorNumber(generator[key]))
+    || typeof generator.period_seconds !== 'number' || !Number.isFinite(generator.period_seconds)
+    || !Array.isArray(generator.sequence) || !generator.sequence.every(isGeneratorNumber)) return null
   return value as unknown as SimulationStartRequest
 }
 

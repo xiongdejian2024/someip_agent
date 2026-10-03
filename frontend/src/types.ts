@@ -54,8 +54,8 @@ export interface ServiceSignal {
   name: string
   dataType: string
   unit?: string
-  minimum?: number
-  maximum?: number
+  minimum?: number | bigint
+  maximum?: number | bigint
   byteOrder?: 'big' | 'little'
   factor?: number
   offset?: number
@@ -292,11 +292,12 @@ export interface SimulationStartRequest {
     signal_name: string
     kind: 'constant' | 'sine' | 'ramp' | 'random' | 'sequence'
     data_type: 'boolean' | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'int8' | 'int16' | 'int32' | 'int64' | 'float32' | 'float64'
-    minimum: number
-    maximum: number
-    initial: number
+    minimum: number | bigint
+    maximum: number | bigint
+    initial: number | bigint
     period_seconds: number
-    sequence: number[]
+    sequence: Array<number | bigint>
+    seed?: number | bigint
   }
 }
 

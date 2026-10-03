@@ -83,6 +83,7 @@ async def samples(tmp_path, binary, config, count=8):
         ("uint64", 18446744073709551615, "ffffffffffffffff"),
         ("int64", -9223372036854775808, "8000000000000000"),
         ("uint64", 18446744073709551614, "fffffffffffffffe"),
+        ("uint64", 9007199254740993, "0020000000000001"),
     ],
 )
 async def test_native_constant_exact_integer_trace_and_payload(

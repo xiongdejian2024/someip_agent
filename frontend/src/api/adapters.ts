@@ -4,8 +4,8 @@ interface RawSignal {
   name?: string
   data_type?: string
   unit?: string | null
-  minimum?: number | null
-  maximum?: number | null
+  minimum?: number | bigint | null
+  maximum?: number | bigint | null
   byte_order?: 'big' | 'little'
   factor?: number
   offset?: number

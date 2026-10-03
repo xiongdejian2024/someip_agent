@@ -4,6 +4,8 @@ import { formatHex } from '../api/adapters'
 import { logError, logInfo } from '../api/logger'
 import { Icon } from '../components/Icon'
 import { SignalScope } from '../components/SignalScope'
+import { GeneratorNumberInput } from '../components/GeneratorNumberInput'
+import { generatorMidpoint, generatorSliderSafe, isGeneratorNumber, validateGeneratorRange, type GeneratorNumber } from '../data/generatorValues'
 import { protocolId, useAgentScope } from '../agent/workspace'
 import type { ServiceDefinition, ServiceSignal, SimulationConfig, SimulationStartRequest, SimulationStatus, WaveSample } from '../types'
 import './SimulationPage.css'
@@ -34,8 +36,8 @@ interface SimulatableSignal {
   source: string
   dataType: GeneratorDataType
   unit?: string
-  minimum: number
-  maximum: number
+  minimum: GeneratorNumber
+  maximum: GeneratorNumber
   step: number
   inferredBounds: boolean
 }
@@ -45,7 +47,7 @@ interface SimulationProjection {
   warnings: { serviceKey: string; message: string }[]
 }
 
-interface SignalSetting { kind: GeneratorMode; value: number; periodSeconds: number; minimum: number; maximum: number }
+interface SignalSetting { kind: GeneratorMode; value: GeneratorNumber; periodSeconds: number; minimum: GeneratorNumber; maximum: GeneratorNumber; seed?: GeneratorNumber }
 const generatorLabels: Record<GeneratorMode, string> = { constant: '常量', sine: '正弦', ramp: '斜坡' }
 const SIGNAL_PAGE_SIZE = 40
 const TASK_PAGE_SIZE = 8
@@ -71,16 +73,16 @@ function defaultBounds(dataType: GeneratorDataType): [number, number] {
   return [0, 100]
 }
 
-function signalBounds(signal: ServiceSignal, dataType: GeneratorDataType): [number, number] {
+function signalBounds(signal: ServiceSignal, dataType: GeneratorDataType): [GeneratorNumber, GeneratorNumber] {
   const [fallbackMinimum, fallbackMaximum] = defaultBounds(dataType)
-  const minimum = Number.isFinite(signal.minimum) ? Number(signal.minimum) : fallbackMinimum
-  const maximumCandidate = Number.isFinite(signal.maximum) ? Number(signal.maximum) : fallbackMaximum
+  const minimum = isGeneratorNumber(signal.minimum) ? signal.minimum : fallbackMinimum
+  const maximumCandidate = isGeneratorNumber(signal.maximum) ? signal.maximum : fallbackMaximum
   return [minimum, maximumCandidate >= minimum ? maximumCandidate : minimum]
 }
 
-function signalStep(dataType: GeneratorDataType, minimum: number, maximum: number): number {
+function signalStep(dataType: GeneratorDataType, minimum: GeneratorNumber, maximum: GeneratorNumber): number {
   if (dataType === 'boolean' || dataType.includes('int')) return 1
-  return Math.max(0.01, Number(((maximum - minimum) / 1000).toPrecision(2)))
+  return Math.max(0.01, Number(((Number(maximum) - Number(minimum)) / 1000).toPrecision(2)))
 }
 
 function supportedEncoding(signal: ServiceSignal): boolean {
@@ -143,7 +145,7 @@ function buildSimulationProjection(services: ServiceDefinition[], selectedServic
         minimum,
         maximum,
         step: signalStep(dataType, minimum, maximum),
-        inferredBounds: !Number.isFinite(signal.minimum) || !Number.isFinite(signal.maximum),
+        inferredBounds: !isGeneratorNumber(signal.minimum) || !isGeneratorNumber(signal.maximum),
       })
     })
     service.fields.forEach((field, fieldIndex) => {
@@ -175,17 +177,15 @@ function buildSimulationProjection(services: ServiceDefinition[], selectedServic
         minimum,
         maximum,
         step: signalStep(dataType, minimum, maximum),
-        inferredBounds: !Number.isFinite(definition.minimum) || !Number.isFinite(definition.maximum),
+        inferredBounds: !isGeneratorNumber(definition.minimum) || !isGeneratorNumber(definition.maximum),
       })
     })
   })
   return { signals, warnings }
 }
 
-function initialSignalValue(signal: SimulatableSignal): number {
-  if (signal.dataType === 'boolean') return signal.minimum
-  const midpoint = signal.minimum + (signal.maximum - signal.minimum) / 2
-  return signal.dataType.includes('int') ? Math.round(midpoint) : midpoint
+function initialSignalValue(signal: SimulatableSignal): GeneratorNumber {
+  return generatorMidpoint(signal.minimum, signal.maximum, signal.dataType)
 }
 
 function defaultSetting(signal: SimulatableSignal): SignalSetting {
@@ -221,6 +221,14 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
   const [runtimeChecked, setRuntimeChecked] = useState(false)
   const [tasks, setTasks] = useState<SimulationStatus[]>([])
   const [stoppingTask, setStoppingTask] = useState<string | null>(null)
+  const [invalidInputs, setInvalidInputs] = useState<Record<string, boolean>>({})
+  const inputsValid = !Object.values(invalidInputs).some(Boolean)
+  const inputValidity = (key: string, valid: boolean) => setInvalidInputs(current => {
+    if (!!current[key] === !valid) return current
+    const next = { ...current }
+    if (valid) delete next[key]; else next[key] = true
+    return next
+  })
   const mutationEpoch = useRef(0)
 
   const projection = useMemo(() => buildSimulationProjection(services, new Set(services.map((service) => service.id))), [services])
@@ -234,7 +242,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
       return signal && ['constant', 'sine', 'ramp'].includes(request.generator.kind) ? [{ signal, request }] : []
     })
     setSelectedKeys(matches.map(item => item.signal.key))
-    setSettings(Object.fromEntries(matches.map(({ signal, request }) => [signal.key, { kind: request.generator.kind as GeneratorMode, value: request.generator.initial, periodSeconds: request.generator.period_seconds, minimum: request.generator.minimum, maximum: request.generator.maximum }])))
+    setSettings(Object.fromEntries(matches.map(({ signal, request }) => [signal.key, { kind: request.generator.kind as GeneratorMode, value: request.generator.initial, periodSeconds: request.generator.period_seconds, minimum: request.generator.minimum, maximum: request.generator.maximum, seed: request.generator.seed }])))
     const first = matches[0]?.request
     if (first) {
       setMode(first.transport === 'udp' ? 'physical' : 'virtual')
@@ -282,7 +290,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
         name: `${signal.serviceName}-${signal.name}-simulation`, service_id: signal.serviceId, instance_id: signal.instanceId,
         method_id: signal.methodId, interface_version: signal.interfaceVersion, interval_ms: effectiveIntervalMs,
         transport: mode === 'physical' ? 'udp' : 'internal', destination_host: config.destinationHost, destination_port: config.destinationPort, enable_sd: config.enableSd,
-        generator: { signal_name: signal.name, kind: setting.kind, data_type: signal.dataType, minimum: setting.minimum, maximum: setting.maximum, initial: setting.value, period_seconds: setting.periodSeconds, sequence: [] },
+        generator: { signal_name: signal.name, kind: setting.kind, data_type: signal.dataType, minimum: setting.minimum, maximum: setting.maximum, initial: setting.value, period_seconds: setting.periodSeconds, sequence: [], seed: setting.seed },
       }
     })
     projectUpdate?.(doc => ({ ...doc, simulations: requests }))
@@ -362,10 +370,11 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
       const target = projection.signals.find((signal) => signal.serviceId === planned.service_id && signal.instanceId === planned.instance_id && signal.methodId === planned.method_id && signal.originalName === planned.generator.signal_name)
       if (!target || planned.transport !== 'internal' || planned.generator.data_type !== target.dataType || !['constant', 'sine', 'ramp'].includes(planned.generator.kind)) throw new Error('草案与当前 ARXML 或仿真能力不匹配，请重新生成')
       const { minimum, maximum, initial, period_seconds } = planned.generator
-      if (![minimum, maximum, initial, period_seconds, planned.interval_ms].every(Number.isFinite) || minimum > maximum || initial < minimum || initial > maximum || period_seconds < 0.1 || planned.interval_ms < 10 || planned.interval_ms > 60_000) throw new Error('草案包含无效的激励参数')
+      validateGeneratorRange(target.dataType, planned.generator.kind, minimum, maximum, initial)
+      if (![period_seconds, planned.interval_ms].every(Number.isFinite) || period_seconds < 0.1 || planned.interval_ms < 10 || planned.interval_ms > 60_000) throw new Error('草案包含无效的激励参数')
       if (!target.inferredBounds && (minimum < target.minimum || maximum > target.maximum)) throw new Error('草案超出当前 ARXML 范围')
       setSelectedKeys([target.key])
-      setSettings({ [target.key]: { kind: planned.generator.kind as GeneratorMode, value: initial, periodSeconds: period_seconds, minimum, maximum } })
+      setSettings({ [target.key]: { kind: planned.generator.kind as GeneratorMode, value: initial, periodSeconds: period_seconds, minimum, maximum, seed: planned.generator.seed } })
       setServiceKey(target.serviceKey); setFocusedKey(target.key); setServiceQuery(''); setSignalQuery(''); setSignalPage(0)
       setTableView('workset'); setWorkspaceView('signals'); setPropertyTab('signal'); setMode('virtual')
       setConfig((current) => ({ ...current, cycleMs: planned.interval_ms, multiplier: 1, enableSd: planned.enable_sd ?? false }))
@@ -385,6 +394,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
     setNotice(null)
     const startedIds: string[] = []
     try {
+      if (!inputsValid) throw new Error('请先修正无效的激励数值输入')
       if (!selectedSignals.length) throw new Error('请先将需要仿真的信号加入工作集')
       if (mode === 'physical' && !config.destinationHost.trim()) throw new Error('真实 UDP 模式必须填写目标主机')
       if (!Number.isFinite(config.cycleMs) || config.cycleMs < 10 || config.cycleMs > 60000) throw new Error('基础周期必须在 10–60000 ms 之间')
@@ -394,13 +404,8 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
       const offeredServices = new Set<string>()
       const requests: SimulationStartRequest[] = selectedSignals.map((signal) => {
         const setting = settings[signal.key] ?? defaultSetting(signal)
-        if (![setting.minimum, setting.maximum, setting.value].every(Number.isFinite) || setting.minimum > setting.maximum || setting.value < setting.minimum || setting.value > setting.maximum) {
-          throw new Error(signal.name + ' 的范围或初始值无效')
-        }
+        validateGeneratorRange(signal.dataType, setting.kind, setting.minimum, setting.maximum, setting.value)
         if (!signal.inferredBounds && (setting.minimum < signal.minimum || setting.maximum > signal.maximum)) throw new Error(signal.name + ' 的激励超出 ARXML 范围')
-        if ((signal.dataType.includes('int') || signal.dataType === 'boolean') && !Number.isInteger(setting.value)) {
-          throw new Error(signal.name + ' 的 ' + signal.dataType + ' 类型需要整数值')
-        }
         if (!Number.isFinite(setting.periodSeconds) || setting.periodSeconds < 0.1) throw new Error(signal.name + ' 的曲线周期不得小于 0.1 秒')
         const serviceInstanceKey = signal.serviceId + ':' + signal.instanceId
         const enableSd = config.enableSd && !offeredServices.has(serviceInstanceKey)
@@ -414,7 +419,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
           generator: {
             signal_name: signal.name, kind: setting.kind, data_type: signal.dataType,
             minimum: setting.minimum, maximum: setting.maximum, initial: setting.value,
-            period_seconds: setting.periodSeconds, sequence: [],
+            period_seconds: setting.periodSeconds, sequence: [], seed: setting.seed,
           },
         }
       })
@@ -469,7 +474,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
 
   return (
     <div className="page sim-workbench">
-      {draft && <section className="panel agent-draft-review" aria-label="智能体仿真草案审阅"><div><strong>待审阅：{draft.config.generator.signal_name}</strong><p>{formatHex(draft.config.service_id)} / {formatHex(draft.config.method_id)} · {draft.config.generator.kind} · {draft.config.interval_ms} ms · 范围 {draft.config.generator.minimum}–{draft.config.generator.maximum} · 初始 {draft.config.generator.initial} · 仅内部总线</p><small>应用后替换当前工作集为此单信号；不会自动启动。运行期间需先手动停止任务。</small></div><div className="context-actions"><button className="button primary" disabled={locked || !runtimeChecked || loading} onClick={applyDraft}>确认替换工作集</button><button className="button ghost" onClick={onDismissDraft}>取消草案</button></div></section>}
+      {draft && <section className="panel agent-draft-review" aria-label="智能体仿真草案审阅"><div><strong>待审阅：{draft.config.generator.signal_name}</strong><p>{formatHex(draft.config.service_id)} / {formatHex(draft.config.method_id)} · {draft.config.generator.kind} · {draft.config.interval_ms} ms · 范围 {String(draft.config.generator.minimum)}–{String(draft.config.generator.maximum)} · 初始 {String(draft.config.generator.initial)} · 仅内部总线</p><small>应用后替换当前工作集为此单信号；不会自动启动。运行期间需先手动停止任务。</small></div><div className="context-actions"><button className="button primary" disabled={locked || !runtimeChecked || loading} onClick={applyDraft}>确认替换工作集</button><button className="button ghost" onClick={onDismissDraft}>取消草案</button></div></section>}
       <section className="panel sim-session-bar">
         <div className="sim-session-heading">
           <span className={'sim-session-indicator' + (running ? ' is-running' : '')}><Icon name={running ? 'activity' : 'play'} size={20} /></span>
@@ -481,7 +486,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
         </div>
         <button className="button secondary" disabled={!focusedSignal || loading} onClick={() => openAgent('请基于当前选中的 ARXML 信号生成一个内部仿真草案，说明数据类型、范围、周期和验证步骤；仅准备草案，不启动任务。')}><Icon name="sparkles" size={16} />生成信号草案</button>
         {running ? <button className="button danger" disabled={simState === 'stopping' || stoppingTask !== null} onClick={() => void stop()}><Icon name="stop" size={16} />{simState === 'stopping' ? '停止中…' : '停止全部'}</button>
-          : <button className="button primary" disabled={!runtimeChecked || simState === 'starting' || !selectedSignals.length} onClick={() => void start()}>{!runtimeChecked || simState === 'starting' ? <span className="spinner" /> : <Icon name="play" size={16} />}{!runtimeChecked ? '同步状态…' : simState === 'starting' ? '启动中…' : '启动工作集'}</button>}
+          : <button className="button primary" disabled={!runtimeChecked || simState === 'starting' || !selectedSignals.length || !inputsValid} onClick={() => void start()}>{!runtimeChecked || simState === 'starting' ? <span className="spinner" /> : <Icon name="play" size={16} />}{!runtimeChecked ? '同步状态…' : simState === 'starting' ? '启动中…' : '启动工作集'}</button>}
       </section>
       {notice && <div role="status" className={'inline-notice ' + (notice.error ? 'error' : 'success')}><Icon name="info" size={16} /><span>{notice.text}</span><button aria-label="关闭仿真提示" onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
 
@@ -521,7 +526,7 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
                 return <tr key={signal.key} className={focusedSignal?.key === signal.key ? 'is-focused' : ''} onClick={() => { setFocusedKey(signal.key); setPropertyTab('signal') }}>
                   <td><input type="checkbox" aria-label={'加入工作集 ' + signal.name} checked={selectedKeySet.has(signal.key)} disabled={locked} onClick={(event) => event.stopPropagation()} onChange={() => toggleSignal(signal)} /></td>
                   <td><button className="sim-row-link" title={signal.name + '\n' + signal.serviceName + ' · ' + signal.source} onClick={() => { setFocusedKey(signal.key); setPropertyTab('signal') }}><strong>{signal.name}</strong><small>{tableView === 'workset' ? signal.serviceName + ' · ' : ''}{signal.source}</small></button></td>
-                  <td><code title={signal.dataType}>{signal.dataType}</code></td><td className="sim-numeric" title={String(setting.value)}>{setting.value}</td><td title={signal.unit || 'ARXML 未定义单位'}>{signal.unit || '—'}</td><td><span className={'sim-generator-label ' + setting.kind}>{generatorLabels[setting.kind]}</span></td>
+                  <td><code title={signal.dataType}>{signal.dataType}</code></td><td className="sim-numeric" title={String(setting.value)}>{String(setting.value)}</td><td title={signal.unit || 'ARXML 未定义单位'}>{signal.unit || '—'}</td><td><span className={'sim-generator-label ' + setting.kind}>{generatorLabels[setting.kind]}</span></td>
                 </tr>
               })}</tbody>
             </table>
@@ -536,14 +541,14 @@ export function SimulationPage({ services, samples, draft, onDismissDraft, loadi
           <div className="sim-property-body">
             {propertyTab === 'signal' ? focusedSignal && focusedSetting ? <>
               <p className="sim-eyebrow">当前信号</p><h3 className="sim-property-name" title={focusedSignal.name}>{focusedSignal.name}</h3>
-              <dl className="sim-metadata"><dt>服务</dt><dd title={focusedSignal.serviceName}>{focusedSignal.serviceName}</dd><dt>Service / Instance</dt><dd>{formatHex(focusedSignal.serviceId)} / {formatHex(focusedSignal.instanceId)}</dd><dt>Event / Notifier</dt><dd>{formatHex(focusedSignal.methodId)}</dd><dt>数据类型 / 单位</dt><dd>{focusedSignal.dataType} / {focusedSignal.unit || '未定义'}</dd><dt>数值范围</dt><dd>{focusedSignal.minimum} ~ {focusedSignal.maximum}</dd></dl>
+              <dl className="sim-metadata"><dt>服务</dt><dd title={focusedSignal.serviceName}>{focusedSignal.serviceName}</dd><dt>Service / Instance</dt><dd>{formatHex(focusedSignal.serviceId)} / {formatHex(focusedSignal.instanceId)}</dd><dt>Event / Notifier</dt><dd>{formatHex(focusedSignal.methodId)}</dd><dt>数据类型 / 单位</dt><dd>{focusedSignal.dataType} / {focusedSignal.unit || '未定义'}</dd><dt>数值范围</dt><dd>{String(focusedSignal.minimum)} ~ {String(focusedSignal.maximum)}</dd></dl>
               {focusedSignal.inferredBounds && <p className="sim-help">ARXML 未完整定义范围，当前使用默认激励范围。</p>}
               <div className="sim-property-divider" />
-              <label className="sim-form-field"><span>激励最小值</span><input type="number" value={focusedSetting.minimum} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { minimum: Number(event.target.value) })} /></label>
-              <label className="sim-form-field"><span>激励最大值</span><input type="number" value={focusedSetting.maximum} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { maximum: Number(event.target.value) })} /></label>
+              <GeneratorNumberInput key={focusedSignal.key + ':minimum'} label="激励最小值" value={focusedSetting.minimum} dataType={focusedSignal.dataType} disabled={locked} onChange={minimum => updateSetting(focusedSignal, { minimum })} onValidityChange={valid => inputValidity(focusedSignal.key + ':minimum', valid)} />
+              <GeneratorNumberInput key={focusedSignal.key + ':maximum'} label="激励最大值" value={focusedSetting.maximum} dataType={focusedSignal.dataType} disabled={locked} onChange={maximum => updateSetting(focusedSignal, { maximum })} onValidityChange={valid => inputValidity(focusedSignal.key + ':maximum', valid)} />
               <label className="sim-form-field"><span>激励方式</span><select value={focusedSetting.kind} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { kind: event.target.value as GeneratorMode })}><option value="constant">常量 · 固定值</option><option value="sine">正弦 · 周期变化</option><option value="ramp">斜坡 · 线性扫描</option></select></label>
-              <label className="sim-form-field"><span>{focusedSetting.kind === 'constant' ? '输出值' : '初始值'} {focusedSignal.unit && '(' + focusedSignal.unit + ')'}</span><input type="number" min={focusedSignal.minimum} max={focusedSignal.maximum} step={focusedSignal.step} value={focusedSetting.value} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { value: Number(event.target.value) })} /></label>
-              {focusedSetting.kind === 'constant' ? <div className="sim-property-range"><input aria-label="调整信号输出值" type="range" min={focusedSignal.minimum} max={focusedSignal.maximum} step={focusedSignal.step} value={focusedSetting.value} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { value: Number(event.target.value) })} /><div><span>{focusedSignal.minimum}</span><span>{focusedSignal.maximum}</span></div></div>
+              <GeneratorNumberInput key={focusedSignal.key + ':value'} label={focusedSetting.kind === 'constant' ? '输出值' : '初始值'} value={focusedSetting.value} dataType={focusedSignal.dataType} disabled={locked} onChange={value => updateSetting(focusedSignal, { value })} onValidityChange={valid => inputValidity(focusedSignal.key + ':value', valid)} />
+              {focusedSetting.kind === 'constant' ? generatorSliderSafe(focusedSetting.minimum, focusedSetting.maximum, focusedSetting.value) ? <div className="sim-property-range"><input aria-label="调整信号输出值" type="range" min={Number(focusedSetting.minimum)} max={Number(focusedSetting.maximum)} step={focusedSignal.step} value={Number(focusedSetting.value)} disabled={locked || !inputsValid} onChange={(event) => updateSetting(focusedSignal, { value: Number(event.target.value) })} /><div><span>{String(focusedSetting.minimum)}</span><span>{String(focusedSetting.maximum)}</span></div></div> : <p className="sim-help">精确大整数使用十进制文本输入，不使用浮点滑块。</p>
                 : <label className="sim-form-field"><span>曲线周期 (s)</span><input type="number" min={0.1} step={0.1} value={focusedSetting.periodSeconds} disabled={locked} onChange={(event) => updateSetting(focusedSignal, { periodSeconds: Number(event.target.value) })} /></label>}
               <button className={'button sim-add-signal ' + (selectedKeySet.has(focusedSignal.key) ? 'subtle' : 'primary')} disabled={locked} onClick={() => toggleSignal(focusedSignal)}><Icon name={selectedKeySet.has(focusedSignal.key) ? 'check' : 'layers'} size={15} />{selectedKeySet.has(focusedSignal.key) ? '已加入工作集 · 点击移除' : '加入工作集'}</button>
               <p className="sim-help">{locked ? '任务运行期间配置已锁定，停止测量后可修改。' : '此处的参数仅作用于当前信号。加入工作集后随测量一起启动。'}</p>

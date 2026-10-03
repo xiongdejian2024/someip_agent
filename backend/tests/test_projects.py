@@ -133,6 +133,46 @@ def test_api_save_export_restore_and_restart_without_execution(tmp_path, monkeyp
         assert restarted.get("/api/v1/network/listeners").json() == []
 
 
+def test_exact_integer_simulation_drafts_restart_without_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr("someip_agent.agent.service.keyring.get_password", lambda *_: None)
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    doc = document("精确整数工程").model_dump(mode="json")
+    doc["simulations"] = [
+        {
+            "service_id": 0x1234,
+            "method_id": 0x8001,
+            "generator": {
+                "kind": "constant",
+                "data_type": data_type,
+                "minimum": low,
+                "maximum": high,
+                "initial": initial,
+                "seed": 18446744073709551615,
+            },
+        }
+        for data_type, low, high, initial in [
+            ("uint64", 0, 18446744073709551615, 9007199254740993),
+            ("int64", -9223372036854775808, 9223372036854775807, -9223372036854775808),
+        ]
+    ]
+    with TestClient(create_app(settings)) as client:
+        created = client.post("/api/v1/projects", json={"document": doc})
+        assert created.status_code == 200, created.text
+        identifier = created.json()["id"]
+        assert client.post(f"/api/v1/projects/{identifier}/open").status_code == 200
+        exported = client.get(f"/api/v1/projects/{identifier}/export").json()["simulations"]
+        assert exported[0]["generator"]["initial"] == 9007199254740993
+        assert exported[1]["generator"]["initial"] == -9223372036854775808
+        assert all(type(item["generator"]["initial"]) is int for item in exported)
+        assert all(item["generator"]["seed"] == 18446744073709551615 for item in exported)
+    with TestClient(create_app(settings)) as restarted:
+        restored = restarted.get("/api/v1/projects/current").json()["document"]["simulations"]
+        assert restored == exported
+        assert restarted.get("/api/v1/simulation").json() == []
+        assert restarted.get("/api/v1/services/sessions").json() == []
+        assert restarted.get("/api/v1/network/listeners").json() == []
+
+
 def test_native_active_session_blocks_open_and_drafts_do_not_start(tmp_path, native_runtime):
     settings = Settings(_env_file=None, data_dir=tmp_path, native_binary=native_runtime)
     with TestClient(create_app(settings)) as client:
