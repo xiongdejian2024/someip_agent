@@ -34,6 +34,14 @@
 .service-json-input textarea[aria-invalid=true] { border-color: var(--red); }
 .service-json-input small { font-size: 11px !important; line-height: 1.7; display: block; overflow-wrap: anywhere; }
 .service-json-error { color: #ffb4bd !important; }
+.service-sync-panel { margin-top: 20px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel-soft); min-width: 0; }
+.service-sync-panel p, .service-sync-panel small { overflow-wrap: anywhere; font-size: 12px; line-height: 1.8; }
+.service-sync-panel > .service-runtime-step { margin-top: 0; }
+.service-sync-panel details { margin-bottom: 16px; }
+.service-sync-panel summary { cursor: pointer; padding: 10px 0; }
+.service-sync-panel .context-actions { flex-wrap: wrap; margin: 12px 0; }
+.service-sync-panel .context-actions button { white-space: normal; }
+.service-sync-panel > label { max-width: 260px; }
 @container (max-width: 560px) {
   .service-runtime-panel { padding: 16px; }
   .service-runtime-form { grid-template-columns: minmax(0, 1fr); }

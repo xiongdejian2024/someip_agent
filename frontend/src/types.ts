@@ -177,6 +177,8 @@ export interface NativeSyncStatus {
   wire_verified: false
 }
 
+export type NativeSyncControl = { action: 'pause' | 'resume' | 'step' | 'stop' } | { action: 'speed'; speed: number }
+
 export interface NativeServiceSession {
   id: string
   runtime: 'vsomeip'

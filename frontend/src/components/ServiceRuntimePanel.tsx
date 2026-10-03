@@ -9,6 +9,7 @@ import { useProject } from '../workbench/projects'
 import { Icon } from './Icon'
 import { CsvStimulusEditor } from './CsvStimulusEditor'
 import { ServiceJsonInput } from './ServiceJsonInput'
+import { ServiceSyncPanel } from './ServiceSyncPanel'
 import './ServiceRuntimePanel.css'
 
 export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefinition; demo: boolean }) {
@@ -37,6 +38,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const [sources, setSources] = useState(stringifyJson(savedCycle?.command.sources ?? [], 2))
   const [csvText, setCsvText] = useState(savedCycle?.command.csv_text ?? '')
   const [cycles, setCycles] = useState<NativeEventCycle[]>([])
+  const [cycleEpoch, setCycleEpoch] = useState(0)
   const [pending, setPending] = useState<NativeServiceRequestMessage[]>([])
   const [results, setResults] = useState<Array<{ id: string; member: string; functionName: string; text: string }>>([])
   const [operations, setOperations] = useState<ReadonlySet<string>>(new Set())
@@ -57,6 +59,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
   const cycleKey = `cycle:${sessionId}:${memberKey}`
   const cycleBusy = operations.has(cycleKey)
   const cycleRunning = cycles.some(item => item.member === memberKey && item.running)
+  const synchronized = cycles.some(item => item.member === memberKey && item.synchronized)
 
   useEffect(() => {
     setCycles([])
@@ -76,7 +79,7 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
     void refresh()
     const timer = window.setInterval(() => void refresh(), 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [sessionId, session?.running])
+  }, [sessionId, session?.running, cycleEpoch])
 
   useEffect(() => {
     setInstance(savedMember ? String(savedMember.instance_id) : ''); setByteOrder(savedMember?.byte_order ?? 'arxml')
@@ -250,11 +253,13 @@ export function ServiceRuntimePanel({ selected, demo }: { selected?: ServiceDefi
         <p>阶跃示例：{`{"path":"/tag","generator":{"kind":"step","initial":7,"step_at_ms":29,"step_value":8}}`}。到共享逻辑时间 ≥ 29 ms 的首次发送切换并保持；时刻用精确整型毫秒，0 表示首样本即切换。单次更新会重新从逻辑时间 0 开始。</p>
         <p>时间状态机示例：{`{"path":"/tag","generator":{"kind":"state_machine","initial_state":"idle","states":[{"name":"idle","value":9,"duration_ms":29,"next":"active"},{"name":"active","value":10}]}}`}。正整型持续时间到达后转换，终态保持；next 指回已有状态可循环。不允许零时长、重复或不可达状态；类型取冻结 ARXML，不执行表达式。当前状态指最近实际样本，不是线上确认。</p>
         </details>
-        <div className="context-actions"><button className="button primary" disabled={busy || cycleBusy || cycleRunning || !argsValid || !sourcesValid || !session.running || !effectiveFunction} onClick={() => void configureCycle(false)}>启动完整事件周期</button><button className="button secondary" disabled={busy || cycleBusy || !argsValid || !sourcesValid || !session.running || !cycleRunning} onClick={() => void configureCycle(true)}>更新完整参数与周期</button><button className="button danger" disabled={busy || cycleBusy || !session.running || !cycleRunning} onClick={() => void run('停止真实事件周期', async () => { await api.stopServiceCycle(session.id, member.key); setCycles(await api.serviceCycles(session.id)) }, cycleKey)}>停止所选成员周期</button></div>
+        {synchronized && <p role="status">该成员由公共时钟组管理；独立周期启动／更新／停止禁用，请使用下方同步组控制。</p>}
+        <div className="context-actions"><button className="button primary" disabled={busy || cycleBusy || synchronized || cycleRunning || !argsValid || !sourcesValid || !session.running || !effectiveFunction} onClick={() => void configureCycle(false)}>启动完整事件周期</button><button className="button secondary" disabled={busy || cycleBusy || synchronized || !argsValid || !sourcesValid || !session.running || !cycleRunning} onClick={() => void configureCycle(true)}>更新完整参数与周期</button><button className="button danger" disabled={busy || cycleBusy || synchronized || !session.running || !cycleRunning} onClick={() => void run('停止真实事件周期', async () => { await api.stopServiceCycle(session.id, member.key); setCycles(await api.serviceCycles(session.id)) }, cycleKey)}>停止所选成员周期</button></div>
         {cycles.filter(item => item.member === member.key).map(item => <p key={item.member}>{item.function ?? '无活动事件'} · {item.running ? '原生调度运行中' : '已停止'} · {item.interval_ms ?? '—'} ms · {item.source_count} 个激励源 · 下次逻辑时间 {item.logical_seconds} s · 尝试通知 {item.emitted_count} 次（不是线上交付计数）{Object.keys(item.active_states ?? {}).length > 0 && <> · 最近状态 {stringifyJson(item.active_states)}</>}</p>)}
       </section>}
       {pending.map(item => <div className="service-runtime-request" key={`${item.member}-${item.request_id}-${item.received_at}`}><code>{item.member} · {item.function} · request_id {item.request_id} · {stringifyJson(item.args)}</code><button className="button ghost" disabled={!item.reply_allowed || busy} onClick={() => { setMemberKey(item.member); setFunctionName(item.function); setRequestId(String(item.request_id)); setAction('respond'); setArgs('{}') }}>{item.reply_allowed ? '选择此请求并填写响应' : '无响应方法'}</button></div>)}
     </div>}
     {!!results.length && <div className="service-runtime-results" aria-live="polite">{results.map(item => <div key={item.id}><code>{item.member} · {item.functionName}</code><p>{item.text}</p></div>)}</div>}
+    <ServiceSyncPanel session={session} onChanged={() => setCycleEpoch(current => current + 1)} />
   </section>
 }

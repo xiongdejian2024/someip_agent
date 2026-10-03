@@ -1,4 +1,5 @@
 .project-manager { margin-bottom: 12px; padding: 16px 18px; min-width: 0; }
+.project-manager :is(button, input, select, textarea) { scroll-margin-top: 85px; }
 .workspace-selector > span:last-child { min-width: 0; }
 .workspace-selector strong { overflow-wrap: anywhere; white-space: normal; }
 .project-toolbar { display: flex; align-items: center; gap: 16px; justify-content: space-between; flex-wrap: wrap; }

@@ -10,6 +10,9 @@ import type {
   NativeServiceRequestMessage,
   NativeEventCycle,
   NativeCycleCommand,
+  NativeSyncCommand,
+  NativeSyncControl,
+  NativeSyncStatus,
   PcapImportResult,
   SimulationStartRequest,
   SimulationStatus,
@@ -133,6 +136,13 @@ export const api = {
   ),
   stopServiceCycle: (id: string, member: string) => request<NativeEventCycle>(
     `/services/sessions/${encodeURIComponent(id)}/cycles/stop`, { method: 'POST', body: stringifyJson({ member }) }, 40_000,
+  ),
+  serviceSync: (id: string) => request<NativeSyncStatus>(`/services/sessions/${encodeURIComponent(id)}/sync`),
+  startServiceSync: (id: string, command: NativeSyncCommand) => request<NativeSyncStatus>(
+    `/services/sessions/${encodeURIComponent(id)}/sync/start`, { method: 'POST', body: stringifyJson(command) }, 40_000,
+  ),
+  controlServiceSync: (id: string, command: NativeSyncControl) => request<NativeSyncStatus>(
+    `/services/sessions/${encodeURIComponent(id)}/sync/control`, { method: 'POST', body: stringifyJson(command) }, 40_000,
   ),
   importArxml: async (file: File) => {
     const result = await uploadFile<{ services?: RawServiceDefinition[]; warnings?: string[] }>('/arxml/import', file)
