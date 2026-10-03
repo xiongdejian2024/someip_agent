@@ -53,6 +53,37 @@ exists 要求路径实际存在。通知 submitted 只证明原生接受命令�
 上述 pair 需在工程中明确保存 VehicleStatus 的 Provider/server 与 Consumer/client 配置。
 接口名字和载荷来自该工程 ARXML，不将示例名字套到未知车型上。
 
+## 公共时钟场景步骤
+
+同一场景自有服务会话支持以下步骤，复用真实原生同步 API，不增加 Python 周期循环：
+
+- `sync_start`：`session` 引用本次 `start_service.profile` 名称，且必须二选一：
+  `profile` 读取冻结工程的同名 `sync_groups`，或 `command` 给出完整原生同步配置。
+- `sync_control`：`session` 加 `command`，action 为 pause/resume/step/speed/stop；
+  speed 的倍率白名单与原生接口一致。暂停/恢复不重置源或逻辑时间。
+- `sync_status`：只读查询实际原生状态，可通过 `save_as` 保存后断言。
+- `sync_stop`：停止该自有会话的组，无 command；可放入业务 cleanup，重复停止安全。
+
+所有步骤都不能引用用户已有会话 UUID。同步写动作禁止放入 parallel；只读状态可并行。
+取消期间已发出的原生写命令先等待完成，再释放本次自有会话；迟到失败保留异常堆栈。
+运行期间修改工程不会替换冻结的同步草案，CLI 与网页场景使用同一执行器和证据链。
+
+```json
+[
+  {"kind":"start_service","profile":"pair"},
+  {"kind":"wait_ready","session":"pair"},
+  {"kind":"sync_start","session":"pair","profile":"pair","save_as":"prepared"},
+  {"kind":"assert","path":["prepared","paused"],"expected":true},
+  {"kind":"sync_control","session":"pair","command":{"action":"step"}},
+  {"kind":"sync_status","session":"pair","save_as":"clock"},
+  {"kind":"assert","path":["clock","frame_index"],"expected":1},
+  {"kind":"sync_stop","session":"pair"}
+]
+```
+
+原生倍率返回浮点（如 2.0），eq 保持精确 JSON 比较，整数 2 与浮点 2.0 不混同；
+需要数值近似比较时明确使用 approx。调度回执不代替消费者报文接收，应另行 wait_message。
+
 ## 清理与完整性
 
 每个参数用例执行后释放它拥有的全部资源，失败/超时/取消也执行清理；不调用 stop-all，

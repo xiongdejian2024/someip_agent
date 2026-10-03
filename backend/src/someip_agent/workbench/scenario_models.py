@@ -34,6 +34,10 @@ class ScenarioStep(StrictModel):
         "respond_next",
         "cycle_start",
         "cycle_stop",
+        "sync_start",
+        "sync_control",
+        "sync_status",
+        "sync_stop",
         "wait_message",
         "delay",
         "assert",
@@ -68,6 +72,10 @@ class ScenarioStep(StrictModel):
             "respond_next": {"session", "command", "timeout", "save_as"},
             "cycle_start": {"session", "command", "save_as"},
             "cycle_stop": {"session", "command", "save_as"},
+            "sync_start": {"session", "profile", "command", "save_as"},
+            "sync_control": {"session", "command", "save_as"},
+            "sync_status": {"session", "save_as"},
+            "sync_stop": {"session", "save_as"},
             "wait_message": {"session", "listener", "match", "save_as", "timeout"},
             "delay": {"seconds"},
             "assert": {"path", "comparison", "expected", "tolerance"},
@@ -87,6 +95,10 @@ class ScenarioStep(StrictModel):
                 "respond_next",
                 "cycle_start",
                 "cycle_stop",
+                "sync_start",
+                "sync_control",
+                "sync_status",
+                "sync_stop",
             }
             and self.session is None
         ):
@@ -94,10 +106,13 @@ class ScenarioStep(StrictModel):
         if self.kind == "stop_listener" and self.listener is None:
             raise ValueError("停止监听必须引用本场景创建的监听器")
         if (
-            self.kind in {"call", "notify", "respond_next", "cycle_start", "cycle_stop"}
+            self.kind
+            in {"call", "notify", "respond_next", "cycle_start", "cycle_stop", "sync_control"}
             and self.command is None
         ):
             raise ValueError("接口操作缺少 command")
+        if self.kind == "sync_start" and (self.profile is None) == (self.command is None):
+            raise ValueError("同步启动必须且只能选择工程 profile 或显式 command")
         if self.kind == "wait_message" and (self.session is None) == (self.listener is None):
             raise ValueError("等待报文必须明确选择本场景的一个会话或监听器")
         if self.kind == "assert" and (not self.path or type(self.path[0]) is not str):
@@ -108,7 +123,16 @@ class ScenarioStep(StrictModel):
             not self.children
             or any(
                 child.kind
-                in {"parallel", "start_service", "start_listener", "stop_service", "stop_listener"}
+                in {
+                    "parallel",
+                    "start_service",
+                    "start_listener",
+                    "stop_service",
+                    "stop_listener",
+                    "sync_start",
+                    "sync_control",
+                    "sync_stop",
+                }
                 for child in self.children
             )
         ):
@@ -158,8 +182,13 @@ class ScenarioDefinition(StrictModel):
             raise ValueError("同一参数用例中的 save_as 不能重复")
         if len(flattened) > 200:
             raise ValueError("包括并行子步骤在内最多 200 个步骤")
-        if any(step.kind not in {"call", "notify", "cycle_stop", "delay"} for step in self.cleanup):
-            raise ValueError("清理步骤只允许调用、通知、停止周期或等待；资源统一由执行器释放")
+        if any(
+            step.kind not in {"call", "notify", "cycle_stop", "sync_stop", "delay"}
+            for step in self.cleanup
+        ):
+            raise ValueError(
+                "清理步骤只允许调用、通知、停止周期／同步组或等待；资源统一由执行器释放"
+            )
         if len(self.model_dump_json().encode()) > 2 * 1024 * 1024:
             raise ValueError("场景定义超过 2 MiB 上限")
         return self

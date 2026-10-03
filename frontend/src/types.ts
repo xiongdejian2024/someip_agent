@@ -127,6 +127,7 @@ export interface NativeEventCycle {
   logical_seconds: number
   observation: 'native_schedule'
   wire_verified: false
+  synchronized?: boolean
 }
 
 export interface NativeEventSource {
@@ -154,6 +155,27 @@ export interface TimedSignalState {
 }
 
 export type NativeCycleCommand = NativeServiceCommand & { interval_ms: number; sources?: NativeEventSource[]; csv_text?: string | null }
+
+export interface NativeSyncCommand {
+  events: NativeCycleCommand[]
+  paused?: boolean
+  speed?: number
+}
+
+export interface NativeSyncStatus {
+  active: boolean
+  paused: boolean
+  group_id: string | null
+  logical_ms: number | bigint
+  frame_index: number | bigint
+  interval_ms: number | null
+  speed: number
+  events: Array<{ member: string; function: string; interval_ms: number; emitted_count: number | bigint;
+    last_logical_ms: number | bigint | null; source_count: number; active_states: Record<string, string> }>
+  last_error: string | null
+  observation: 'native_schedule'
+  wire_verified: false
+}
 
 export interface NativeServiceSession {
   id: string

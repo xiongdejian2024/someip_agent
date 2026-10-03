@@ -8,6 +8,7 @@ import logging
 import math
 import time
 from collections import deque
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -19,6 +20,9 @@ from someip_agent.runtime.service_models import (
     ServiceCycleCommand,
     ServiceCycleStop,
     ServiceResponse,
+    ServiceSyncCommand,
+    ServiceSyncControl,
+    ServiceSyncStatus,
 )
 from someip_agent.soa.catalog import NativeCatalogRequest
 from someip_agent.version import __version__
@@ -490,6 +494,37 @@ class ScenarioManager:
         if step.kind == "wait_message":
             return await asyncio.wait_for(self._message(run, step), step.timeout)
         identifier = run.sessions[session_name]
+        if step.kind == "sync_start":
+            if step.profile is not None:
+                if profile_name != session_name:
+                    raise ValueError("同步草案必须应用于对应服务配置创建的会话")
+                draft = next(
+                    (
+                        group
+                        for group in run.project.document.sync_groups
+                        if group.service_profile == profile_name
+                    ),
+                    None,
+                )
+                if draft is None:
+                    raise ValueError("工程中不存在所选公共时钟同步草案")
+                sync_config = parameters(
+                    draft.command.model_dump(mode="json"), run.values["parameters"]
+                )
+            else:
+                sync_config = step.command
+            return await self._settled_sync(
+                self.state.services.start_sync(
+                    identifier, ServiceSyncCommand.model_validate(sync_config)
+                )
+            )
+        if step.kind in {"sync_control", "sync_stop"}:
+            control = ServiceSyncControl.model_validate(
+                {"action": "stop"} if step.kind == "sync_stop" else step.command
+            )
+            return await self._settled_sync(self.state.services.control_sync(identifier, control))
+        if step.kind == "sync_status":
+            return (await self.state.services.sync_status(identifier)).model_dump(mode="json")
         if step.kind == "wait_ready":
 
             async def ready():
@@ -547,6 +582,21 @@ class ScenarioManager:
         if step.kind == "call":
             return (await self.state.services.call(identifier, command)).model_dump(mode="json")
         return (await self.state.services.notify(identifier, command)).model_dump(mode="json")
+
+    @staticmethod
+    async def _settled_sync(operation: Awaitable[ServiceSyncStatus]) -> dict[str, Any]:
+        # IPC/to_thread 可能已经执行；先等写命令结束，再让 finally 释放已登记的自有会话。
+        pending = asyncio.ensure_future(operation)
+        try:
+            return (await asyncio.shield(pending)).model_dump(mode="json")
+        except asyncio.CancelledError:
+            try:
+                await pending
+            except Exception:
+                logger.exception(
+                    "场景取消期间同步写命令失败", extra={"operation": "scenario.sync.cancel"}
+                )
+            raise
 
     async def _message(self, run: Run, step: ScenarioStep) -> dict[str, Any]:
         source = run.sessions[step.session] if step.session else run.listeners[step.listener or ""]

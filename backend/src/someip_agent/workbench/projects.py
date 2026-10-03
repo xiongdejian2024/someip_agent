@@ -19,7 +19,7 @@ from someip_agent.domain.models import (
     SignalGeneratorConfig,
     SimulationConfig,
 )
-from someip_agent.runtime.service_models import ServiceCycleCommand
+from someip_agent.runtime.service_models import ServiceCycleCommand, ServiceSyncCommand
 from someip_agent.soa.catalog import NativeCatalogRequest
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,11 @@ class CycleDraft(StrictModel):
     command: ServiceCycleCommand
 
 
+class SyncDraft(StrictModel):
+    service_profile: str = Field(min_length=1, max_length=128)
+    command: ServiceSyncCommand
+
+
 class WaveSelection(StrictModel):
     service_id: int = Field(ge=0, le=65535)
     method_id: int = Field(ge=0, le=65535)
@@ -100,6 +105,8 @@ class ProjectDocument(StrictModel):
     listeners: list[ListenerDraft] = Field(default_factory=list, max_length=16)
     simulations: list[SimulationDraft] = Field(default_factory=list, max_length=128)
     cycles: list[CycleDraft] = Field(default_factory=list, max_length=128)
+    # v2 的可选增量字段，旧文档读取时补空列表；不保存原生 group_id 或运行状态。
+    sync_groups: list[SyncDraft] = Field(default_factory=list, max_length=16)
     workspace: WorkspaceSelection = Field(default_factory=WorkspaceSelection)
 
     @model_validator(mode="before")
@@ -124,6 +131,11 @@ class ProjectDocument(StrictModel):
             raise ValueError("服务草案名称必须为 1–128 字符")
         if any(cycle.service_profile not in self.services for cycle in self.cycles):
             raise ValueError("周期草案必须引用工程内的服务配置")
+        profiles = [group.service_profile for group in self.sync_groups]
+        if any(profile not in self.services for profile in profiles):
+            raise ValueError("同步草案必须引用工程内的服务配置")
+        if len(profiles) != len(set(profiles)):
+            raise ValueError("每个服务配置最多保存一个公共时钟同步组")
         if self.model and ("/" in self.model.source_name or "\\" in self.model.source_name):
             raise ValueError("工程模型只保存源文件名，不接受本地文件路径")
         if len(self.model_dump_json().encode()) > MAX_DOCUMENT_BYTES:

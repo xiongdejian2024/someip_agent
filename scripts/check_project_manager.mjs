@@ -13,6 +13,8 @@ const output = await build({ stdin: { contents: `
   export {ApiError} from './src/api/client'
   export const empty=emptyProject()
   export const saved={...empty,name:'已保存工程',cycles:[{service_profile:'/V',command:{member:'Provider_server',function:'UpdateValueEvent',args:{value:18446744073709551615n},interval_ms:29}}]}
+  export const synchronized={...saved,sync_groups:[{service_profile:'/V',command:{paused:true,speed:0.5,events:[{member:'Provider_server',function:'UpdateValueEvent',args:{value:18446744073709551615n},interval_ms:20,sources:[{path:'value',generator:{kind:'state_machine',seed:18446744073709551615n,initial_state:'ready',states:[{name:'ready',value:18446744073709551615n}]}}]}]}}]}
+  export {parseJson} from './src/api/json'
   const current={id:'saved',revision:3,updated_at:'2026-10-03',document:saved}
   const noop=()=>{throw new Error('首次渲染不能保存、加载或运行')}
   export const clean=renderToStaticMarkup(createElement(ProjectBar,{current,controls:{document:saved,update:noop},apply:noop,onSaved:noop}))
@@ -22,7 +24,12 @@ const output = await build({ stdin: { contents: `
   platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } })
 const module = { exports: {} }
 new Function('require','module','exports',output.outputFiles[0].text)(require,module,module.exports)
-const {empty,saved,clean,dirty,loading,mergeSavedDraft,projectDraftChanged,projectContents,projectDate,projectResultUnknown,ApiError,projectEditorText}=module.exports
+const {empty,saved,synchronized,parseJson,clean,dirty,loading,mergeSavedDraft,projectDraftChanged,projectContents,projectDate,projectResultUnknown,ApiError,projectEditorText}=module.exports
+assert.deepEqual(empty.sync_groups,[])
+assert.equal(projectContents({...saved,sync_groups:undefined}).find(([label])=>label==='公共时钟组')[1],0)
+assert.equal(projectContents(synchronized).find(([label])=>label==='公共时钟组')[1],1)
+assert.deepEqual(parseJson(projectEditorText(synchronized)).sync_groups,synchronized.sync_groups)
+assert.equal(projectDraftChanged(saved,synchronized),true)
 assert.match(clean,/草案与已保存修订一致/)
 assert.match(dirty,/有未保存更改/)
 assert.match(clean,/id="project-load" class="project-section" hidden=""/)

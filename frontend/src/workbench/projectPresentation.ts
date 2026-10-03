@@ -17,6 +17,7 @@ export function projectContents(document: ProjectDocument) {
     ['服务配置', Object.keys(document.services).length], ['周期激励', document.cycles.length],
     ['监听草案', document.listeners.length], ['仿真工作集', document.simulations.length],
     ['波形通道', document.workspace.waves.length],
+    ['公共时钟组', (document.sync_groups ?? []).length],
   ] as const
 }
 
