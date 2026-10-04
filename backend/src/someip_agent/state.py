@@ -14,7 +14,7 @@ from someip_agent.protocol.native_payload import NativePayloadError, NativeSigna
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.network import NetworkCaptureManager
 from someip_agent.runtime.network_environment import NetworkEnvironmentManager
-from someip_agent.runtime.network_gate import NetworkTaskGate
+from someip_agent.runtime.network_gate import NetworkTaskConflict, NetworkTaskGate
 from someip_agent.runtime.services import ServiceSessionManager
 from someip_agent.runtime.simulator import SimulationManager
 from someip_agent.soa.operator import NativeRuntimeError
@@ -100,20 +100,40 @@ class ApplicationState:
 
     async def open_project(self, identifier: UUID) -> ProjectView:
         async with self._model_lock:
-            if (
-                any(s.active for s in self.services.statuses())
-                or any(s.running for s in self.simulator.list())
-                or any(s.running for s in self.network.list())
-            ):
-                raise ProjectConflict(
-                    "请先停止服务、仿真和监听，再切换工程；打开不会自动停止或启动它们"
-                )
-            view = await asyncio.to_thread(self.projects.get, identifier)
-            await asyncio.to_thread(self.projects.select, identifier)
-            self._arxml_model = (
-                view.document.model.model_copy(deep=True) if view.document.model else None
-            )
-            return view
+            try:
+                with self.network_gate.configuration():
+                    if self.has_active_network_tasks():
+                        raise ProjectConflict(
+                            "请先停止并释放服务、仿真和监听，再切换工程；不会自动停止任务"
+                        )
+                    # 在线程的同一 SQLite 事务读取并选择，不分两次提交可变版本。
+                    selecting = asyncio.create_task(
+                        asyncio.to_thread(self.projects.select, identifier)
+                    )
+                    cancelled = False
+                    while True:
+                        try:
+                            view = await asyncio.shield(selecting)
+                            break
+                        except asyncio.CancelledError:
+                            if selecting.cancelled():
+                                logger.exception("工程选择线程任务被意外取消，结果未确认")
+                                raise
+                            cancelled = True
+                            logger.info(
+                                "工程加载请求取消，等待选择线程结束后释放保护",
+                                exc_info=True,
+                                extra={"operation": "project.open.cancel"},
+                            )
+                    self._arxml_model = (
+                        view.document.model.model_copy(deep=True) if view.document.model else None
+                    )
+                    if cancelled:
+                        # 已选择的工程与内存模型保持一致，调用方仍收到取消，不能冒称回执成功。
+                        raise asyncio.CancelledError
+                    return view
+            except NetworkTaskConflict as exc:
+                raise ProjectConflict(str(exc)) from exc
 
     def services_as_dicts(self) -> list[dict[str, object]]:
         model = self._arxml_model

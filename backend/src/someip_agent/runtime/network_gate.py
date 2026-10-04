@@ -22,8 +22,8 @@ class NetworkTaskGate:
     def task_operation(self) -> Iterator[None]:
         with self._lock:
             if self._configuring:
-                logger.warning("网卡环境正在变更，拒绝原生生命周期操作")
-                raise NetworkTaskConflict("网卡环境正在变更，请等待完成后再启动或停止任务")
+                logger.warning("工程或网卡配置正在变更，拒绝原生生命周期操作")
+                raise NetworkTaskConflict("工程或网卡配置正在变更，请等待完成后再启动或停止任务")
             self._operations += 1
         try:
             yield
@@ -35,7 +35,7 @@ class NetworkTaskGate:
     def configuration(self) -> Iterator[None]:
         with self._lock:
             if self._configuring or self._operations:
-                logger.warning("原生生命周期操作尚未结束，拒绝网卡变更")
+                logger.warning("配置或原生生命周期操作尚未结束，拒绝配置变更")
                 raise NetworkTaskConflict("服务、仿真或监听正在启停，请等待资源完全释放")
             self._configuring = True
         try:

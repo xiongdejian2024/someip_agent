@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 import sqlite3
@@ -267,7 +268,7 @@ class ProjectRepository:
             id=identifier, revision=revision, updated_at=updated, document=request.document
         )
 
-    def backups(self, identifier: UUID) -> list[dict[str, Any]]:
+    def backups(self, identifier: UUID) -> builtins.list[dict[str, Any]]:
         self.get(identifier)
         with closing(self._connect()) as db:
             rows = db.execute(
@@ -288,10 +289,14 @@ class ProjectRepository:
             ProjectSave(document=view.document, expected_revision=expected_revision), identifier
         )
 
-    def select(self, identifier: UUID) -> None:
-        self.get(identifier)
+    def select(self, identifier: UUID) -> ProjectView:
         with closing(self._connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            view = self._view(
+                db.execute("SELECT * FROM projects WHERE id=?", (str(identifier),)).fetchone()
+            )
             db.execute("INSERT OR REPLACE INTO project_selection VALUES(1,?)", (str(identifier),))
+        return view
 
     def current(self) -> ProjectView | None:
         with closing(self._connect()) as db:
