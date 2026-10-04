@@ -78,12 +78,13 @@ def test_migration_and_nested_secret_rejection():
         ProjectDocument.model_validate(bad)
 
 
-def test_project_management_page_round_trip(tmp_path):
+@pytest.mark.parametrize("page", ["projects", "network"])
+def test_project_management_page_round_trip(tmp_path, page):
     repo = ProjectRepository(tmp_path / "test.sqlite3")
     doc = document()
-    doc.workspace.page = "projects"
+    doc.workspace.page = page
     saved = repo.save(ProjectSave(document=doc))
-    assert repo.get(saved.id).document.workspace.page == "projects"
+    assert repo.get(saved.id).document.workspace.page == page
 
 
 def test_api_save_export_restore_and_restart_without_execution(tmp_path, monkeypatch):

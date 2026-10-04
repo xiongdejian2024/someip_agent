@@ -90,6 +90,11 @@ function uploadFile<T>(path: string, file: File, fieldName = 'file', extra?: Rec
 }
 
 export const api = {
+  networkEnvironment: () => request<import('../workbench/networkEnvironment').NetworkEnvironmentStatus>('/network/environment', {}, 20000),
+  planNetworkEnvironment: (profile: import('../types').NetworkProfile) => request<import('../workbench/networkEnvironment').NetworkPlan>('/network/environment/plan', { method: 'POST', body: stringifyJson(profile) }, 30000),
+  applyNetworkEnvironment: (profile: import('../types').NetworkProfile, token: string) => request<import('../workbench/networkEnvironment').ManagedEnvironment>('/network/environment/apply', { method: 'POST', body: stringifyJson({ profile, token, confirm: true }) }, 60000),
+  removeNetworkEnvironment: (id: string) => request<import('../workbench/networkEnvironment').ManagedEnvironment>(`/network/environment/${encodeURIComponent(id)}/remove`, { method: 'POST', body: stringifyJson({ confirm: true }) }, 60000),
+  bindNetworkEnvironment: (managed_id: string | null) => request<{ native_unicast: string }>('/network/environment/binding', { method: 'POST', body: stringifyJson({ managed_id, confirm: true }) }, 30000),
   scenarioRuns: () => request<import('../workbench/ScenarioPanel').ScenarioSummary[]>('/scenarios/runs?limit=100'),
   scenarioRun: (id: string) => request<import('../workbench/ScenarioPanel').ScenarioRun>(`/scenarios/runs/${encodeURIComponent(id)}`),
   validateScenario: (definition: unknown) => request<unknown>('/scenarios/runs/validate', { method: 'POST', body: stringifyJson(definition) }),

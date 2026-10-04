@@ -200,6 +200,8 @@ Windows 安装包需在 Windows 的 PowerShell 7 (`pwsh`) 上构建，先准备�
 - [系统架构](docs/architecture.md)
 - [CANoe SOME/IP 能力对标](docs/canoe-comparison.md)
 - [高密度工作台设计](docs/workbench-design.md)
+- [工程保存与加载独立页面](docs/project-ui-design.md)
+- [VLAN 与网卡环境配置](docs/network-environment.md)
 - [开源底座选型与许可证风险](docs/open-source-selection.md)
 - [产品路线图](docs/roadmap.md)
 - [Windows 打包与发布](docs/windows-packaging.md)

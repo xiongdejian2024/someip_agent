@@ -46,6 +46,7 @@ interface ChatMessage extends AgentMessage {
 }
 
 const pageSuggestions: Record<PageId, { label: string; prompt: string }[]> = {
+  network: [{ label: '网络配置安全边界', prompt: '请说明 VLAN、网卡工程草案、实际主机配置和发送授权的区别；不要替我修改系统网络或启动任务。' }],
   projects: [
     { label: '工程保护说明', prompt: '请说明工程保存、加载、恢复和运行的区别；不要替我执行任何操作。' },
   ],

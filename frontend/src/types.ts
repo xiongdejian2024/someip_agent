@@ -8,6 +8,7 @@ export type PageId =
   | 'pcap'
   | 'settings'
   | 'projects'
+  | 'network'
 
 export type ConnectionState = 'online' | 'offline' | 'connecting'
 

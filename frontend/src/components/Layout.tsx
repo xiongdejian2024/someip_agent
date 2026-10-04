@@ -40,6 +40,7 @@ const pageMeta: Record<PageId, { title: string; eyebrow: string }> = {
   pcap: { title: 'PCAP 离线分析', eyebrow: '抓包解析与协议洞察' },
   settings: { title: '模型与系统设置', eyebrow: '安全配置中心' },
   projects: { title: '工程保存与加载', eyebrow: '配置、历史与迁移' },
+  network: { title: 'VLAN 与网卡环境', eyebrow: '工程草案与主机配置' },
 }
 
 export function Layout({
@@ -74,6 +75,9 @@ export function Layout({
             </button>
           ))}
           <p className="nav-section">系统</p>
+          <button className={page === 'network' ? 'active' : ''} onClick={() => navigate('network')}>
+            <Icon name="network" /><span>VLAN 与网卡环境</span>
+          </button>
           <button className={page === 'projects' ? 'active' : ''} onClick={() => navigate('projects')}>
             <Icon name="file" /><span>工程保存与加载</span>
           </button>

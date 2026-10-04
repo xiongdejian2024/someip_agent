@@ -9,6 +9,7 @@ import { useBackendStatus } from './hooks/useBackendStatus'
 import { useMonitorStream } from './hooks/useMonitorStream'
 import { DashboardPage } from './pages/DashboardPage'
 import { MonitorPage } from './pages/MonitorPage'
+import { NetworkEnvironmentPage } from './pages/NetworkEnvironmentPage'
 import { PcapPage } from './pages/PcapPage'
 import { ServicesPage } from './pages/ServicesPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -19,7 +20,7 @@ import { ProjectStatus } from './workbench/ProjectManager'
 import { ScenarioPanel } from './workbench/ScenarioPanel'
 import { mergeSavedDraft } from './workbench/projectPresentation'
 
-const pages: PageId[] = ['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings', 'projects']
+const pages: PageId[] = ['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings', 'projects', 'network']
 
 function pageFromHash(): PageId {
   const value = window.location.hash.replace('#/', '') as PageId
@@ -171,6 +172,7 @@ export default function App() {
       case 'pcap': return <PcapPage />
       case 'settings': return <SettingsPage currentVersion={health?.version} />
       case 'projects': return null
+      case 'network': return null
       case 'dashboard':
       default: return <DashboardPage services={services} modelLoading={servicesLoading} streamState={streamState} messages={messages} samples={samples} source={source} modelSource={serviceSource} onNavigate={navigate} onOpenAgent={() => openAgent()} />
     }
@@ -188,7 +190,7 @@ export default function App() {
         connectionState={connectionState}
         health={health}
         agentOpen={agentOpen}
-        agentPanel={<AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} connectionState={connectionState} modelConfigured={health?.llm_configured === true} contextLabel={{ dashboard: '工作区总览', services: 'ARXML 服务模型', simulation: '信号仿真', monitor: '报文监控', pcap: '离线抓包', settings: '模型设置', projects: '工程保存与加载' }[page]} context={activeContext} intent={agentIntent} onLoadSimulationPlan={(config) => {
+        agentPanel={<AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} connectionState={connectionState} modelConfigured={health?.llm_configured === true} contextLabel={{ dashboard: '工作区总览', services: 'ARXML 服务模型', simulation: '信号仿真', monitor: '报文监控', pcap: '离线抓包', settings: '模型设置', projects: '工程保存与加载', network: 'VLAN 与网卡环境' }[page]} context={activeContext} intent={agentIntent} onLoadSimulationPlan={(config) => {
           setSimulationDraft({ id: crypto.randomUUID(), config })
           navigate('simulation')
           logInfo('智能体仿真草案载入工作台，尚未执行', { serviceId: config.service_id, methodId: config.method_id })
@@ -198,7 +200,8 @@ export default function App() {
         {page !== 'projects' && <ProjectStatus document={project.document} current={project.view} onOpen={() => navigate('projects')} />}
         {/* 页面切换只隐藏管理器，保留 JSON 编辑、写入锁及未知结果保护；不因卸载丢弃草案。 */}
         <ProjectBar visible={page === 'projects'} ready={project.ready} controls={{ document: project.document, update: project.update }} current={project.view} apply={project.apply} onSaved={(view, requested) => { project.setView(view); project.update(current => mergeSavedDraft(current, requested, view.document)) }} />
-        <div hidden={page === 'projects'}><ScenarioPanel project={project.view} /></div>
+        <NetworkEnvironmentPage visible={page === 'network'} ready={project.ready} projectKey={`${project.view?.id ?? 'unsaved'}:${project.epoch}`} controls={{ document: project.document, update: project.update }} />
+        <div hidden={page === 'projects' || page === 'network'}><ScenarioPanel project={project.view} /></div>
         {project.ready ? <div key={project.epoch}>{content}</div> : <p role="status">正在恢复工程配置（不会启动任务）…</p>}
       </Layout>
     </AgentWorkspace.Provider>

@@ -92,7 +92,7 @@ class WaveSelection(StrictModel):
 
 class WorkspaceSelection(StrictModel):
     page: Literal[
-        "dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects"
+        "dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects", "network"
     ] = "dashboard"
     service_paths: list[str] = Field(default_factory=list, max_length=128)
     waves: list[WaveSelection] = Field(default_factory=list, max_length=128)

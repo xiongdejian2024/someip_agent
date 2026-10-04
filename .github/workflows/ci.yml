@@ -214,6 +214,8 @@ jobs:
         run: node scripts/check_project_surface.mjs
       - name: 工程管理分层界面与保存保护
         run: node scripts/check_project_manager.mjs
+      - name: VLAN 与网卡草案、环境分区和写入保护
+        run: node scripts/check_network_environment.mjs
       - name: 公共时钟草案与明确运行表面
         run: node scripts/check_sync_panel.mjs
 

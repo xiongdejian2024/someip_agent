@@ -44,7 +44,9 @@ class SessionCycleStop(Identifier):
 
 class Navigation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    page: Literal["dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects"]
+    page: Literal[
+        "dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects", "network"
+    ]
 
 
 class ConsoleControls:

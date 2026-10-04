@@ -376,7 +376,9 @@ class AgentContext(BaseModel):
     """仅接受工作台目标引用，禁止把客户端状态当成服务端工程事实。"""
 
     model_config = ConfigDict(extra="forbid")
-    page: Literal["dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects"]
+    page: Literal[
+        "dashboard", "services", "simulation", "monitor", "pcap", "settings", "projects", "network"
+    ]
     service_id: int | None = Field(default=None, ge=0, le=0xFFFF)
     method_id: int | None = Field(default=None, ge=0, le=0xFFFF)
     message_id: str | None = Field(default=None, max_length=128)
