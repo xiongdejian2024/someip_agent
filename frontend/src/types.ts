@@ -11,6 +11,16 @@ export type PageId =
 
 export type ConnectionState = 'online' | 'offline' | 'connecting'
 
+export interface NetworkProfile {
+  name: string
+  parent: string
+  interface: string
+  vlan_id: number | null
+  ipv4: string
+  mtu: number | null
+  sd_multicast: string | null
+}
+
 export interface MonitorStreamCounters {
   backend_epoch: string
   counter_scope: 'backend_process_lifetime'

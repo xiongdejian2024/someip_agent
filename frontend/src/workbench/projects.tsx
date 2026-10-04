@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { stringifyJson } from '../api/json'
 import { logError, logInfo } from '../api/logger'
 import { projectDraftChanged } from './projectPresentation'
-import type { NativeCycleCommand, NativeServiceRequest, NativeSyncCommand, NetworkListenerConfig, PageId, SimulationStartRequest } from '../types'
+import type { NativeCycleCommand, NativeServiceRequest, NativeSyncCommand, NetworkListenerConfig, NetworkProfile, PageId, SimulationStartRequest } from '../types'
 
 export interface ProjectDocument {
   format: 'someip-agent-project'
@@ -16,6 +16,7 @@ export interface ProjectDocument {
   simulations: SimulationStartRequest[]
   cycles: Array<{ service_profile: string; command: NativeCycleCommand }>
   sync_groups: Array<{ service_profile: string; command: NativeSyncCommand }>
+  network_profiles: NetworkProfile[]
   workspace: { page: PageId; service_paths: string[]; waves: Array<{ service_id: number; method_id: number; signal_name: string }> }
 }
 export interface ProjectView { id: string; revision: number; updated_at: string; document: ProjectDocument }
@@ -27,7 +28,7 @@ export interface ProjectControls {
 
 export function emptyProject(): ProjectDocument {
   return { format: 'someip-agent-project', format_version: 2, name: '未命名工程', description: '', model: null,
-    services: {}, listeners: [], simulations: [], cycles: [], sync_groups: [], workspace: { page: 'dashboard', service_paths: [], waves: [] } }
+    services: {}, listeners: [], simulations: [], cycles: [], sync_groups: [], network_profiles: [], workspace: { page: 'dashboard', service_paths: [], waves: [] } }
 }
 
 export const ProjectContext = createContext<ProjectControls | null>(null)

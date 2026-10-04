@@ -36,6 +36,18 @@ jobs:
           python -m pytest native/tests/test_browser_update_runner.py -v
       - name: 编解码与虚拟网功能验收
         run: make native-test
+      - name: 隔离 Linux 网卡与 VLAN 配置验收
+        run: |
+          mkdir -p build/network-environment-evidence
+          docker run --rm --init --cap-add NET_ADMIN --network none \
+            -v "$PWD/backend:/workspace/backend:ro" \
+            -v "$PWD/native/tests:/workspace/native/tests:ro" \
+            -v "$PWD/build/network-environment-evidence:/evidence" \
+            -e PYTHONPATH=/workspace/backend/src \
+            -e SOMEIP_AGENT_NETWORK_ENV_TEST=1 \
+            someip-agent-vsomeip:test \
+            python -m pytest native/tests/test_network_environment_virtual.py -ra \
+              --junitxml=/evidence/network-environment-real.xml
       - name: 原生后端完整回归
         run: make native-regression
       - name: 不挂载源码的安装包虚拟网与后端验收
@@ -84,7 +96,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vsomeip-virtual-evidence
-          path: build/virtual-evidence/
+          path: |
+            build/virtual-evidence/
+            build/network-environment-evidence/
           if-no-files-found: error
       - name: 保留安装包验收证据
         if: always()
@@ -149,6 +163,7 @@ jobs:
           native/tests/ipv4_option_vectors.py
           native/tests/benchmark_virtual.py native/tests/performance_metrics.py
           native/tests/test_performance_metrics.py
+          native/tests/test_network_environment_virtual.py
           native/tests/audit_service_names.py native/tests/test_service_names.py
           native/tests/check_linux_payload_package.py
           native/tests/check_linux_workbench_package.py native/tests/test_clean_package_client.py

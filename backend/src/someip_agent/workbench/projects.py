@@ -19,6 +19,7 @@ from someip_agent.domain.models import (
     SignalGeneratorConfig,
     SimulationConfig,
 )
+from someip_agent.runtime.network_environment import NetworkProfile
 from someip_agent.runtime.service_models import ServiceCycleCommand, ServiceSyncCommand
 from someip_agent.soa.catalog import NativeCatalogRequest
 
@@ -41,6 +42,8 @@ def check_portable_data(node: Any, depth: int = 0) -> None:
         "runtime_path",
         "network_send_enabled",
         "allowed_destinations",
+        "network_config_enabled",
+        "network_config_interfaces",
     }
     if depth > 64:
         raise ValueError("可移植配置嵌套超过 64 层")
@@ -107,6 +110,8 @@ class ProjectDocument(StrictModel):
     cycles: list[CycleDraft] = Field(default_factory=list, max_length=128)
     # v2 的可选增量字段，旧文档读取时补空列表；不保存原生 group_id 或运行状态。
     sync_groups: list[SyncDraft] = Field(default_factory=list, max_length=16)
+    # 可移植网络草案不是主机授权或已应用状态，加载及重启不执行系统命令。
+    network_profiles: list[NetworkProfile] = Field(default_factory=list, max_length=16)
     workspace: WorkspaceSelection = Field(default_factory=WorkspaceSelection)
 
     @model_validator(mode="before")
@@ -136,6 +141,9 @@ class ProjectDocument(StrictModel):
             raise ValueError("同步草案必须引用工程内的服务配置")
         if len(profiles) != len(set(profiles)):
             raise ValueError("每个服务配置最多保存一个公共时钟同步组")
+        interfaces = [profile.interface for profile in self.network_profiles]
+        if len(interfaces) != len(set(interfaces)):
+            raise ValueError("网络环境草案的目标网卡名称不能重复")
         if self.model and ("/" in self.model.source_name or "\\" in self.model.source_name):
             raise ValueError("工程模型只保存源文件名，不接受本地文件路径")
         if len(self.model_dump_json().encode()) > MAX_DOCUMENT_BYTES:

@@ -51,13 +51,18 @@ class Settings(BaseSettings):
     update_max_download_bytes: int = 1024 * 1024 * 1024
 
     network_send_enabled: bool = False
+    # 主机网卡配置与 SOME/IP 发包授权独立，不能从工程导入或网页开启。
+    network_config_enabled: bool = False
+    network_config_interfaces: list[str] = Field(default_factory=list)
     native_binary: str = "soa_partner"
     native_unicast: str = "127.0.0.1"
     allowed_destinations: list[str] = Field(default_factory=list)
     monitor_capacity: int = 20_000
     max_upload_bytes: int = 256 * 1024 * 1024
 
-    @field_validator("allowed_destinations", "cors_origins", mode="before")
+    @field_validator(
+        "allowed_destinations", "cors_origins", "network_config_interfaces", mode="before"
+    )
     @classmethod
     def parse_json_list(cls, value: Any) -> Any:
         if isinstance(value, str):

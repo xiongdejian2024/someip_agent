@@ -1,0 +1,68 @@
+# VLAN 与网卡环境配置
+
+## 边界与已有依赖
+
+复用 Linux 成熟的 iproute2，不添加 Python 包，不重写 Netlink，不用 Python 发 SOME/IP。
+依据 [ip-link](https://man7.org/linux/man-pages/man8/ip-link.8.html) 与
+[ip-address](https://man7.org/linux/man-pages/man8/ip-address.8.html) 的网卡、802.1Q、MTU
+和 `noprefixroute` 能力，新增自己的地址与路由，不覆盖现有配置。
+
+配置作用于**后端所在的 Linux 网络命名空间**，不是浏览器所在的电脑。必须安装 iproute2
+且具有 NET_ADMIN 权限。macOS 后端可保存工程草案，但当前不提供系统网卡写入功能。
+后端默认 `NETWORK_CONFIG_ENABLED=false`、`NETWORK_CONFIG_INTERFACES=[]`；管理员
+明确授权专用测试网卡后才允许写入。页面不能修改这些主机授权，发送开关与目标白名单独立。
+
+支持新建 VLAN（ID 1–4094）、IPv4/CIDR、VLAN MTU、可选 SD 组播 /32 路由；也支持
+在既有、已 UP 的专用以太网卡上增加自有 IPv4 地址。无 VLAN 模式不改物理网卡 MTU。
+不修改已有 IP、MAC、默认网关、DNS、DHCP、系统网络管理器或桥接／绑定关系。
+启用接口可能产生内核的邻居／IPv6 流量，但不会自动启动 SOME/IP、仿真或监听任务。
+
+## 工程草案与明确应用
+
+工程 `network_profiles` 保存可移植草案，旧工程缺省为空。加载、导入、重启均不自动运行
+系统命令，也不携带主机授权、管理记录 ID 或发送许可。独立环境配置页面尚待接入。
+
+1. 读取真实接口与主路由表，检查名称、父网卡、IP、MTU、地址／路由冲突。
+2. 预检只产生命令计划和环境指纹，不修改系统。应用时再次预检并核对令牌。
+3. 用户明确 `confirm=true` 后才应用；不接受字符串或数字冒充确认，不自动重试写入。
+4. 持久化 UUID、启动标识／命名空间、父子 ifindex、alias 标记、写入步骤和完整路由快照。
+5. 应用失败保留记录及完整异常堆栈，不盲目回滚；明确核对后仅清理有证据属于本工具的差异。
+
+原生地址绑定需要单独确认，只改变未来启动任务的 `native_unicast`，不改变发送许可。
+解除绑定回到回环地址。服务、仿真或监听活动时，应用、清理和绑定均拒绝；目前管理器锁
+仅序列化其自身命令，跨业务启动的并发保护仍待补充，不能声称全局事务安全。
+
+清理 VLAN 前核对启动／命名空间、索引、alias、VLAN ID、父网卡以及额外地址／路由。
+发现其他程序改动时拒绝整体删除。无 VLAN 模式只删除明确记录的地址／路由，保留父网卡
+和已有地址。不使用 flush、replace 或按名称删除未知来源网卡。
+
+实际内核验收发现创建命令附带 alias 可能未生效，因此实现先保存创建意图，创建后核对索引，
+再设置 alias 并核验所有权。若进程在设置标记前中断，遗留网卡必须人工核对，不能自动清理；
+这不是原子网络事务。VLAN 必须先 UP 再添加设备路由，否则内核拒绝 nexthop。
+
+## API
+
+- `GET /api/v1/network/environment`：系统能力、接口、主路由、主机授权、管理记录及当前绑定。
+- `POST /api/v1/network/environment/plan`：草案预检，无系统写入。
+- `POST /api/v1/network/environment/apply`：草案、令牌、明确确认。
+- `POST /api/v1/network/environment/{UUID}/remove`：明确清理自有记录。
+- `POST /api/v1/network/environment/binding`：管理 ID 或 null，明确绑定／解除。
+
+## 验收日志与未完成项
+
+2026-10-04：控制层 22 项测试通过；本机相关后端 41 通过、21 原生条件跳过，不将其
+称为完整原生验收。隔离 Linux 容器 `--network none --cap-add NET_ADMIN` 内 3 项真实
+系统测试全部通过，覆盖 VLAN 创建、MTU、IP、路由、绑定、重启记录、自有清理及拒绝
+接管其他程序资源。使用自建 dummy 父网卡，不修改宿主网络，不等同于硬件标签帧验收。
+证据位于 `build/network-environment-evidence/`，原始失败 XML 保留；首次父接口索引／alias
+核对失败以及先路由后 UP 的错误均经实际系统复验修正，没有放宽所有权校验。
+
+ruff、模块 mypy、前端类型与工程管理渲染检查通过。新增真实网卡测试已接入 CI，最新完整
+远程 CI、VLAN 前端页、跨业务启动并发保护及浏览器真实交互／视觉仍待完成。
+不改变版本、正式密钥或现有 Release，不将本节局部通过当作整个目标完成。
+
+全量回归最初误用了旧 `someip-agent-vsomeip:test` 镜像，出现 Pi 运行时缺失等失败；停止
+该测试容器，单独 `-x` 复现并保留完整堆栈。核对原生源码与已验证镜像基线无差异后，改用
+`someip-agent-vsomeip:p0p2-final-1fd97dd`，完整源码只读挂载至 `/repo`、不覆盖镜像二进制，
+在 `--network none` 环境复跑当前后端：901 通过，零失败／跳过，4 条既有或只读缓存警告。
+XML：`build/network-environment-evidence/backend-full-current-runtime.xml`。

@@ -18,6 +18,7 @@ export function projectContents(document: ProjectDocument) {
     ['监听草案', document.listeners.length], ['仿真工作集', document.simulations.length],
     ['波形通道', document.workspace.waves.length],
     ['公共时钟组', (document.sync_groups ?? []).length],
+    ['网卡环境草案', (document.network_profiles ?? []).length],
   ] as const
 }
 

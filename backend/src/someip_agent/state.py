@@ -13,6 +13,7 @@ from someip_agent.domain.models import ArxmlModel, MessageType, MonitorMessage, 
 from someip_agent.protocol.native_payload import NativePayloadError, NativeSignalDecoder
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.network import NetworkCaptureManager
+from someip_agent.runtime.network_environment import NetworkEnvironmentManager
 from someip_agent.runtime.services import ServiceSessionManager
 from someip_agent.runtime.simulator import SimulationManager
 from someip_agent.soa.operator import NativeRuntimeError
@@ -38,6 +39,9 @@ class ApplicationState:
         self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
         self.simulator = SimulationManager(self.monitor, settings)
         self.services = ServiceSessionManager(settings, self.monitor)
+        self.network_environment = NetworkEnvironmentManager(
+            settings, self.has_active_network_tasks
+        )
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")
         self.projects = ProjectRepository(settings.data_dir / "someip-agent.sqlite3")
@@ -64,6 +68,13 @@ class ApplicationState:
         async with self._model_lock:
             self.arxml_models.save(model)
             self._arxml_model = model
+
+    def has_active_network_tasks(self) -> bool:
+        return (
+            any(item.active for item in self.services.statuses())
+            or any(item.running for item in self.simulator.list())
+            or any(item.running for item in self.network.list())
+        )
 
     async def get_arxml_model(self) -> ArxmlModel | None:
         async with self._model_lock:
