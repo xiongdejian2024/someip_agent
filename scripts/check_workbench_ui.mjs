@@ -11,6 +11,7 @@ const output=await build({stdin:{contents:`
   import {ServicesPage} from './src/pages/ServicesPage'
   import {SimulationPage} from './src/pages/SimulationPage'
   import {ServiceJsonInput} from './src/components/ServiceJsonInput'
+  import {Layout} from './src/components/Layout'
   const service={id:'1',name:'复合服务',path:'/Composite',deploymentPath:'/Deployment',serviceId:'0x1234',instanceId:'1',instanceIds:[1],
     methods:[],fields:[],events:[{id:'0x8001',name:'Envelope',dataType:'struct',signals:[]}]}
   const noop=()=>{throw new Error('只读渲染不能触发运行或写入')}
@@ -19,10 +20,20 @@ const output=await build({stdin:{contents:`
   export const simulation=renderToStaticMarkup(createElement(SimulationPage,{services:[service],samples:[],onDismissDraft:noop,onOpenService:noop}))
   export const input=renderToStaticMarkup(createElement(ServiceJsonInput,{label:'参数',ariaLabel:'参数',value:'{"counter":18446744073709551615}',disabled:false,onChange:noop,onValidityChange:noop}))
   export const invalid=renderToStaticMarkup(createElement(ServiceJsonInput,{label:'绑定',ariaLabel:'绑定',array:true,value:'{}',disabled:false,onChange:noop,onValidityChange:noop}))
+  const layoutProps={page:'projects',onNavigate:noop,onOpenAgent:noop,sidebarOpen:false,onToggleSidebar:noop,
+    agentOpen:false,agentPanel:null,children:null}
+  const health={status:'ok',version:'0.1.2',service_count:0,llm_configured:false}
+  export const versions={
+    connecting:renderToStaticMarkup(createElement(Layout,{...layoutProps,connectionState:'connecting',health:null})),
+    online:renderToStaticMarkup(createElement(Layout,{...layoutProps,connectionState:'online',health})),
+    offline:renderToStaticMarkup(createElement(Layout,{...layoutProps,connectionState:'offline',health})),
+    reconnecting:renderToStaticMarkup(createElement(Layout,{...layoutProps,connectionState:'connecting',health})),
+    unknown:renderToStaticMarkup(createElement(Layout,{...layoutProps,connectionState:'online',health:{...health,version:''}}))
+  }
 `,resolveDir:fileURLToPath(new URL('../frontend/',import.meta.url)),loader:'js'},bundle:true,write:false,platform:'node',format:'cjs',jsx:'automatic',loader:{'.css':'empty'},define:{'process.env.NODE_ENV':'"production"'}})
 const module={exports:{}}
 new Function('require','module','exports',output.outputFiles[0].text)(require,module,module.exports)
-const {model,runtime,simulation,input,invalid}=module.exports
+const {model,runtime,simulation,input,invalid,versions}=module.exports
 assert.match(model,/服务工作区视图/)
 assert.match(model,/<div hidden=""><section class="panel service-runtime-panel"/)
 assert.doesNotMatch(runtime,/<div hidden=""><section class="panel service-runtime-panel"/)
@@ -38,5 +49,11 @@ assert.match(input,/格式化 JSON/)
 assert.match(invalid,/aria-invalid="true"/)
 assert.match(invalid,/role="alert"/)
 assert.match(invalid,/disabled=""/)
+assert.match(versions.connecting,/Console · 版本待确认/)
+assert.doesNotMatch(versions.connecting,/v0\.1\.0/)
+assert.match(versions.online,/Console v0\.1\.2/)
+assert.match(versions.offline,/Console · 上次确认 v0\.1\.2/)
+assert.match(versions.reconnecting,/Console · 上次确认 v0\.1\.2/)
+assert.match(versions.unknown,/Console · 版本待确认/)
 assert.match(await readFile(new URL('../frontend/src/index.css',import.meta.url),'utf8'),/\[hidden\] \{ display: none !important; \}/)
-console.log('工作台 UI 模型／运行分区、复合入口、无损 JSON 反馈与显式运行边界首次渲染通过；真实交互另行验收')
+console.log('工作台 UI 模型／运行分区、复合入口、无损 JSON、健康版本来源与显式运行边界首次渲染通过；真实交互另行验收')

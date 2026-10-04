@@ -48,6 +48,10 @@ export function Layout({
 }: LayoutProps) {
   const meta = pageMeta[page]
   const project = useProject()
+  const version = health?.version?.trim()
+  const versionLabel = version
+    ? connectionState === 'online' ? `Console v${version}` : `Console · 上次确认 v${version}`
+    : 'Console · 版本待确认'
   const navigate = (id: PageId) => {
     onNavigate(id)
     if (window.innerWidth < 900) onToggleSidebar()
@@ -92,7 +96,7 @@ export function Layout({
             <Icon name="chevron" size={15} />
           </button>
           <div className="version-block">
-            <span>Console {health?.version ? `v${health.version}` : 'v0.1.0'}</span>
+            <span>{versionLabel}</span>
             <span className={connectionState === 'online' ? 'online' : ''}>{connectionState === 'online' ? '服务正常' : connectionState === 'connecting' ? '正在连接' : '后端离线'}</span>
           </div>
         </div>
