@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, describeApiError } from '../api/client'
 import { logError, logInfo } from '../api/logger'
 import type { ProjectControls } from '../workbench/projects'
-import { emptyNetworkForm, formFromProfile, networkDraftDocument, networkWriteAllowed, networkWriteUnknown, profileFromForm,
+import { emptyNetworkForm, formFromProfile, networkBindingResetAllowed, networkDraftDocument, networkWriteAllowed, networkWriteUnknown, profileFromForm,
   type ManagedEnvironment, type NetworkEnvironmentStatus, type NetworkForm, type NetworkPlan } from '../workbench/networkEnvironment'
 import './NetworkEnvironmentPage.css'
 
@@ -17,14 +17,14 @@ export function NetworkHostPanel({ status, busy, blocked, refresh, confirmRecord
     {!status ? <p role="status">尚未读取后端环境；不显示虚构网卡。</p> : <>
       <p>{status.available ? 'Linux iproute2 可读取' : status.reason} · 主机写入{status.write_enabled ? '已授权' : '未授权'}</p>
       <p>父网卡白名单：{status.allowed_parents.join('、') || '未配置'}；原生地址：<code>{status.native_unicast}</code></p>
-      <p>活动网络资源：{status.active_tasks ? '尚未释放' : '无'}；启停操作：{status.activity.lifecycle_operations}；环境变更：{status.activity.configuring ? '进行中' : '无'}</p>
+      <p>活动网络资源：{status.active_tasks ? '尚未释放' : '无'}；启停操作：{status.activity.lifecycle_operations}；配置保护：{status.activity.configuring ? '进行中' : '无'}</p>
       <p className="muted">需在 Linux 后端安装 iproute2，并由管理员配置 NETWORK_CONFIG_ENABLED 和 NETWORK_CONFIG_INTERFACES、授予 NET_ADMIN。页面不提供提权或发送授权。</p>
       <div className="network-table-wrap"><table className="network-table"><caption>实际接口与地址</caption><thead><tr><th>网卡／索引</th><th>MTU／状态</th><th>IPv4 地址</th></tr></thead><tbody>
         {status.interfaces.map(link => <tr key={link.ifindex}><td>{link.ifname}<small>#{link.ifindex} · {link.link_type}</small></td><td>{link.mtu}<small>{link.flags.includes('UP') ? 'UP' : 'DOWN'}</small></td><td>{link.addr_info?.filter(item => item.family === 'inet').map(item => `${item.local}/${item.prefixlen}`).join('、') || '无'}</td></tr>)}
         {!status.interfaces.length && <tr><td colSpan={3}>无可读取的接口。</td></tr>}
       </tbody></table></div>
       <details><summary>主路由表（不修改默认路由）</summary><ul>{status.routes.map((route, i) => <li key={i}><code>{route.dst ?? 'default'}</code> → {route.dev ?? '未指定接口'}{route.gateway ? `，经 ${route.gateway}` : ''}</li>)}</ul></details>
-      <div className="project-section-heading network-heading"><h3>本工具管理记录</h3><button className="button secondary" disabled={busy || blocked || !networkWriteAllowed(status)} onClick={resetBinding}>解除地址绑定</button></div>
+      <div className="project-section-heading network-heading"><h3>本工具管理记录</h3><button className="button secondary" disabled={busy || blocked || !networkBindingResetAllowed(status)} onClick={resetBinding}>解除地址绑定</button></div>
       <p className="muted">记录状态不代表即时所有权验证；绑定／清理时后端会再次检查。解除绑定回到 127.0.0.1，仍不启动任务。</p>
       <div className="network-records">{status.managed.map(record => <article key={record.id} className="project-preview"><h4>{record.profile.name}</h4>
         <p>{record.profile.interface} · {record.profile.ipv4} · {({ pending: '写入未完成', failed: '部分失败／需核对', applied: '已应用回执', removed: '已清理' })[record.status]} · {record.id.slice(0, 8)}</p>

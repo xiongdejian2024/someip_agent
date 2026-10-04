@@ -52,7 +52,14 @@ export interface NetworkEnvironmentStatus {
 }
 export interface NetworkPlan { token: string; profile: NetworkProfile; commands: string[][]; destinations: string[]; parent_index: number }
 
+function networkLifecycleQuiet(status: NetworkEnvironmentStatus | null): boolean {
+  return !!status && !status.active_tasks && !status.activity.configuring && status.activity.lifecycle_operations === 0
+}
+export function networkBindingResetAllowed(status: NetworkEnvironmentStatus | null): boolean {
+  // 仅恢复内存中的未来任务地址；无需 iproute2 写权限，但须停止并释放所有资源。
+  return networkLifecycleQuiet(status) && status?.native_unicast !== '127.0.0.1'
+}
 export function networkWriteAllowed(status: NetworkEnvironmentStatus | null, parent?: string): boolean {
-  return !!status?.available && status.write_enabled && !status.active_tasks && !status.activity.configuring && status.activity.lifecycle_operations === 0
+  return !!status?.available && status.write_enabled && networkLifecycleQuiet(status)
     && (parent === undefined || status.allowed_parents.includes(parent))
 }

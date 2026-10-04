@@ -270,3 +270,43 @@ def test_network_profile_duplicate_and_host_authorization_rejected():
         ProjectDocument(name="冲突", network_profiles=[profile(), profile()])
     with pytest.raises(ValidationError):
         ProjectDocument.model_validate({"name": "权限", "network_config_enabled": True})
+
+
+def test_explicit_binding_reset_requires_quiet_lifecycle_but_not_iproute_permissions(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def unavailable(*args):
+        calls.append(args)
+        pytest.fail("解除内存地址绑定不能运行系统网络命令")
+
+    monkeypatch.setattr(NetworkEnvironmentManager, "_run", unavailable)
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path,
+        native_unicast="10.88.0.2",
+        network_config_enabled=False,
+        network_config_interfaces=[],
+        network_send_enabled=True,
+        allowed_destinations=["192.0.2.4"],
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        state = app.state.container
+        endpoint = "/api/v1/network/environment/binding"
+        assert client.post(endpoint, json={"managed_id": None, "confirm": False}).status_code == 422
+        with state.network_gate.task_operation():
+            assert client.post(
+                endpoint, json={"managed_id": None, "confirm": True}
+            ).status_code == 409
+        assert settings.native_unicast == "10.88.0.2"
+        response = client.post(endpoint, json={"managed_id": None, "confirm": True})
+        assert response.status_code == 200
+        assert response.json() == {"native_unicast": "127.0.0.1"}
+        assert settings.network_send_enabled is True
+        assert settings.allowed_destinations == ["192.0.2.4"]
+        assert settings.network_config_enabled is False
+        assert settings.network_config_interfaces == []
+        assert not state.has_active_network_tasks()
+        assert calls == []

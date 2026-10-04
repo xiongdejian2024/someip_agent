@@ -10,7 +10,7 @@ const result = await build({ stdin: { contents: `
   import {NetworkEnvironmentPage,NetworkHostPanel} from './src/pages/NetworkEnvironmentPage'
   import {emptyProject} from './src/workbench/projects'
   export {api,ApiError} from './src/api/client'
-  export {emptyNetworkForm,formFromProfile,profileFromForm,networkDraftDocument,networkWriteUnknown,networkWriteAllowed} from './src/workbench/networkEnvironment'
+  export {emptyNetworkForm,formFromProfile,profileFromForm,networkDraftDocument,networkWriteUnknown,networkWriteAllowed,networkBindingResetAllowed} from './src/workbench/networkEnvironment'
   export const project=emptyProject()
   const noop=()=>{throw new Error('静态渲染不得写入工程或系统')}
   export const initial=renderToStaticMarkup(createElement(NetworkEnvironmentPage,{visible:true,ready:true,controls:{document:project,update:noop}}))
@@ -20,10 +20,11 @@ const result = await build({ stdin: { contents: `
     interfaces:[{ifname:'test0',ifindex:2,mtu:1500,flags:['UP'],link_type:'ether',addr_info:[{family:'inet',local:'192.168.1.2',prefixlen:24}]}],routes:[{dst:'default',dev:'test0',gateway:'192.168.1.1'}],managed:[{id:'uuid',profile,status:'applied',routes:[]}]}
   export const host=renderToStaticMarkup(createElement(NetworkHostPanel,{status,busy:false,blocked:false,refresh:noop,confirmRecord:noop,resetBinding:noop}))
   export const blocked=renderToStaticMarkup(createElement(NetworkHostPanel,{status,busy:false,blocked:true,refresh:noop,confirmRecord:noop,resetBinding:noop}))
+  export const revoked=renderToStaticMarkup(createElement(NetworkHostPanel,{status:{...status,reason:'工具不可读取',interfaces:[],routes:[],write_enabled:false,available:false,allowed_parents:[],native_unicast:'10.88.0.2'},busy:false,blocked:false,refresh:noop,confirmRecord:noop,resetBinding:noop}))
 `, resolveDir: fileURLToPath(new URL('../frontend/', import.meta.url)), loader: 'js' }, bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } })
 const module = { exports: {} }
 new Function('require', 'module', 'exports', result.outputFiles[0].text)(require, module, module.exports)
-const { api, ApiError, emptyNetworkForm, formFromProfile, profileFromForm, networkDraftDocument, networkWriteUnknown, networkWriteAllowed, project, profile, status, initial, hidden, host, blocked } = module.exports
+const { api, ApiError, emptyNetworkForm, formFromProfile, profileFromForm, networkDraftDocument, networkWriteUnknown, networkWriteAllowed, networkBindingResetAllowed, project, profile, status, initial, hidden, host, blocked, revoked } = module.exports
 assert.deepEqual(project.network_profiles, [])
 assert.throws(() => profileFromForm(emptyNetworkForm()), /环境名称/)
 assert.deepEqual(profileFromForm(formFromProfile(profile)), profile)
@@ -54,6 +55,10 @@ assert.match(host, /记录状态不代表即时所有权验证/)
 assert.match(host, /绑定未来原生任务地址/)
 for (const action of ['绑定未来原生任务地址', '清理自有配置', '解除地址绑定']) assert.match(blocked, new RegExp(`disabled="">${action}`))
 assert.match(blocked, />刷新实际环境（只读）/)
+assert.doesNotMatch(revoked, /disabled="">解除地址绑定/)
+const nonLoopback = { ...status, native_unicast: '10.88.0.2', write_enabled: false, available: false }
+assert.equal(networkBindingResetAllowed(nonLoopback), true)
+for (const changed of [null, status, { ...nonLoopback, active_tasks: true }, { ...nonLoopback, activity: { configuring: true, lifecycle_operations: 0 } }, { ...nonLoopback, activity: { configuring: false, lifecycle_operations: 1 } }]) assert.equal(networkBindingResetAllowed(changed), false)
 
 // 真实客户端序列化，替身 HTTP 仅验证传输，不当系统写入验收。
 globalThis.window = { setTimeout, clearTimeout }
