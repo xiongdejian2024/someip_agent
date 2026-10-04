@@ -78,6 +78,14 @@ def test_migration_and_nested_secret_rejection():
         ProjectDocument.model_validate(bad)
 
 
+def test_project_management_page_round_trip(tmp_path):
+    repo = ProjectRepository(tmp_path / "test.sqlite3")
+    doc = document()
+    doc.workspace.page = "projects"
+    saved = repo.save(ProjectSave(document=doc))
+    assert repo.get(saved.id).document.workspace.page == "projects"
+
+
 def test_api_save_export_restore_and_restart_without_execution(tmp_path, monkeypatch):
     monkeypatch.setattr("someip_agent.agent.service.keyring.get_password", lambda *_: None)
     settings = Settings(_env_file=None, data_dir=tmp_path, llm_api_key="secret-not-exported")

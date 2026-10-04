@@ -7,6 +7,7 @@ export type PageId =
   | 'monitor'
   | 'pcap'
   | 'settings'
+  | 'projects'
 
 export type ConnectionState = 'online' | 'offline' | 'connecting'
 

@@ -1,4 +1,10 @@
 .project-manager { margin-bottom: 12px; padding: 16px 18px; min-width: 0; }
+.project-manager[hidden] { display: none; }
+.project-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.project-status > span { display: grid; gap: 4px; min-width: 0; }
+.project-status strong { font-size: 13px; overflow-wrap: anywhere; }
+.project-status small { color: var(--text-secondary); font-size: 11px; }
+.project-page-tabs { margin-top: 18px; }
 .project-manager :is(button, input, select, textarea) { scroll-margin-top: 85px; }
 .workspace-selector > span:last-child { min-width: 0; }
 .workspace-selector strong { overflow-wrap: anywhere; white-space: normal; }

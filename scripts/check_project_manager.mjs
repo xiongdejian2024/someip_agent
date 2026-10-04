@@ -10,6 +10,7 @@ const output = await build({ stdin: { contents: `
   import {ProjectBar,emptyProject} from './src/workbench/projects'
   export {mergeSavedDraft,projectDraftChanged,projectContents,projectDate,projectEditorText} from './src/workbench/projectPresentation'
   export {projectResultUnknown} from './src/workbench/ProjectManager'
+  import {ProjectStatus} from './src/workbench/ProjectManager'
   export {ApiError} from './src/api/client'
   export const empty=emptyProject()
   export const saved={...empty,name:'已保存工程',cycles:[{service_profile:'/V',command:{member:'Provider_server',function:'UpdateValueEvent',args:{value:18446744073709551615n},interval_ms:29}}]}
@@ -20,11 +21,13 @@ const output = await build({ stdin: { contents: `
   export const clean=renderToStaticMarkup(createElement(ProjectBar,{current,controls:{document:saved,update:noop},apply:noop,onSaved:noop}))
   export const dirty=renderToStaticMarkup(createElement(ProjectBar,{current,controls:{document:{...saved,name:'未保存更改'},update:noop},apply:noop,onSaved:noop}))
   export const loading=renderToStaticMarkup(createElement(ProjectBar,{current:null,ready:false,controls:{document:empty,update:noop},apply:noop,onSaved:noop}))
+  export const hidden=renderToStaticMarkup(createElement(ProjectBar,{visible:false,current,controls:{document:saved,update:noop},apply:noop,onSaved:noop}))
+  export const status=renderToStaticMarkup(createElement(ProjectStatus,{document:saved,current,onOpen:noop}))
 `, resolveDir: fileURLToPath(new URL('../frontend/', import.meta.url)), loader: 'js' }, bundle: true, write: false,
   platform: 'node', format: 'cjs', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } })
 const module = { exports: {} }
 new Function('require','module','exports',output.outputFiles[0].text)(require,module,module.exports)
-const {empty,saved,synchronized,parseJson,clean,dirty,loading,mergeSavedDraft,projectDraftChanged,projectContents,projectDate,projectResultUnknown,ApiError,projectEditorText}=module.exports
+const {empty,saved,synchronized,parseJson,clean,dirty,loading,hidden,status,mergeSavedDraft,projectDraftChanged,projectContents,projectDate,projectResultUnknown,ApiError,projectEditorText}=module.exports
 assert.deepEqual(empty.sync_groups,[])
 assert.equal(projectContents({...saved,sync_groups:undefined}).find(([label])=>label==='公共时钟组')[1],0)
 assert.equal(projectContents(synchronized).find(([label])=>label==='公共时钟组')[1],1)
@@ -33,7 +36,11 @@ assert.equal(projectDraftChanged(saved,synchronized),true)
 assert.match(clean,/草案与已保存修订一致/)
 assert.match(dirty,/有未保存更改/)
 assert.match(clean,/id="project-load" class="project-section" hidden=""/)
-assert.match(clean,/id="project-management" class="project-section" hidden=""/)
+assert.match(clean,/id="project-management" class="project-section">/)
+assert.match(clean,/aria-label="工程保存与加载"/)
+assert.match(hidden,/aria-label="工程保存与加载"[^>]*hidden=""/)
+assert.match(status,/前往工程保存与加载/)
+assert.doesNotMatch(status,/搜索工程|另存新工程|工程配置草案/)
 assert.match(clean,/aria-label="搜索工程"/)
 assert.match(clean,/aria-label="工程预览"/)
 assert.match(clean,/不会代你停止任务/)

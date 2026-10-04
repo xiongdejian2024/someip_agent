@@ -6,7 +6,7 @@ export type AgentHistoryMessage = AgentHistoryItem
 const MAX_HISTORY_MESSAGES = 12
 const MAX_HISTORY_ITEM_LENGTH = 6000
 const MAX_HISTORY_TOTAL_LENGTH = 24_000
-const CONTEXT_PAGES = new Set(['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings'])
+const CONTEXT_PAGES = new Set(['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings', 'projects'])
 
 function truncateText(value: string, limit: number): string {
   const truncated = value.slice(0, limit)

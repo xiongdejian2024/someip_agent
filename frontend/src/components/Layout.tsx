@@ -39,6 +39,7 @@ const pageMeta: Record<PageId, { title: string; eyebrow: string }> = {
   monitor: { title: '实时监控', eyebrow: '报文、波形与诊断' },
   pcap: { title: 'PCAP 离线分析', eyebrow: '抓包解析与协议洞察' },
   settings: { title: '模型与系统设置', eyebrow: '安全配置中心' },
+  projects: { title: '工程保存与加载', eyebrow: '配置、历史与迁移' },
 }
 
 export function Layout({
@@ -73,6 +74,9 @@ export function Layout({
             </button>
           ))}
           <p className="nav-section">系统</p>
+          <button className={page === 'projects' ? 'active' : ''} onClick={() => navigate('projects')}>
+            <Icon name="file" /><span>工程保存与加载</span>
+          </button>
           <button className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}>
             <Icon name="settings" /><span>模型与设置</span>
           </button>

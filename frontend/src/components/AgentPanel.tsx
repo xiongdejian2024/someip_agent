@@ -46,6 +46,9 @@ interface ChatMessage extends AgentMessage {
 }
 
 const pageSuggestions: Record<PageId, { label: string; prompt: string }[]> = {
+  projects: [
+    { label: '工程保护说明', prompt: '请说明工程保存、加载、恢复和运行的区别；不要替我执行任何操作。' },
+  ],
   dashboard: [
     { label: '工作区概况', prompt: '请结合当前服务模型、监控数据与仿真任务，概括工作区状态，并列出需要关注的证据。' },
     { label: '通信异常', prompt: '请查询当前监控证据，分析通信异常，并区分已验证事实和待验证假设。' },

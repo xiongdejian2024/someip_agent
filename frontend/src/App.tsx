@@ -15,10 +15,11 @@ import { SettingsPage } from './pages/SettingsPage'
 import { SimulationPage } from './pages/SimulationPage'
 import type { AgentWorkspaceContext, PageId, ServiceDefinition, SimulationStartRequest } from './types'
 import { ProjectBar, ProjectContext, useProjectState, type ProjectView } from './workbench/projects'
+import { ProjectStatus } from './workbench/ProjectManager'
 import { ScenarioPanel } from './workbench/ScenarioPanel'
 import { mergeSavedDraft } from './workbench/projectPresentation'
 
-const pages: PageId[] = ['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings']
+const pages: PageId[] = ['dashboard', 'services', 'simulation', 'monitor', 'pcap', 'settings', 'projects']
 
 function pageFromHash(): PageId {
   const value = window.location.hash.replace('#/', '') as PageId
@@ -44,8 +45,10 @@ export default function App() {
     const items = await api.services()
     setServices(items); setServicesLoading(false); setServiceSource('live'); setModelError(null)
     setSimulationDraft(undefined)
-    setPage(view.document.workspace.page)
-    window.location.hash = `/${view.document.workspace.page}`
+    // 工程管理是独立操作页；恢复配置不强制把用户从加载页切走。
+    const target = pageFromHash() === 'projects' ? 'projects' : view.document.workspace.page
+    setPage(target)
+    window.location.hash = `/${target}`
   }, [])
   const project = useProjectState(restoreProject)
   const setScope = useCallback((next: AgentWorkspaceContext) => {
@@ -152,7 +155,7 @@ export default function App() {
 
   const navigate = (next: PageId) => {
     setPage(next)
-    project.update(doc => ({ ...doc, workspace: { ...doc.workspace, page: next } }))
+    if (next !== 'projects') project.update(doc => ({ ...doc, workspace: { ...doc.workspace, page: next } }))
     window.history.pushState(null, '', `#/${next}`)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -167,6 +170,7 @@ export default function App() {
       case 'monitor': return <MonitorPage messages={messages} samples={samples} streamState={streamState} source={source} onClear={clear} streamCounters={streamCounters} bufferCounters={bufferCounters} />
       case 'pcap': return <PcapPage />
       case 'settings': return <SettingsPage currentVersion={health?.version} />
+      case 'projects': return null
       case 'dashboard':
       default: return <DashboardPage services={services} modelLoading={servicesLoading} streamState={streamState} messages={messages} samples={samples} source={source} modelSource={serviceSource} onNavigate={navigate} onOpenAgent={() => openAgent()} />
     }
@@ -184,15 +188,17 @@ export default function App() {
         connectionState={connectionState}
         health={health}
         agentOpen={agentOpen}
-        agentPanel={<AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} connectionState={connectionState} modelConfigured={health?.llm_configured === true} contextLabel={{ dashboard: '工作区总览', services: 'ARXML 服务模型', simulation: '信号仿真', monitor: '报文监控', pcap: '离线抓包', settings: '模型设置' }[page]} context={activeContext} intent={agentIntent} onLoadSimulationPlan={(config) => {
+        agentPanel={<AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} connectionState={connectionState} modelConfigured={health?.llm_configured === true} contextLabel={{ dashboard: '工作区总览', services: 'ARXML 服务模型', simulation: '信号仿真', monitor: '报文监控', pcap: '离线抓包', settings: '模型设置', projects: '工程保存与加载' }[page]} context={activeContext} intent={agentIntent} onLoadSimulationPlan={(config) => {
           setSimulationDraft({ id: crypto.randomUUID(), config })
           navigate('simulation')
           logInfo('智能体仿真草案载入工作台，尚未执行', { serviceId: config.service_id, methodId: config.method_id })
         }} />}
       >
         {modelError && <div className="inline-notice error" role="alert">{modelError}</div>}
-        <ProjectBar ready={project.ready} controls={{ document: project.document, update: project.update }} current={project.view} apply={project.apply} onSaved={(view, requested) => { project.setView(view); project.update(current => mergeSavedDraft(current, requested, view.document)) }} />
-        <ScenarioPanel project={project.view} />
+        {page !== 'projects' && <ProjectStatus document={project.document} current={project.view} onOpen={() => navigate('projects')} />}
+        {/* 页面切换只隐藏管理器，保留 JSON 编辑、写入锁及未知结果保护；不因卸载丢弃草案。 */}
+        <ProjectBar visible={page === 'projects'} ready={project.ready} controls={{ document: project.document, update: project.update }} current={project.view} apply={project.apply} onSaved={(view, requested) => { project.setView(view); project.update(current => mergeSavedDraft(current, requested, view.document)) }} />
+        <div hidden={page === 'projects'}><ScenarioPanel project={project.view} /></div>
         {project.ready ? <div key={project.epoch}>{content}</div> : <p role="status">正在恢复工程配置（不会启动任务）…</p>}
       </Layout>
     </AgentWorkspace.Provider>

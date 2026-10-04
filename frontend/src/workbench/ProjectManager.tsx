@@ -14,13 +14,24 @@ export function projectResultUnknown(action: string, error: unknown) {
   return error instanceof ApiError && error.status === 0 && ['保存工程', '另存新工程', '导入工程', '恢复工程备份', '加载工程'].includes(action)
 }
 
-export function ProjectBar({ controls, current, apply, onSaved, ready = true }: {
+export function ProjectStatus({ document, current, onOpen }: {
+  document: ProjectDocument; current: ProjectView | null; onOpen: () => void
+}) {
+  const dirty = projectDraftChanged(document, current?.document ?? emptyProject())
+  return <section className="project-status" aria-label="当前工程状态">
+    <span><strong>{document.name}</strong><small>{current ? `修订 ${current.revision}` : '未打开工程'} · {dirty ? '有未保存更改' : current ? '已保存' : '配置草案'}</small></span>
+    <button className="button secondary" onClick={onOpen}>前往工程保存与加载</button>
+  </section>
+}
+
+export function ProjectBar({ controls, current, apply, onSaved, ready = true, visible = true }: {
   controls: ProjectControls; current: ProjectView | null
   apply: (view: ProjectView) => Promise<void>
   onSaved: (view: ProjectView, requested: ProjectDocument) => void
   ready?: boolean
+  visible?: boolean
 }) {
-  const [section, setSection] = useState<Section>(null)
+  const [section, setSection] = useState<Section>('details')
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [listError, setListError] = useState('')
   const [selected, setSelected] = useState('')
@@ -93,7 +104,7 @@ export function ProjectBar({ controls, current, apply, onSaved, ready = true }: 
   const load = (id: string) => guard('加载会替换工作区草案；未保存更改不会保留。', '加载工程', async () => {
     const view = await api.openProject(id)
     await apply(view)
-    setSavedCopy(null); setUncertain(false); setEditor(''); setEditorBase(''); setSection(null)
+    setSavedCopy(null); setUncertain(false); setEditor(''); setEditorBase(''); setSection('load')
     return `已加载「${view.document.name}」修订 ${view.revision}，已设为重启恢复目标；未启动任何任务。`
   })
   const save = (asNew: boolean) => void run(asNew ? '另存新工程' : '保存工程', async () => {
@@ -113,10 +124,10 @@ export function ProjectBar({ controls, current, apply, onSaved, ready = true }: 
     const link = document.createElement('a')
     link.href = url; link.download = `project-${id}.json`; link.click(); URL.revokeObjectURL(url)
   }
-  const toggle = (next: Exclude<Section, null>) => { setSection(value => value === next ? null : next); setConfirmation(null) }
+  const toggle = (next: Exclude<Section, null>) => { setSection(next); setConfirmation(null) }
   const items = projects.filter(item => item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 
-  return <section className="panel project-manager" aria-label="工程管理" aria-busy={busy}>
+  return <section className="panel project-manager" aria-label="工程保存与加载" aria-busy={busy} hidden={!visible}>
     <div className="project-toolbar">
       <div className="project-identity"><span className="project-eyebrow">当前工作区</span><strong>{current?.document.name ?? '未打开工程'}</strong>
         <span className="project-meta">{current ? `修订 ${current.revision}` : '配置草案'} · {needsReload ? '已保存版本已变化，等待重新加载' : unsaved ? '有未保存更改' : current ? '草案与已保存修订一致' : '尚未持久化'}</span>
@@ -124,10 +135,10 @@ export function ProjectBar({ controls, current, apply, onSaved, ready = true }: 
       <div className="context-actions">
         <button className="button primary" disabled={busy || !validName || editorDirty || needsReload || uncertain} onClick={() => save(false)}>保存配置</button>
         <button className="button secondary" aria-expanded={section === 'load'} aria-controls="project-load" disabled={busy} onClick={() => toggle('load')}>加载工程</button>
-        <button className="button secondary" aria-expanded={section !== null && section !== 'load'} aria-controls="project-management" disabled={busy} onClick={() => toggle('details')}>工程管理</button>
       </div>
     </div>
     <p className="project-safety">仅保存与加载配置，不自动发包。加载前须停止并释放服务、仿真和监听；不会代你停止任务。</p>
+    <nav className="project-tabs project-page-tabs" aria-label="工程管理分区">{([['details', '保存与另存'], ['load', '加载工程'], ['history', '历史备份'], ['transfer', '导入 / 导出'], ['advanced', '高级配置']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} disabled={busy} onClick={() => toggle(key)}>{label}</button>)}</nav>
     {notice && <p className={`project-notice${notice.error ? ' error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
     {savedCopy && <div className="project-copy-notice"><span>已保存「{savedCopy.document.name}」修订 {savedCopy.revision}，等待明确加载。</span><button className="button secondary" disabled={busy} onClick={() => load(savedCopy.id)}>加载刚保存的工程（不运行）</button></div>}
     {confirmation && <div className="project-confirmation" role="group" aria-label="确认替换工作区草案">
@@ -161,7 +172,6 @@ export function ProjectBar({ controls, current, apply, onSaved, ready = true }: 
       </div>
     </div>
     <div id="project-management" className="project-section" hidden={section === null || section === 'load'}>
-      <nav className="project-tabs" aria-label="工程管理分区">{([['details', '名称与另存'], ['history', '历史备份'], ['transfer', '导入 / 导出'], ['advanced', '高级配置']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={section === key} disabled={busy} onClick={() => setSection(key)}>{label}</button>)}</nav>
       <div hidden={section !== 'details'}>
         <div className="project-details-grid"><label className="project-field">工程名称<input aria-label="工程名称" value={controls.document.name} maxLength={128} disabled={busy} onChange={event => controls.update(doc => ({ ...doc, name: event.target.value }))} /></label>
           <label className="project-field">工程说明<input aria-label="工程说明" value={controls.document.description} maxLength={2000} disabled={busy} onChange={event => controls.update(doc => ({ ...doc, description: event.target.value }))} /></label></div>
