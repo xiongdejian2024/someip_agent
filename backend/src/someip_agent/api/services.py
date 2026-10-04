@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from someip_agent.api.dependencies import get_state
 from someip_agent.runtime.native_config import SimulationPermissionError
+from someip_agent.runtime.network_gate import NetworkTaskConflict
 from someip_agent.runtime.service_models import (
     ServiceCommand,
     ServiceCommandResult,
@@ -53,7 +54,7 @@ async def _operation(
             code = 403
         elif isinstance(exc, ServiceSessionNotFound):
             code = 404
-        elif isinstance(exc, ServiceSessionConflict):
+        elif isinstance(exc, (ServiceSessionConflict, NetworkTaskConflict)):
             code = 409
         elif isinstance(exc, (NativeOperationError, ValueError)):
             code = 422

@@ -14,6 +14,7 @@ from someip_agent.protocol.native_payload import NativePayloadError, NativeSigna
 from someip_agent.runtime.monitor import MonitorStore
 from someip_agent.runtime.network import NetworkCaptureManager
 from someip_agent.runtime.network_environment import NetworkEnvironmentManager
+from someip_agent.runtime.network_gate import NetworkTaskGate
 from someip_agent.runtime.services import ServiceSessionManager
 from someip_agent.runtime.simulator import SimulationManager
 from someip_agent.soa.operator import NativeRuntimeError
@@ -36,11 +37,14 @@ class ApplicationState:
         self.monitor = MonitorStore(settings.monitor_capacity)
         self.recordings = RecordingManager(settings.data_dir / "recordings", self.monitor)
         self.signal_decoder = NativeSignalDecoder(settings)
-        self.network = NetworkCaptureManager(self.monitor, self.enrich_message, settings=settings)
-        self.simulator = SimulationManager(self.monitor, settings)
-        self.services = ServiceSessionManager(settings, self.monitor)
+        self.network_gate = NetworkTaskGate()
+        self.network = NetworkCaptureManager(
+            self.monitor, self.enrich_message, settings=settings, gate=self.network_gate
+        )
+        self.simulator = SimulationManager(self.monitor, settings, self.network_gate)
+        self.services = ServiceSessionManager(settings, self.monitor, self.network_gate)
         self.network_environment = NetworkEnvironmentManager(
-            settings, self.has_active_network_tasks
+            settings, self.has_active_network_tasks, self.network_gate
         )
         self.audit = AuditRepository(settings.data_dir / "someip-agent.sqlite3")
         self.arxml_models = ArxmlModelRepository(settings.data_dir / "models")
@@ -71,9 +75,9 @@ class ApplicationState:
 
     def has_active_network_tasks(self) -> bool:
         return (
-            any(item.active for item in self.services.statuses())
-            or any(item.running for item in self.simulator.list())
-            or any(item.running for item in self.network.list())
+            self.services.has_network_resources()
+            or self.simulator.has_network_resources()
+            or self.network.has_network_resources()
         )
 
     async def get_arxml_model(self) -> ArxmlModel | None:

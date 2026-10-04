@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import SimulationConfig, SimulationStatus
+from someip_agent.runtime.network_gate import NetworkTaskConflict
 from someip_agent.runtime.simulator import SimulationPermissionError
 from someip_agent.soa.operator import NativeOperationError, NativeRuntimeError
 from someip_agent.state import ApplicationState
@@ -33,6 +34,9 @@ async def start_simulation(
 ) -> SimulationStatus:
     try:
         result = await state.simulator.start(config)
+    except NetworkTaskConflict as exc:
+        logger.exception("仿真启动与网卡变更冲突", extra={"operation": "simulation.start"})
+        raise HTTPException(409, str(exc)) from exc
     except SimulationPermissionError as exc:
         logger.exception("仿真启动被安全策略拒绝", extra={"operation": "simulation.start"})
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
@@ -59,7 +63,11 @@ async def stop_simulation(
     state: ApplicationState = Depends(get_state),
 ) -> list[SimulationStatus]:
     simulation_id = request.simulation_id if request else None
-    stopped = await state.simulator.stop(simulation_id)
+    try:
+        stopped = await state.simulator.stop(simulation_id)
+    except NetworkTaskConflict as exc:
+        logger.exception("仿真停止与网卡变更冲突", extra={"operation": "simulation.stop"})
+        raise HTTPException(409, str(exc)) from exc
     state.audit.add(
         action="simulation.stop",
         target=simulation_id or "all",

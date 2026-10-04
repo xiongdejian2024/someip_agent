@@ -20,6 +20,7 @@ from someip_agent.soa.operator import NativeRuntimeError, SOAOperator
 from someip_agent.soa.partner import S2sBaseClass
 
 from .monitor import MonitorStore
+from .network_gate import NetworkTaskGate
 from .service_models import (
     NativeMemberView,
     ServiceCommand,
@@ -61,15 +62,25 @@ class ServiceSession:
 
 
 class ServiceSessionManager:
-    def __init__(self, settings: Settings, monitor: MonitorStore) -> None:
+    def __init__(
+        self, settings: Settings, monitor: MonitorStore, gate: NetworkTaskGate | None = None
+    ) -> None:
         self.settings = settings
         self.monitor = monitor
+        self._network_gate = gate or NetworkTaskGate()
         self._sessions: dict[str, ServiceSession] = {}
         self._history: deque[ServiceSessionView] = deque(maxlen=64)
         self._lifecycle = asyncio.Lock()
         self._cycle_control = asyncio.Lock()
 
     async def start(self, model: ArxmlModel, request: NativeCatalogRequest) -> ServiceSessionView:
+        with self._network_gate.task_operation():
+            return await self._start(model, request)
+
+    def has_network_resources(self) -> bool:
+        return bool(self._sessions) or self._lifecycle.locked()
+
+    async def _start(self, model: ArxmlModel, request: NativeCatalogRequest) -> ServiceSessionView:
         bundle = build_native_bundle(model, request, self.settings)
         async with self._lifecycle:
             if len(self._sessions) >= 16:
@@ -500,6 +511,10 @@ class ServiceSessionManager:
             )
 
     async def stop(self, identifier: str) -> ServiceSessionView:
+        with self._network_gate.task_operation():
+            return await self._stop(identifier)
+
+    async def _stop(self, identifier: str) -> ServiceSessionView:
         async with self._lifecycle:
             session = self._sessions.get(identifier)
             if session is None:

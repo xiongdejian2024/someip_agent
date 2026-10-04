@@ -17,6 +17,7 @@ from someip_agent.soa.operator import NativeRuntimeError, SOAOperator
 from .monitor import MonitorStore
 from .native_config import SimulationPermissionError as SimulationPermissionError
 from .native_config import validate_network, write_inputs
+from .network_gate import NetworkTaskGate
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,24 @@ class NativeSession:
 
 
 class SimulationManager:
-    def __init__(self, monitor: MonitorStore, settings: Settings) -> None:
+    def __init__(
+        self, monitor: MonitorStore, settings: Settings, gate: NetworkTaskGate | None = None
+    ) -> None:
         self._monitor = monitor
         self._settings = settings
+        self._network_gate = gate or NetworkTaskGate()
         self._statuses: dict[str, SimulationStatus] = {}
         self._sessions: dict[str, NativeSession] = {}
         self._lifecycle = asyncio.Lock()
 
     async def start(self, config: SimulationConfig) -> SimulationStatus:
+        with self._network_gate.task_operation():
+            return await self._start(config)
+
+    def has_network_resources(self) -> bool:
+        return bool(self._sessions) or self._lifecycle.locked()
+
+    async def _start(self, config: SimulationConfig) -> SimulationStatus:
         validate_network(config, self._settings)
         async with self._lifecycle:
             identifier = str(uuid4())
@@ -180,6 +191,10 @@ class SimulationManager:
             await asyncio.to_thread(session.operator.stop_operator)
 
     async def stop(self, simulation_id: str | None = None) -> list[SimulationStatus]:
+        with self._network_gate.task_operation():
+            return await self._stop(simulation_id)
+
+    async def _stop(self, simulation_id: str | None = None) -> list[SimulationStatus]:
         async with self._lifecycle:
             identifiers = [simulation_id] if simulation_id else list(self._sessions)
             stopped = []

@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from someip_agent.config import Settings
+from someip_agent.runtime.network_gate import NetworkTaskGate
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +77,12 @@ class EnvironmentConflict(ValueError):
 class NetworkEnvironmentManager:
     """有界系统命令、显式预检、持久所有权记录；重启和工程加载不执行命令。"""
 
-    def __init__(self, settings: Settings, active: Callable[[], bool]) -> None:
+    def __init__(
+        self, settings: Settings, active: Callable[[], bool], gate: NetworkTaskGate | None = None
+    ) -> None:
         self.settings = settings
         self._active = active
+        self._gate = gate or NetworkTaskGate()
         self._lock = threading.RLock()
         self._path = settings.data_dir / "network-environment.sqlite3"
         with closing(self._connect()) as db, db:
@@ -168,6 +172,8 @@ class NetworkEnvironmentManager:
                 "interfaces": interfaces,
                 "routes": routes,
                 "managed": self.records(),
+                "activity": self._gate.status(),
+                "active_tasks": self._active(),
             }
 
     def _permission(self, profile: NetworkProfile) -> None:
@@ -288,7 +294,7 @@ class NetworkEnvironmentManager:
         return item
 
     def apply(self, profile: NetworkProfile, token: str) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, self._gate.configuration():
             self._permission(profile)
             plan = self._plan(profile)
             if token != plan["token"]:
@@ -362,7 +368,7 @@ class NetworkEnvironmentManager:
                 raise
 
     def remove(self, identifier: UUID) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, self._gate.configuration():
             record = next((item for item in self.records() if item["id"] == str(identifier)), None)
             if record is None or record["status"] == "removed":
                 raise EnvironmentConflict("没有可清理的管理记录")
@@ -421,7 +427,7 @@ class NetworkEnvironmentManager:
             return record
 
     def bind(self, identifier: UUID | None) -> dict[str, str]:
-        with self._lock:
+        with self._lock, self._gate.configuration():
             if self._active():
                 raise EnvironmentConflict("请先停止服务、仿真和监听，再切换原生地址绑定")
             address = "127.0.0.1"

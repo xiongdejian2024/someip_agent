@@ -16,6 +16,7 @@ from someip_agent.runtime.network_environment import (
     EnvironmentUnavailable,
     NetworkProfile,
 )
+from someip_agent.runtime.network_gate import NetworkTaskConflict
 from someip_agent.state import ApplicationState
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ async def operation(state: ApplicationState, action: str, work: Callable[[], Any
         )
         if isinstance(exc, PermissionError):
             raise HTTPException(403, str(exc)) from exc
-        if isinstance(exc, EnvironmentConflict):
+        if isinstance(exc, (EnvironmentConflict, NetworkTaskConflict)):
             raise HTTPException(409, str(exc)) from exc
         if isinstance(exc, (EnvironmentUnavailable, OSError, subprocess.SubprocessError)):
             raise HTTPException(503, "网络环境工具不可用或权限不足；请检查后端完整日志") from exc

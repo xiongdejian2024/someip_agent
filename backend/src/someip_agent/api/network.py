@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from someip_agent.api.dependencies import get_state
 from someip_agent.domain.models import ListenerConfig, ListenerStatus
+from someip_agent.runtime.network_gate import NetworkTaskConflict
 from someip_agent.soa.operator import NativeRuntimeError
 from someip_agent.state import ApplicationState
 
@@ -24,6 +25,9 @@ async def capture_interfaces(
 ) -> list[dict[str, object]]:
     try:
         return await state.network.interfaces()
+    except NetworkTaskConflict as exc:
+        logger.exception("网卡枚举与环境变更冲突", extra={"operation": "network.interfaces"})
+        raise HTTPException(409, str(exc)) from exc
     except NativeRuntimeError as exc:
         logger.exception("原生网卡枚举失败", extra={"operation": "network.interfaces"})
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
@@ -43,6 +47,9 @@ async def start_listener(
 ) -> ListenerStatus:
     try:
         listener = await state.network.start(config)
+    except NetworkTaskConflict as exc:
+        logger.exception("监听启动与网卡变更冲突", extra={"operation": "network.listener.start"})
+        raise HTTPException(409, str(exc)) from exc
     except NativeRuntimeError as exc:
         logger.exception("原生网络运行时不可用", extra={"operation": "network.listener.start"})
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
@@ -63,7 +70,11 @@ async def stop_listener(
     state: ApplicationState = Depends(get_state),
 ) -> list[ListenerStatus]:
     listener_id = request.listener_id if request else None
-    listeners = await state.network.stop(listener_id)
+    try:
+        listeners = await state.network.stop(listener_id)
+    except NetworkTaskConflict as exc:
+        logger.exception("监听停止与网卡变更冲突", extra={"operation": "network.listener.stop"})
+        raise HTTPException(409, str(exc)) from exc
     state.audit.add(
         action="network.listener.stop",
         target=listener_id or "all",

@@ -17,6 +17,7 @@ from someip_agent.soa.ipc import read_frame
 from someip_agent.soa.operator import NativeOperationError, NativeRuntimeError, SOAOperator
 
 from .monitor import MonitorStore
+from .network_gate import NetworkTaskGate
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,12 @@ class NetworkCaptureManager:
         message_enricher: Callable[[MonitorMessage], MonitorMessage] | None = None,
         *,
         settings: Settings | None = None,
+        gate: NetworkTaskGate | None = None,
     ) -> None:
         self._monitor = monitor
         self._message_enricher = message_enricher or (lambda message: message)
         self._settings = settings or Settings()
+        self._network_gate = gate or NetworkTaskGate()
         self._statuses: dict[str, ListenerStatus] = {}
         self._active: set[str] = set()
         self._operator: SOAOperator | None = None
@@ -79,6 +82,18 @@ class NetworkCaptureManager:
             raise
 
     async def start(self, config: ListenerConfig) -> ListenerStatus:
+        with self._network_gate.task_operation():
+            return await self._start(config)
+
+    def has_network_resources(self) -> bool:
+        process = self._operator.process if self._operator else None
+        return (
+            bool(self._active)
+            or self._lifecycle.locked()
+            or bool(process and process.poll() is None)
+        )
+
+    async def _start(self, config: ListenerConfig) -> ListenerStatus:
         async with self._lifecycle:
             identifier = str(uuid4())
             status = ListenerStatus(id=identifier, config=config, running=False)
@@ -114,6 +129,10 @@ class NetworkCaptureManager:
             return status.model_copy(deep=True)
 
     async def stop(self, listener_id: str | None = None) -> list[ListenerStatus]:
+        with self._network_gate.task_operation():
+            return await self._stop(listener_id)
+
+    async def _stop(self, listener_id: str | None = None) -> list[ListenerStatus]:
         async with self._lifecycle:
             identifiers = [listener_id] if listener_id else list(self._statuses)
             stopped = []
@@ -158,6 +177,10 @@ class NetworkCaptureManager:
             return stopped
 
     async def interfaces(self) -> list[dict[str, Any]]:
+        with self._network_gate.task_operation():
+            return await self._interfaces()
+
+    async def _interfaces(self) -> list[dict[str, Any]]:
         async with self._lifecycle:
             try:
                 operator = await self._ensure_runtime()
